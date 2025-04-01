@@ -1,4 +1,4 @@
-idf_component_register(SRCS "MPU6050Manager.cpp" 
+idf_component_register(SRCS  "PCNTEncoder.cpp" "Encoder.cpp" "MPU6050Manager.cpp" 
                             "RuntimeConfig.cpp"
                             "ComponentHandler.cpp"
                             "WiFiManager.cpp"
@@ -16,7 +16,8 @@ idf_component_register(SRCS "MPU6050Manager.cpp"
                                 esp_timer
                                 spiffs
                                 driver
-                                json)
+                                json
+                                pthread)
 
 set(EXTRA_COMPONENT_DIRS $ENV{IDF_PATH}/components/json/cJSON)
 

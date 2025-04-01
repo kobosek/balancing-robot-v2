@@ -13,13 +13,15 @@ class WebServer : public IWebServer {
         esp_err_t init(const IRuntimeConfig&) override;
         esp_err_t onConfigUpdate(const IRuntimeConfig&) override;
         
-        void update_telemetry(float, float);
+        void update_telemetry(float, float, float, float);
 
     private:
         static constexpr const char* TAG = "WebServer";
         httpd_handle_t server;
         float m_angle;
-        float m_output;
+        float m_desiredSpeed;
+        float m_speed;
+        float m_rmse;
 
         ComponentHandler& componentHandler;
         IRuntimeConfig& runtimeConfig;

@@ -10,7 +10,7 @@
 #define CHUNK_SIZE 1024
 
 WebServer::WebServer(ComponentHandler& componentHandler, IRuntimeConfig& runtimeConfig)
-    : server(nullptr), m_angle(0), m_output(0), componentHandler(componentHandler), runtimeConfig(runtimeConfig) {}
+    : server(nullptr), m_angle(0), m_desiredSpeed(0), m_speed(0), componentHandler(componentHandler), runtimeConfig(runtimeConfig) {}
 
 esp_err_t WebServer::init(const IRuntimeConfig& runtimeConfig) {
     ESP_LOGI(TAG, "Initializing web server");
@@ -70,9 +70,11 @@ esp_err_t WebServer::init(const IRuntimeConfig& runtimeConfig) {
     return ESP_OK;
 }
 
-void WebServer::update_telemetry(float angle, float output) {
+void WebServer::update_telemetry(float angle, float desiredSpeed, float speed, float rmse) {
     m_angle = angle;
-    m_output = output;
+    m_desiredSpeed = desiredSpeed;
+    m_speed = speed;
+    m_rmse = rmse;
 }
 
 esp_err_t WebServer::static_get_handler(httpd_req_t *req) {
@@ -148,7 +150,7 @@ esp_err_t WebServer::handle_static_get(httpd_req_t *req) {
 
 esp_err_t WebServer::handle_data_get(httpd_req_t *req) {
     char resp[64];
-    snprintf(resp, sizeof(resp), "%.2f,%.2f", m_angle, m_output);
+    snprintf(resp, sizeof(resp), "%.3f,%.3f,%.3f, %.3f", m_angle, m_desiredSpeed, m_speed, m_rmse);
     
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");

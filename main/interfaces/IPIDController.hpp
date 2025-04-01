@@ -4,6 +4,6 @@
 
 class IPIDController : public IConfigObserver {
   public:
-    virtual float compute(float&, float&, float&, float, float) const = 0;
+    virtual float compute(float, float&, float&, float, float) const = 0;
     virtual ~IPIDController() = default;
 };

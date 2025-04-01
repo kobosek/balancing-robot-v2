@@ -24,22 +24,24 @@ esp_err_t PIDController::init(const IRuntimeConfig& config) {
     ESP_LOGI(TAG, "PID Controller initialized successfully");
     return ESP_OK;
 }
+float PIDController::compute(float setpoint, float& integral, float& lastError, float currentValue, float dt) const {
 
-float PIDController::compute(float& setpoint, float& integral, float& lastError, float currentValue, float dt) const {
     float currentError = setpoint - currentValue;
     
     // Proportional term
     float pTerm = m_kp * currentError;
     
     // Integral term 
-    integral += currentError * dt;
+    integral += (currentError + lastError) / 2 * dt;
     integral = std::max(m_iTermMin, std::min(integral, m_iTermMax));
+    
     float iTerm = m_ki * integral;
     
     // Derivative term
     float dTerm = m_kd * (currentError - lastError) / dt;
-    lastError = currentError;
     
+    lastError = currentError;
+
     // Calculate total output
     float output = pTerm + iTerm + dTerm;
     

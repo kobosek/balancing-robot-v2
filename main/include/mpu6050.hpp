@@ -6,11 +6,38 @@
 enum class MPU6050Register : uint8_t {
     PWR_MGMT_1 = 0x6B,
     SMPLRT_DIV = 0x19,
+    USER_CTRL = 0x6A,
+    FIFO_EN = 0x23,
+    INT_PIN_CFG = 0x37,
+    INTERRUPT_EN = 0x38,
+    INTERRUPT_STATUS = 0x3A,
     DLPF_CONFIG = 0x1A,
     GYRO_CONFIG = 0x1B,
     ACCEL_CONFIG = 0x1C,
+    FIFO_COUNT_H = 0x72,
+    FIFO_R_W = 0x74,
     ACCEL_XOUT_H = 0x3B,
     GYRO_XOUT_H = 0x43
+};
+
+enum class MPU6050Interrupt : uint8_t {
+    DATA_READY = 0x01,
+    FIFO_OVERFLOW = 0x10,
+    DATA_READY_FIFO_OVERFLOW = 0x11
+};
+
+enum class MPU6050InterruptPinConfig : uint8_t {
+    ACTIVE_HIGH = 0x00, // b00000000 - Active high and clear automatically
+    ACTIVE_LOW = 0x80  // b10000000 - Active low and clear automatically
+};
+enum class MPU6050UserControl : uint8_t {
+    FIFO_RESET = 0x04,
+    FIFO_ENABLE = 0x40,  //01000000 (bit 6 is fifo enable)
+    FIFO_RESET_ENABLE = 0x44, //01000100
+};
+
+enum class MPU6050FIFOEnable : uint8_t {
+    GYRO_ACCEL = 0x78,  //01111000 (bit 6,5,4 gyro, bit 3 accel)
 };
 
 enum class MPU6050PowerManagement : uint8_t {
@@ -56,14 +83,22 @@ public:
                     const gpio_num_t,
                     const uint16_t,
                     const uint32_t);
-
+                    
+    float getAccelScale() const { return _accel_scale; }
+    float getGyroScale() const { return _gyro_scale; }
     esp_err_t getAcceleration(float& , float&, float&) const;
     esp_err_t getRotation(float&, float&, float&) const;
+    esp_err_t readFromFifo(uint8_t*, uint8_t*);
+
+    esp_err_t isDataReady() const;
+    esp_err_t isFIFOOverflow() const;
 
     esp_err_t setDLPFConfig(MPU6050DLPFConfig);
     esp_err_t setSampleRate(MPU6050SampleRateDiv);
     esp_err_t setAccelRange(MPU6050AccelConfig);
     esp_err_t setGyroRange(MPU6050GyroConfig);
+    esp_err_t setupInterrupt(MPU6050InterruptPinConfig, MPU6050Interrupt);
+    esp_err_t setupFIFO(MPU6050UserControl, MPU6050FIFOEnable);
 
 private:
     static constexpr const char* TAG = "MPU6050";

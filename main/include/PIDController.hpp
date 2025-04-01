@@ -13,7 +13,7 @@ public:
     esp_err_t init(const IRuntimeConfig&) override;
     esp_err_t onConfigUpdate(const IRuntimeConfig&) override;
 
-    float compute(float&, float&, float&, float, float) const override;
+    float compute(float, float&, float&, float, float) const override;
 private:
     static constexpr const char* TAG = "PIDController";
     

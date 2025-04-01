@@ -20,7 +20,7 @@ esp_err_t MPU6050::init(const i2c_port_t i2c_port,
         }
     };
 
-        i2c_master_bus_handle_t bus_handle;
+    i2c_master_bus_handle_t bus_handle;
     esp_err_t ret = i2c_new_master_bus(&bus_config, &bus_handle);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to create I2C master bus: %s", esp_err_to_name(ret));
@@ -73,6 +73,71 @@ esp_err_t MPU6050::setAccelRange(MPU6050AccelConfig range) {
     return ret;
 }
 
+esp_err_t MPU6050::setupInterrupt(MPU6050InterruptPinConfig intPinConfig, MPU6050Interrupt intEn) {
+    ESP_LOGD(TAG, "Setting up interrupt");
+    esp_err_t ret = writeRegister(MPU6050Register::INT_PIN_CFG, static_cast<uint8_t>(intPinConfig));
+    if (ret == ESP_OK) {
+        ret = writeRegister(MPU6050Register::INTERRUPT_EN, static_cast<uint8_t>(intEn));
+    }
+    return ret;
+}
+
+esp_err_t MPU6050::isDataReady() const {
+    ESP_LOGD(TAG, "Checking interrupt flag");
+    uint8_t _int_status;
+    esp_err_t ret = readRegisters(MPU6050Register::INTERRUPT_STATUS, &_int_status, 1);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read interrupt status: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    if (_int_status & static_cast<uint8_t>(MPU6050Interrupt::DATA_READY)) {
+        ESP_LOGD(TAG, "Data Ready interrupt triggered");
+        return ret;
+    } else {
+        ESP_LOGD(TAG, "Data Ready interrupt not triggered");
+        return ESP_ERR_INVALID_STATE;
+    }
+}
+
+esp_err_t MPU6050::isFIFOOverflow() const {
+    ESP_LOGD(TAG, "Checking interrupt flag");
+    uint8_t _int_status;
+    esp_err_t ret = readRegisters(MPU6050Register::INTERRUPT_STATUS, &_int_status, 1);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read interrupt status: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    if (_int_status & static_cast<uint8_t>(MPU6050Interrupt::FIFO_OVERFLOW)) {
+        ESP_LOGD(TAG, "FIFO overflow interrupt triggered");
+        return ret;
+    } else {
+        ESP_LOGD(TAG, "FIFO overflow interrupt not triggered");
+        return ESP_ERR_INVALID_STATE;
+    }
+}
+
+esp_err_t MPU6050::setupFIFO(MPU6050UserControl userCtrl, MPU6050FIFOEnable fifoEn) {
+    ESP_LOGD(TAG, "Setting up FIFO");
+    esp_err_t ret = writeRegister(MPU6050Register::USER_CTRL, static_cast<uint8_t>(userCtrl));
+    if (ret == ESP_OK) {
+        ret = writeRegister(MPU6050Register::FIFO_EN, static_cast<uint8_t>(fifoEn));
+    }
+    return ret;
+}
+
+esp_err_t MPU6050::readFromFifo(uint8_t* count_buf, uint8_t* fifo_data) {
+    esp_err_t ret = readRegisters(MPU6050Register::FIFO_COUNT_H, count_buf, 2);
+    uint16_t fifo_count = (count_buf[0] << 8) | count_buf[1];
+
+    if (fifo_count > 1024) {
+        ESP_LOGW(TAG, "FIFO overflow, resetting");
+        ret = writeRegister(MPU6050Register::USER_CTRL, static_cast<uint8_t>(MPU6050UserControl::FIFO_RESET));
+    } else if (fifo_count > 0) {
+        ret = readRegisters(MPU6050Register::FIFO_R_W, fifo_data, fifo_count);
+    }
+    return ret;
+}
+
 esp_err_t MPU6050::setGyroRange(MPU6050GyroConfig range) {
     ESP_LOGD(TAG, "Setting gyroscope range");
     esp_err_t ret = writeRegister(MPU6050Register::GYRO_CONFIG, static_cast<uint8_t>(range));
@@ -105,6 +170,8 @@ esp_err_t MPU6050::getAcceleration(float& ax, float& ay, float& az) const {
     ESP_LOGV(TAG, "Acceleration: X=%.2f, Y=%.2f, Z=%.2f", ax, ay, az);
     return ESP_OK;
 }
+
+
 
 esp_err_t MPU6050::getRotation(float& gx, float& gy, float& gz) const {
     uint8_t data[6];

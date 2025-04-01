@@ -3,6 +3,6 @@
 
 class IWebServer : public IConfigObserver {
     public:
-        virtual void update_telemetry(float, float) = 0;
+        virtual void update_telemetry(float, float, float, float) = 0;
         virtual ~IWebServer() = default;
 };

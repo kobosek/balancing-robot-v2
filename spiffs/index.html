@@ -13,7 +13,7 @@
             background-color: #f4f4f4;
         }
         .container {
-            max-width: 1000px;
+            max-width: 1800px; /* Increased to accommodate larger graph */
             margin: auto;
             background: white;
             padding: 20px;
@@ -70,13 +70,49 @@
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
+            margin-bottom: 30px;
         }
+
+        .visualization-section {
+            flex: 1;
+        }
+
         .config-section {
             flex: 1;
             margin-right: 20px;
         }
-        .visualization-section {
-            flex: 1;
+        .graph-container {
+            margin-top: 30px;
+            background: white;
+            padding: 20px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+            width: 100%;
+            height: 800px; /* Increased height */
+        }
+        .data-box {
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .legend-item {
+            margin-bottom: 10px;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .legend-color {
+            width: 20px;
+            height: 3px;
+            display: inline-block;
+        }
+        .legend-value {
+            font-weight: bold;
+        }
+        #speedGraph {
+            width: 100%;
+            height: 100%;
         }
     </style>
 </head>
@@ -98,11 +134,25 @@
                     <div class="data-box">
                         <h2>Current Angle: <span id="currentAngle">0.00</span>°</h2>
                     </div>
-                    <div class="data-box">
-                        <h2>Motor Output: <span id="motorOutput">0.00</span></h2>
-                    </div>
                 </div>
             </div>
+        </div>
+        <div class="graph-container">
+            <div id="legend" style="position: absolute; margin: 20px;">
+                <div class="legend-item">
+                    <span class="legend-color" style="background: #2196F3;"></span>
+                    Desired Speed: <span class="legend-value" id="desiredSpeedValue">0</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-color" style="background: #f44336;"></span>
+                    Current Speed: <span class="legend-value" id="currentSpeedValue">0</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-color" style="background: #ffeb3b;"></span>
+                    RMSE: <span class="legend-value" id="rmseValue">0</span>
+                </div>
+            </div>
+            <canvas id="speedGraph" width="1024" height="860"></canvas>
         </div>
     </div>
 
@@ -113,9 +163,15 @@
             const canvas = document.getElementById('robotCanvas');
             const ctx = canvas.getContext('2d');
             let angle = 0;
-            let motorOutput = 0;
             let wheelRotation = 0;
-
+            const speedGraph = document.getElementById('speedGraph');
+            const speedCtx = speedGraph.getContext('2d');
+            const maxDataPoints = 400; // Number of points to show on graph
+            const speedData = {
+                desired: Array(maxDataPoints).fill(0),
+                current: Array(maxDataPoints).fill(0),
+                rmse: Array(maxDataPoints).fill(0)
+            };
             // Create buttons for both controllers
             const angleConfigBtn = document.createElement('button');
             angleConfigBtn.textContent = 'Angle PID Config';
@@ -163,6 +219,98 @@
                 loadConfig('pid_speed', speedConfigForm);
             });
 
+            function drawSpeedGraph() {
+                const width = speedGraph.width;
+                const height = speedGraph.height;
+                const padding = 70;
+                
+                // Clear the canvas
+                speedCtx.clearRect(0, 0, width, height);
+                
+                // Draw background grid
+                speedCtx.strokeStyle = '#eee';
+                speedCtx.lineWidth = 1;
+                
+                // Draw horizontal grid lines
+                const gridSteps = 16;  // For steps of 100 in the range -800 to 800
+                for(let i = 0; i <= gridSteps; i++) {
+                    const y = padding + (height - 2 * padding) * (i/gridSteps);
+                    speedCtx.beginPath();
+                    speedCtx.moveTo(padding, y);
+                    speedCtx.lineTo(width - padding, y);
+                    speedCtx.stroke();
+                    
+                    // Add speed labels with larger font
+                    speedCtx.fillStyle = '#666';
+                    speedCtx.font = '16px Arial';
+                    speedCtx.textAlign = 'right';
+                    const speedValue = 800 - (i * 1600/gridSteps);  // Changed to 800 range
+                    speedCtx.fillText(speedValue.toFixed(0), padding - 10, y + 5);
+                }
+                
+                // Draw vertical grid lines (time markers every 0.5 seconds)
+                const timeSteps = 4;  // One mark every 0.5 seconds for 5 seconds
+                for(let i = 0; i <= timeSteps; i++) {
+                    const x = padding + (width - 2 * padding) * (i/timeSteps);
+                    speedCtx.beginPath();
+                    speedCtx.moveTo(x, padding);
+                    speedCtx.lineTo(x, height - padding);
+                    speedCtx.stroke();
+                    
+                    // Add time labels (0 to 5 seconds)
+                    speedCtx.fillStyle = '#666';
+                    speedCtx.font = '14px Arial';
+                    speedCtx.textAlign = 'center';
+                    const seconds = (i * 0.5).toFixed(1); // 0.5 second intervals
+                    speedCtx.fillText(`${seconds}s`, x, height - padding/2);
+                }
+                
+                // Draw zero line
+                speedCtx.strokeStyle = '#999';
+                speedCtx.setLineDash([5, 5]);
+                speedCtx.beginPath();
+                const zeroY = padding + (height - 2 * padding) * 0.5;
+                speedCtx.moveTo(padding, zeroY);
+                speedCtx.lineTo(width - padding, zeroY);
+                speedCtx.stroke();
+                speedCtx.setLineDash([]);
+                
+                // Draw the speed lines
+                const drawLine = (data, color) => {
+                    speedCtx.strokeStyle = color;
+                    speedCtx.lineWidth = 3;
+                    speedCtx.beginPath();
+                    
+                    data.forEach((speed, index) => {
+                        const x = padding + (width - 2 * padding) * (index / (maxDataPoints - 1));
+                        const normalizedSpeed = (speed + 800) / 1600;  // Changed to 800 range
+                        const y = padding + (height - 2 * padding) * (1 - normalizedSpeed);
+                        
+                        if(index === 0) {
+                            speedCtx.moveTo(x, y);
+                        } else {
+                            speedCtx.lineTo(x, y);
+                        }
+                    });
+                    
+                    speedCtx.stroke();
+                };
+                
+                // Draw desired speed in blue
+                drawLine(speedData.desired, '#2196F3');
+                // Draw current speed in red
+                drawLine(speedData.current, '#f44336');
+
+                //draw rmse in yellow
+                drawLine(speedData.rmse, '#ffeb3b');
+                
+                // Add legend with larger font
+                speedCtx.font = '18px Arial';
+                speedCtx.fillStyle = '#2196F3';
+                speedCtx.fillText('Desired Speed', width - 200, 30);
+                speedCtx.fillStyle = '#f44336';
+                speedCtx.fillText('Current Speed', width - 200, 60);
+            }            
             function createConfigForm(idPrefix) {
                 const form = document.createElement('div');
 
@@ -255,32 +403,40 @@
                     })
                     .catch(error => console.error(`Error saving ${type} configuration:`, error));
             }
-
             function updateData() {
-                fetch('/data', {
-                    method: 'GET',
-                    cache: 'no-cache',
-                    headers: {
-                        'Cache-Control': 'no-cache',
-                        'Pragma': 'no-cache'
-                    }
-                })
-                .then(response => response.text())
-                .then(data => {
-                    const [newAngle, newOutput] = data.split(',').map(parseFloat);
-                    angle = newAngle;
-                    motorOutput = newOutput;
-                    document.getElementById('currentAngle').textContent = angle.toFixed(2);
-                    document.getElementById('motorOutput').textContent = motorOutput.toFixed(2);
-
-                    // Update wheel rotation
-                    wheelRotation += (motorOutput / 100) * (100 / 60) * (2 * Math.PI / 60);
-                    wheelRotation %= (2 * Math.PI);  // Keep it within 0 to 2π
-
-                    drawRobot();
-                })
-                .catch(error => console.error('Error fetching data:', error));
-            }
+            fetch('/data', {
+                method: 'GET',
+                cache: 'no-cache',
+                headers: {
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache'
+                }
+            })
+            .then(response => response.text())
+            .then(data => {
+                const [newAngle, desiredSpeed, currentSpeed, rmse] = data.split(',').map(parseFloat);
+                angle = newAngle;
+                
+                // Update speed data arrays
+                speedData.desired.push(desiredSpeed);
+                speedData.desired.shift();
+                speedData.current.push(currentSpeed);
+                speedData.current.shift();
+                speedData.rmse.push(rmse);
+                speedData.rmse.shift();
+                
+                // Update the display values
+                document.getElementById('currentAngle').textContent = angle.toFixed(2);
+                document.getElementById('desiredSpeedValue').textContent = desiredSpeed.toFixed(2);
+                document.getElementById('currentSpeedValue').textContent = currentSpeed.toFixed(2);
+                document.getElementById('rmseValue').textContent = rmse.toFixed(2);
+                
+                // Update both visualizations
+                drawRobot();
+                drawSpeedGraph();
+            })
+            .catch(error => console.error('Error fetching data:', error));
+        }
 
             function drawRobot() {
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -306,7 +462,7 @@
 
                 // Draw wheel details to show rotation
                 ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 3;
+                ctx.lineWidth = 1;
                 ctx.beginPath();
                 ctx.moveTo(0, 0);
                 ctx.lineTo(50 * Math.cos(wheelRotation), 50 * Math.sin(wheelRotation));
@@ -322,8 +478,7 @@
                 ctx.restore();
             }
 
-            // Update data every 16ms (approximately 60fps)
-            setInterval(updateData, 16);
+            setInterval(updateData, 5);
 
             // Initial update
             updateData();

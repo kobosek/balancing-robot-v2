@@ -4,6 +4,7 @@
 #include "include/PIDController.hpp"
 #include "include/MotorDriver.hpp"
 #include "include/MPU6050Manager.hpp"
+#include "include/Encoder.hpp"
 
 #include <algorithm>
 #include "esp_log.h"
@@ -20,10 +21,33 @@ esp_err_t ComponentHandler::init() {
         registerObserver(webServer);
     }
 
-    motorDriver = std::make_shared<MX1616H>();
-    ret = motorDriver->init(runtimeConfig);
+    motorLeft = std::make_shared<MX1616H>(GPIO_NUM_5, GPIO_NUM_6, LEDC_CHANNEL_2, LEDC_CHANNEL_3);
+    ret = motorLeft->init(runtimeConfig);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize MotorDriver");
+        return ret;
+    }
+
+    motorRight = std::make_shared<MX1616H>(GPIO_NUM_4, GPIO_NUM_3, LEDC_CHANNEL_0, LEDC_CHANNEL_1);
+    ret = motorRight->init(runtimeConfig);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize MotorDriver");
+        return ret;
+    }
+
+    encoderLeft = std::make_shared<PCNTEncoder>(GPIO_NUM_11, GPIO_NUM_10);
+
+    ret = encoderLeft->init(runtimeConfig);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize Encoder");
+        return ret;
+    }
+
+    encoderRight = std::make_shared<PCNTEncoder>(GPIO_NUM_12, GPIO_NUM_13);
+
+    ret = encoderRight->init(runtimeConfig);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize Encoder");
         return ret;
     }
 
@@ -47,10 +71,9 @@ esp_err_t ComponentHandler::init() {
         ESP_LOGE(TAG, "Failed to initialize Speed PIDController");
         return ret;
     }
-    registerObserver(motorDriver);
+
     registerObserver(anglePidController);
     registerObserver(speedPidController);
-    registerObserver(mpu6050Manager);
 
     ESP_LOGI(TAG, "ComponentHandler initialization complete");
     return ESP_OK;

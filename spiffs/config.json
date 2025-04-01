@@ -4,29 +4,27 @@
       "password": "Lubieplacki4321"
     },
     "pid_angle": {
-      "kp": 2,
+      "kp": 15.0,
       "ki": 0.0,
       "kd": 0.0,
-      "target": 0,
-      "output_min": 0,
-      "output_max": 70,
+      "output_min": 0.0,
+      "output_max": 720.0,
       "iterm_min": -1000.0,
       "iterm_max": 1000.0
     },
     "pid_speed": {
-      "kp": 2,
-      "ki": 1,
-      "kd": 0.5,
-      "target": 0.0,
-      "output_min": 0,
-      "output_max": 1023.0,
-      "iterm_min": -1000.0,
-      "iterm_max": 1000.0
+      "kp": 0.01,
+      "ki": 0.02,
+      "kd": 0.00001,
+      "output_min": 0.0,
+      "output_max": 1.0,
+      "iterm_min": -100.0,
+      "iterm_max": 100.0
     },
     "mpu6050": {
       "calibration_samples": 1000
     },
     "main_loop": {
-      "interval_ms": 10
+      "interval_ms": 3
     }
   }
