@@ -108,9 +108,11 @@ extern "C" void app_main(void)
         .name = "control_loop"
     };
     
+    int intervalMs = config.getMainLoopIntervalMs();
+
     esp_timer_handle_t control_loop_timer;
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &control_loop_timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(control_loop_timer, 5 * 1000));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(control_loop_timer, intervalMs * 1000));
 
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(1000)); // Delay for 1000 ms
@@ -150,13 +152,20 @@ static void control_loop_callback(void* arg) {
 
         ctx->currentSpeedRight = ctx->encoderRight.getSpeed(dt);//speed in deg/s of the outer shaft 
         ctx->dutyRight = ctx->speedPidController.compute(ctx->speedSetPoint, ctx->speedRightIntegral, ctx->speedRightLastError, ctx->currentSpeedRight, dt);
-        ctx->motorRight.setSpeed(ctx->dutyRight);  
+        ctx->motorRight.setSpeed(ctx->dutyRight);
 
-        ctx->webServer.update_telemetry(ctx->pitch, ctx->speedSetPoint, ctx->currentSpeedLeft, rmseSpeedErrorLeft);
+        // Create telemetry data point and add it to the web server buffer
+        TelemetryDataPoint currentData = {
+            .pitch = ctx->pitch,
+            .desiredSpeed = ctx->speedSetPoint,
+            .currentSpeed = ctx->currentSpeedLeft, // Using left speed for telemetry
+            .rmse = rmseSpeedErrorLeft             // Using left RMSE for telemetry
+        };
+        ctx->webServer.addTelemetryData(currentData);
 
         if (ctx->logCounter > 20) {
          ESP_LOGI(TAG, "Pitch: %.2f, Speed Set Point: %.2f, Encoder Speed Left: %.2f, dt: %.8f, RMSE: %.3f",
-            ctx->pitch, ctx->speedSetPoint, ctx->currentSpeedRight, dt, rmseSpeedErrorLeft);  
+            ctx->pitch, ctx->speedSetPoint, ctx->currentSpeedLeft, dt, rmseSpeedErrorLeft);  
             ctx->logCounter = 0;         
         }
         //ctx->logCounter++;

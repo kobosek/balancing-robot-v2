@@ -412,24 +412,32 @@
                     'Pragma': 'no-cache'
                 }
             })
-            .then(response => response.text())
-            .then(data => {
-                const [newAngle, desiredSpeed, currentSpeed, rmse] = data.split(',').map(parseFloat);
-                angle = newAngle;
-                
-                // Update speed data arrays
-                speedData.desired.push(desiredSpeed);
-                speedData.desired.shift();
-                speedData.current.push(currentSpeed);
-                speedData.current.shift();
-                speedData.rmse.push(rmse);
-                speedData.rmse.shift();
-                
-                // Update the display values
+            .then(response => response.json())
+            .then(jsonData => {
+                if (!jsonData.data || jsonData.data.length === 0) return;
+
+                const intervalMs = jsonData.interval_ms;
+                const batchData = jsonData.data;
+
+                // Update graph data with all points in the batch
+                batchData.forEach(point => {
+                    const [newAngle, desiredSpeed, currentSpeed, rmse] = point;
+                    
+                    speedData.desired.push(desiredSpeed);
+                    speedData.desired.shift();
+                    speedData.current.push(currentSpeed);
+                    speedData.current.shift();
+                    speedData.rmse.push(rmse);
+                    speedData.rmse.shift();
+                });
+
+                // Update display values with last point in batch
+                const lastPoint = batchData[batchData.length - 1];
+                angle = lastPoint[0];
                 document.getElementById('currentAngle').textContent = angle.toFixed(2);
-                document.getElementById('desiredSpeedValue').textContent = desiredSpeed.toFixed(2);
-                document.getElementById('currentSpeedValue').textContent = currentSpeed.toFixed(2);
-                document.getElementById('rmseValue').textContent = rmse.toFixed(2);
+                document.getElementById('desiredSpeedValue').textContent = lastPoint[1].toFixed(2);
+                document.getElementById('currentSpeedValue').textContent = lastPoint[2].toFixed(2);
+                document.getElementById('rmseValue').textContent = lastPoint[3].toFixed(2);
                 
                 // Update both visualizations
                 drawRobot();
@@ -478,7 +486,7 @@
                 ctx.restore();
             }
 
-            setInterval(updateData, 5);
+            setInterval(updateData, 100);
 
             // Initial update
             updateData();

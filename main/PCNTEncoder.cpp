@@ -59,27 +59,11 @@ float PCNTEncoder::getSpeed(float dt) {
     int pulseCount = 0;
     pcnt_unit_get_count(m_unit, &pulseCount);
 
-    // bufferCounter = bufferCounter%bufferSize;
-    // pulseBuffer[bufferCounter] = pulseCount - lastPulseCount;
-
-    // int bufferSum = 0;
-    // for (int i = 0; i < bufferSize; i++) {
-    //     bufferSum += pulseBuffer[i];
-    // }
-    // float windowAvg = float(bufferSum) / bufferSize;
-    // bufferCounter++;
-    //float instantSpeed = windowAvg / 28 * 360 / 100 / dt;
-
     float deltaPos = float (pulseCount - lastPulseCount);
     float instantSpeed = deltaPos / 28 * 360 / 100 / dt;
     lastPulseCount = pulseCount;     
 
-    // float alpha = 0.1;
-    // float filteredSpeed = alpha * instantSpeed + (1.0f - alpha) * last_speed;
-    // last_speed = filteredSpeed;
-
     float instantAccel = abs(instantSpeed - last_speed) / dt;
-    // Increase alpha during high acceleration
     float baseAlpha = 0.05f;
     float accelScale = std::min(1.0f, instantAccel / 20000.0f);  // Adjust 1000 based on your max accel
     float alpha = baseAlpha + (0.5f - baseAlpha) * accelScale;

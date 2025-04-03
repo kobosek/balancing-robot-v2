@@ -1,20 +1,31 @@
 #include "include/WebServer.hpp"
 #include "include/ComponentHandler.hpp"
-#include "include/RuntimeConfig.hpp"
+#include "include/RuntimeConfig.hpp" // Needed for loop interval
 
 #include "esp_spiffs.h"
 #include "esp_vfs.h"
 #include <string.h>
+#include "cJSON.h" // Needed for JSON formatting
+#include "freertos/FreeRTOS.h" // For pdMS_TO_TICKS
+#include "freertos/task.h"     // For task delay/yield if needed
 
 #define MAX_FILE_PATH_LENGTH 256
 #define CHUNK_SIZE 1024
 
 WebServer::WebServer(ComponentHandler& componentHandler, IRuntimeConfig& runtimeConfig)
-    : server(nullptr), m_angle(0), m_desiredSpeed(0), m_speed(0), componentHandler(componentHandler), runtimeConfig(runtimeConfig) {}
+    : server(nullptr), componentHandler(componentHandler), runtimeConfig(runtimeConfig) {} // Remove old telemetry members
 
-esp_err_t WebServer::init(const IRuntimeConfig& runtimeConfig) {
+esp_err_t WebServer::init(const IRuntimeConfig& /*config_param*/) { // Parameter unused now
     ESP_LOGI(TAG, "Initializing web server");
-    
+
+    // Initialize the telemetry mutex
+    telemetryMutex = xSemaphoreCreateMutex();
+    if (!telemetryMutex) {
+        ESP_LOGE(TAG, "Failed to create telemetry mutex");
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "Telemetry mutex created");
+
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true;
 
@@ -70,12 +81,22 @@ esp_err_t WebServer::init(const IRuntimeConfig& runtimeConfig) {
     return ESP_OK;
 }
 
-void WebServer::update_telemetry(float angle, float desiredSpeed, float speed, float rmse) {
-    m_angle = angle;
-    m_desiredSpeed = desiredSpeed;
-    m_speed = speed;
-    m_rmse = rmse;
+// Implementation for adding telemetry data to the buffer
+void WebServer::addTelemetryData(const TelemetryDataPoint& data) {
+    if (xSemaphoreTake(telemetryMutex, pdMS_TO_TICKS(10)) == pdTRUE) { // Wait briefly
+        if (telemetryBuffer.size() >= maxBufferSize) {
+            // Remove the oldest element to make space if buffer is full
+            telemetryBuffer.erase(telemetryBuffer.begin());
+            ESP_LOGV(TAG, "Telemetry buffer full, removed oldest entry.");
+        }
+        telemetryBuffer.push_back(data);
+        xSemaphoreGive(telemetryMutex);
+        ESP_LOGV(TAG, "Added telemetry point. Buffer size: %d", telemetryBuffer.size());
+    } else {
+        ESP_LOGW(TAG, "Failed to acquire telemetry mutex for writing");
+    }
 }
+
 
 esp_err_t WebServer::static_get_handler(httpd_req_t *req) {
     WebServer* server = static_cast<WebServer*>(req->user_ctx);
@@ -148,20 +169,79 @@ esp_err_t WebServer::handle_static_get(httpd_req_t *req) {
     return ESP_OK;
 }
 
+// Modified handler for /data endpoint to send batched data as JSON
 esp_err_t WebServer::handle_data_get(httpd_req_t *req) {
-    char resp[64];
-    snprintf(resp, sizeof(resp), "%.3f,%.3f,%.3f, %.3f", m_angle, m_desiredSpeed, m_speed, m_rmse);
-    
-    httpd_resp_set_type(req, "text/plain");
+    std::vector<TelemetryDataPoint> dataToSend;
+
+    // Safely copy and clear the shared buffer
+    if (xSemaphoreTake(telemetryMutex, pdMS_TO_TICKS(50)) == pdTRUE) { // Wait a bit longer here
+        dataToSend = telemetryBuffer; // Copy constructor
+        telemetryBuffer.clear();
+        xSemaphoreGive(telemetryMutex);
+    } else {
+        ESP_LOGE(TAG, "Failed to acquire telemetry mutex for reading");
+        httpd_resp_send_500(req); // Indicate server error
+        return ESP_FAIL;
+    }
+
+    // Get the current loop interval from runtime config
+    // Note: Assumes RuntimeConfig class has this getter implemented later
+    int intervalMs = runtimeConfig.getMainLoopIntervalMs();
+
+    // Create JSON response
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        ESP_LOGE(TAG, "Failed to create root cJSON object");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    cJSON_AddNumberToObject(root, "interval_ms", intervalMs);
+
+    cJSON *dataArray = cJSON_CreateArray();
+    if (!dataArray) {
+        ESP_LOGE(TAG, "Failed to create data cJSON array");
+        cJSON_Delete(root);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    cJSON_AddItemToObject(root, "data", dataArray);
+
+    for (const auto& point : dataToSend) {
+        cJSON *pointArray = cJSON_CreateArray();
+        if (!pointArray) {
+            ESP_LOGW(TAG, "Failed to create point cJSON array, skipping point");
+            continue; // Skip this point if allocation fails
+        }
+        cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.pitch));
+        cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.desiredSpeed));
+        cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.currentSpeed));
+        cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.rmse));
+        cJSON_AddItemToArray(dataArray, pointArray);
+    }
+
+    char *json_string = cJSON_PrintUnformatted(root); // Use unformatted for smaller size
+    cJSON_Delete(root); // Clean up cJSON structure
+
+    if (!json_string) {
+        ESP_LOGE(TAG, "Failed to print cJSON to string");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    // Send the JSON response
+    httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
     httpd_resp_set_hdr(req, "Pragma", "no-cache");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-    
-    httpd_resp_send(req, resp, strlen(resp));
-    
-    ESP_LOGV(TAG, "Sen` telemetry data: %s", resp);
-    return ESP_OK;
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*"); // Keep CORS header if needed
+
+    esp_err_t send_ret = httpd_resp_send(req, json_string, strlen(json_string));
+    free(json_string); // Free the allocated string
+
+    ESP_LOGV(TAG, "Sent %u telemetry points. Interval: %d ms", dataToSend.size(), intervalMs);
+    return send_ret;
 }
+
 
 esp_err_t WebServer::handle_get_config(httpd_req_t *req) {
     std::string json = runtimeConfig.toJson();
