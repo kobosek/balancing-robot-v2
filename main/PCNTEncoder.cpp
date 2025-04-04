@@ -55,17 +55,21 @@ esp_err_t PCNTEncoder::init(const IRuntimeConfig& config) {
     return ESP_OK;
 }
 
+const float PULSES_PER_REVOLUTION = 28.0f;
+const float DEGREES_PER_REVOLUTION = 360.0f;
+const float GEAR_RATIO = 100.0f;
+
 float PCNTEncoder::getSpeed(float dt) {
     int pulseCount = 0;
     pcnt_unit_get_count(m_unit, &pulseCount);
 
     float deltaPos = float (pulseCount - lastPulseCount);
-    float instantSpeed = deltaPos / 28 * 360 / 100 / dt;
+    float instantSpeed = deltaPos / PULSES_PER_REVOLUTION * DEGREES_PER_REVOLUTION / GEAR_RATIO / dt;
     lastPulseCount = pulseCount;     
 
     float instantAccel = abs(instantSpeed - last_speed) / dt;
     float baseAlpha = 0.05f;
-    float accelScale = std::min(1.0f, instantAccel / 20000.0f);  // Adjust 1000 based on your max accel
+    float accelScale = std::min(1.0f, instantAccel / 10000.0f);  // Adjust 1000 based on your max accel
     float alpha = baseAlpha + (0.5f - baseAlpha) * accelScale;
 
     float filteredSpeed = alpha * instantSpeed + (1.0f - alpha) * last_filtered_speed;

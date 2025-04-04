@@ -22,8 +22,11 @@ class IRuntimeConfig {
         virtual PIDConfig getAnglePidConfig() const = 0;
         virtual void setAnglePidConfig(PIDConfig) = 0;
 
-        virtual PIDConfig getSpeedPidConfig() const = 0;
-        virtual void setSpeedPidConfig(PIDConfig) = 0;
+        virtual PIDConfig getSpeedPidLeftConfig() const = 0;
+        virtual void setSpeedPidLeftConfig(PIDConfig) = 0;
+
+        virtual PIDConfig getSpeedPidRightConfig() const = 0;
+        virtual void setSpeedPidRightConfig(PIDConfig) = 0;
 
         // MPU6050 parameters
         virtual int getMpu6050CalibrationSamples() const = 0;

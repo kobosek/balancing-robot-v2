@@ -1,10 +1,12 @@
-idf_component_register(SRCS  "PCNTEncoder.cpp" "Encoder.cpp" "MPU6050Manager.cpp" 
+# main/CMakeLists.txt
+idf_component_register(SRCS  "PCNTEncoder.cpp" "Encoder.cpp" "MPU6050Manager.cpp"
                             "RuntimeConfig.cpp"
                             "ComponentHandler.cpp"
                             "WiFiManager.cpp"
                             "WebServer.cpp"
-                            "MotorDriver.cpp"                           
+                            "MotorDriver.cpp"
                             "PIDController.cpp"
+                            "BalancingController.cpp" # <-- Add this line
                             "mpu6050.cpp"
                             "main.cpp"
                        INCLUDE_DIRS "."
@@ -20,4 +22,3 @@ idf_component_register(SRCS  "PCNTEncoder.cpp" "Encoder.cpp" "MPU6050Manager.cpp
                                 pthread)
 
 set(EXTRA_COMPONENT_DIRS $ENV{IDF_PATH}/components/json/cJSON)
-

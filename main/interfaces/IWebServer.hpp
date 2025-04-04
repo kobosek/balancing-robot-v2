@@ -5,8 +5,10 @@
 struct TelemetryDataPoint {
     float pitch;
     float desiredSpeed;
-    float currentSpeed;
-    float rmse;
+    float currentSpeedLeft;
+    float currentSpeedRight;
+    float rmseLeft;
+    float rmseRight;
     // Optional: uint64_t timestamp; // Could add later if needed
 };
 

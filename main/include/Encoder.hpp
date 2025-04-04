@@ -47,9 +47,6 @@ class PCNTEncoder : public IEncoder {
         gpio_num_t m_pinB;
         pcnt_unit_handle_t m_unit;
 
-        //static const int bufferSize = 3; 
-        //volatile int pulseBuffer[bufferSize];
-        //volatile int bufferCounter = 0;
         volatile int lastPulseCount = 0;
         volatile float last_speed = 0.0f;
         volatile float last_filtered_speed = 0.0f;

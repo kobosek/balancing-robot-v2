@@ -124,15 +124,25 @@ std::string RuntimeConfig::toJson() const {
     cJSON_AddNumberToObject(pid_angle, "iterm_max", anglePidConfig.pid_iterm_max);
     cJSON_AddItemToObject(root, "pid_angle", pid_angle);
 
-    cJSON *pid_speed = cJSON_CreateObject();
-    cJSON_AddNumberToObject(pid_speed, "kp", speedPidConfig.pid_kp);
-    cJSON_AddNumberToObject(pid_speed, "ki", speedPidConfig.pid_ki);
-    cJSON_AddNumberToObject(pid_speed, "kd", speedPidConfig.pid_kd);
-    cJSON_AddNumberToObject(pid_speed, "output_min", speedPidConfig.pid_output_min);
-    cJSON_AddNumberToObject(pid_speed, "output_max", speedPidConfig.pid_output_max);
-    cJSON_AddNumberToObject(pid_speed, "iterm_min", speedPidConfig.pid_iterm_min);
-    cJSON_AddNumberToObject(pid_speed, "iterm_max", speedPidConfig.pid_iterm_max);
-    cJSON_AddItemToObject(root, "pid_speed", pid_speed);
+    cJSON *pid_speed_left = cJSON_CreateObject();
+    cJSON_AddNumberToObject(pid_speed_left, "kp", speedPidLeftConfig.pid_kp);
+    cJSON_AddNumberToObject(pid_speed_left, "ki", speedPidLeftConfig.pid_ki);
+    cJSON_AddNumberToObject(pid_speed_left, "kd", speedPidLeftConfig.pid_kd);
+    cJSON_AddNumberToObject(pid_speed_left, "output_min", speedPidLeftConfig.pid_output_min);
+    cJSON_AddNumberToObject(pid_speed_left, "output_max", speedPidLeftConfig.pid_output_max);
+    cJSON_AddNumberToObject(pid_speed_left, "iterm_min", speedPidLeftConfig.pid_iterm_min);
+    cJSON_AddNumberToObject(pid_speed_left, "iterm_max", speedPidLeftConfig.pid_iterm_max);
+    cJSON_AddItemToObject(root, "pid_speed_left", pid_speed_left);
+
+    cJSON *pid_speed_right = cJSON_CreateObject();
+    cJSON_AddNumberToObject(pid_speed_right, "kp", speedPidRightConfig.pid_kp);
+    cJSON_AddNumberToObject(pid_speed_right, "ki", speedPidRightConfig.pid_ki);
+    cJSON_AddNumberToObject(pid_speed_right, "kd", speedPidRightConfig.pid_kd);
+    cJSON_AddNumberToObject(pid_speed_right, "output_min", speedPidRightConfig.pid_output_min);
+    cJSON_AddNumberToObject(pid_speed_right, "output_max", speedPidRightConfig.pid_output_max);
+    cJSON_AddNumberToObject(pid_speed_right, "iterm_min", speedPidRightConfig.pid_iterm_min);
+    cJSON_AddNumberToObject(pid_speed_right, "iterm_max", speedPidRightConfig.pid_iterm_max);
+    cJSON_AddItemToObject(root, "pid_speed_right", pid_speed_right);
 
     cJSON *mpu6050 = cJSON_CreateObject();
     cJSON_AddNumberToObject(mpu6050, "calibration_samples", mpu6050_calibration_samples);
@@ -190,18 +200,32 @@ esp_err_t RuntimeConfig::fromJson(const std::string& json) {
         ESP_LOGW(TAG, "PID configuration not found in JSON");
     }
 
-    cJSON *pid_speed = cJSON_GetObjectItem(root, "pid_speed");
-    if (pid_speed) {
-        if ((item = cJSON_GetObjectItem(pid_speed, "kp")) && cJSON_IsNumber(item)) speedPidConfig.pid_kp = item->valuedouble;
-        if ((item = cJSON_GetObjectItem(pid_speed, "ki")) && cJSON_IsNumber(item)) speedPidConfig.pid_ki = item->valuedouble;
-        if ((item = cJSON_GetObjectItem(pid_speed, "kd")) && cJSON_IsNumber(item)) speedPidConfig.pid_kd = item->valuedouble;
-        if ((item = cJSON_GetObjectItem(pid_speed, "output_min")) && cJSON_IsNumber(item)) speedPidConfig.pid_output_min = item->valuedouble;
-        if ((item = cJSON_GetObjectItem(pid_speed, "output_max")) && cJSON_IsNumber(item)) speedPidConfig.pid_output_max = item->valuedouble;
-        if ((item = cJSON_GetObjectItem(pid_speed, "iterm_min")) && cJSON_IsNumber(item)) speedPidConfig.pid_iterm_min = item->valuedouble;
-        if ((item = cJSON_GetObjectItem(pid_speed, "iterm_max")) && cJSON_IsNumber(item)) speedPidConfig.pid_iterm_max = item->valuedouble;
-        ESP_LOGI(TAG, "Loaded Speed PID configuration");
+    cJSON *pid_speed_left = cJSON_GetObjectItem(root, "pid_speed_left");
+    if (pid_speed_left) {
+        if ((item = cJSON_GetObjectItem(pid_speed_left, "kp")) && cJSON_IsNumber(item)) speedPidLeftConfig.pid_kp = item->valuedouble;
+        if ((item = cJSON_GetObjectItem(pid_speed_left, "ki")) && cJSON_IsNumber(item)) speedPidLeftConfig.pid_ki = item->valuedouble;
+        if ((item = cJSON_GetObjectItem(pid_speed_left, "kd")) && cJSON_IsNumber(item)) speedPidLeftConfig.pid_kd = item->valuedouble;
+        if ((item = cJSON_GetObjectItem(pid_speed_left, "output_min")) && cJSON_IsNumber(item)) speedPidLeftConfig.pid_output_min = item->valuedouble;
+        if ((item = cJSON_GetObjectItem(pid_speed_left, "output_max")) && cJSON_IsNumber(item)) speedPidLeftConfig.pid_output_max = item->valuedouble;
+        if ((item = cJSON_GetObjectItem(pid_speed_left, "iterm_min")) && cJSON_IsNumber(item)) speedPidLeftConfig.pid_iterm_min = item->valuedouble;
+        if ((item = cJSON_GetObjectItem(pid_speed_left, "iterm_max")) && cJSON_IsNumber(item)) speedPidLeftConfig.pid_iterm_max = item->valuedouble;
+        ESP_LOGI(TAG, "Loaded Left Speed PID configuration");
     } else {
-        ESP_LOGW(TAG, "PID configuration not found in JSON");
+        ESP_LOGW(TAG, "Left Speed PID configuration not found in JSON");
+    }
+
+    cJSON *pid_speed_right = cJSON_GetObjectItem(root, "pid_speed_right");
+    if (pid_speed_right) {
+        if ((item = cJSON_GetObjectItem(pid_speed_right, "kp")) && cJSON_IsNumber(item)) speedPidRightConfig.pid_kp = item->valuedouble;
+        if ((item = cJSON_GetObjectItem(pid_speed_right, "ki")) && cJSON_IsNumber(item)) speedPidRightConfig.pid_ki = item->valuedouble;
+        if ((item = cJSON_GetObjectItem(pid_speed_right, "kd")) && cJSON_IsNumber(item)) speedPidRightConfig.pid_kd = item->valuedouble;
+        if ((item = cJSON_GetObjectItem(pid_speed_right, "output_min")) && cJSON_IsNumber(item)) speedPidRightConfig.pid_output_min = item->valuedouble;
+        if ((item = cJSON_GetObjectItem(pid_speed_right, "output_max")) && cJSON_IsNumber(item)) speedPidRightConfig.pid_output_max = item->valuedouble;
+        if ((item = cJSON_GetObjectItem(pid_speed_right, "iterm_min")) && cJSON_IsNumber(item)) speedPidRightConfig.pid_iterm_min = item->valuedouble;
+        if ((item = cJSON_GetObjectItem(pid_speed_right, "iterm_max")) && cJSON_IsNumber(item)) speedPidRightConfig.pid_iterm_max = item->valuedouble;
+        ESP_LOGI(TAG, "Loaded Right Speed PID configuration");
+    } else {
+        ESP_LOGW(TAG, "Right Speed PID configuration not found in JSON");
     }
 
     cJSON *mpu6050 = cJSON_GetObjectItem(root, "mpu6050");

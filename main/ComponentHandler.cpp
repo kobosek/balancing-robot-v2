@@ -58,22 +58,30 @@ esp_err_t ComponentHandler::init() {
         return ret;
     }
 
-    anglePidController = std::make_shared<PIDController>(PIDControllerType::ANGLE);
-    ret = anglePidController->init(runtimeConfig);
+    anglePidController = std::make_shared<PIDController>("angle"); // Assign key
+    ret = anglePidController->init(runtimeConfig); // Uses key internally
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize Angle PIDController");
         return ret;
     }
 
-    speedPidController = std::make_shared<PIDController>(PIDControllerType::SPEED);
-    ret = speedPidController->init(runtimeConfig);
+    speedPidControllerLeft = std::make_shared<PIDController>("speed_left"); // Assign key
+    ret = speedPidControllerLeft->init(runtimeConfig); // Uses key internally
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize Speed PIDController");
+        ESP_LOGE(TAG, "Failed to initialize Speed Left PIDController");
+        return ret;
+    }
+
+    speedPidControllerRight = std::make_shared<PIDController>("speed_right"); // Assign key
+    ret = speedPidControllerRight->init(runtimeConfig); // Uses key internally
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize Speed Right PIDController");
         return ret;
     }
 
     registerObserver(anglePidController);
-    registerObserver(speedPidController);
+    registerObserver(speedPidControllerLeft);
+    registerObserver(speedPidControllerRight);
 
     ESP_LOGI(TAG, "ComponentHandler initialization complete");
     return ESP_OK;

@@ -12,8 +12,11 @@ public:
     PIDConfig getAnglePidConfig() const override { return anglePidConfig;};
     void setAnglePidConfig(PIDConfig config) override { anglePidConfig = config; };
 
-    PIDConfig getSpeedPidConfig() const override { return speedPidConfig; };
-    void setSpeedPidConfig(PIDConfig config ) override { speedPidConfig = config; };
+    PIDConfig getSpeedPidLeftConfig() const override { return speedPidLeftConfig; };
+    void setSpeedPidLeftConfig(PIDConfig config ) override { speedPidLeftConfig = config; };
+
+    PIDConfig getSpeedPidRightConfig() const override { return speedPidRightConfig; };
+    void setSpeedPidRightConfig(PIDConfig config ) override { speedPidRightConfig = config; };
 
     // MPU6050 parameters
     int getMpu6050CalibrationSamples() const override { return mpu6050_calibration_samples; }
@@ -39,7 +42,8 @@ private:
     esp_err_t init_nvs_Flash();
 
     PIDConfig anglePidConfig;
-    PIDConfig speedPidConfig;
+    PIDConfig speedPidLeftConfig;
+    PIDConfig speedPidRightConfig;
 
     // MPU6050 parameters
     int mpu6050_calibration_samples;

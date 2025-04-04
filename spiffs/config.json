@@ -7,16 +7,25 @@
       "kp": 15.0,
       "ki": 0.0,
       "kd": 0.0,
-      "output_min": 0.0,
+      "output_min": -720.0,
       "output_max": 720.0,
       "iterm_min": -1000.0,
       "iterm_max": 1000.0
     },
-    "pid_speed": {
+    "pid_speed_left": {
       "kp": 0.01,
       "ki": 0.05,
       "kd": 0.00001,
-      "output_min": 0.0,
+      "output_min": -1.0,
+      "output_max": 1.0,
+      "iterm_min": -100.0,
+      "iterm_max": 100.0
+    },
+    "pid_speed_right": {
+      "kp": 0.01,
+      "ki": 0.05,
+      "kd": 0.00001,
+      "output_min": -1.0,
       "output_max": 1.0,
       "iterm_min": -100.0,
       "iterm_max": 100.0

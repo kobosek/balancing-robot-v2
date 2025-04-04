@@ -2,171 +2,191 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_timer.h" 
+#include "freertos/queue.h"
+#include "esp_timer.h"
 #include "esp_log.h"
 #include "esp_pthread.h"
 
 #include "include/ComponentHandler.hpp"
 #include "include/RuntimeConfig.hpp"
+#include "include/BalancingController.hpp" 
 
 #include "interfaces/IWebServer.hpp"
-#include "interfaces/IPIDController.hpp"
-#include "interfaces/IMotorDriver.hpp"
-#include "interfaces/IMPU6050Manager.hpp"
-#include "interfaces/IEncoder.hpp"
-#include "math.h"
 
-#define TAG "PID_DEBUG"
+#define TAG "AppMain" // Change main tag
+#define CONTROL_TASK_TAG "ControlTask"
+#define TELEMETRY_TAG "TelemetryHandler"
 
-static const int ERROR_BUFFER_SIZE = 50;
+#define TELEMETRY_QUEUE_LENGTH 10
+static QueueHandle_t telemetryQueue = NULL;
 
-struct ControlContext {
-    const IMPU6050Manager& mpu6050Manager;
-    const IMotorDriver& motorLeft;
-    const IMotorDriver& motorRight;
-    IEncoder& encoderLeft;
-    IEncoder& encoderRight;
-    const IPIDController& anglePidController;
-    const IPIDController& speedPidController;
+struct TelemetryTaskArgs {
+    QueueHandle_t queue;
     IWebServer& webServer;
-    float pitch;
-    float angleSetPoint;
-    float angleIntegral;
-    float angleLastError;
-    float lastSpeedSetPoint;
-    float speedSetPoint;
-    float speedLeftIntegral;
-    float speedLeftLastError;
-    float currentSpeedLeft;
-    float dutyLeft;
-    float speedRightIntegral;
-    float speedRightLastError;
-    float currentSpeedRight;
-    float dutyRight;
-    int64_t lastTimeMPU6050;
-    int64_t lastTimeLeftMotor;
-    int64_t lastTimeRightMotor;
-    int64_t logCounter;
-    float deltaSpeed;
-    float speedErrorBuffer[ERROR_BUFFER_SIZE] = {0};
-    int errorBufferIndex = 0;
 };
 
-
-float calculateRMSE(float* errorBuffer, int bufferSize) {
-    float sumSquaredError = 0;
-    for(int i = 0; i < bufferSize; i++) {
-        sumSquaredError += pow(errorBuffer[i], 2);
+static void telemetry_handler_task(void* arg) {
+    if (arg == nullptr) {
+        ESP_LOGE(TELEMETRY_TAG, "Task arguments are NULL! Deleting task.");
+        vTaskDelete(NULL);
+        return;
     }
-    return sqrt(sumSquaredError / bufferSize);
+    TelemetryTaskArgs* taskArgs = static_cast<TelemetryTaskArgs*>(arg);
+    QueueHandle_t queue = taskArgs->queue;
+    IWebServer& webServer = taskArgs->webServer;
+
+    ESP_LOGI(TELEMETRY_TAG, "Telemetry Handler Task started.");
+    TelemetryDataPoint receivedData;
+    while (1) {
+        if (xQueueReceive(queue, &receivedData, portMAX_DELAY) == pdPASS) {
+            ESP_LOGV(TELEMETRY_TAG, "Received telemetry point, adding to buffer.");
+            webServer.addTelemetryData(receivedData);
+        } else {
+            ESP_LOGE(TELEMETRY_TAG, "xQueueReceive failed unexpectedly.");
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+    }
 }
 
-static void control_loop_callback(void* arg);
+
+// --- Control Task Function (Modified) ---
+static void control_task(void* arg) {
+    BalancingController* controller = static_cast<BalancingController*>(arg);
+    if (!controller) {
+        ESP_LOGE(CONTROL_TASK_TAG, "Controller instance is NULL! Deleting task.");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    struct ControlTaskArgs {
+        BalancingController* controller;
+        int loopIntervalMs;
+    };
+
+    ControlTaskArgs* taskArgs = static_cast<ControlTaskArgs*>(arg);
+    controller = taskArgs->controller; // Get controller pointer
+    const int intervalMs = taskArgs->loopIntervalMs; // Get interval
+
+    if (!controller) { /* Re-check after cast */ }
+
+    TickType_t xFrequency = pdMS_TO_TICKS(intervalMs);
+    if (xFrequency == 0) {
+         ESP_LOGE(CONTROL_TASK_TAG, "Calculated task frequency is 0 ticks! Interval: %d ms. Halting.", intervalMs);
+         vTaskDelete(NULL); return;
+    }
+
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    ESP_LOGI(CONTROL_TASK_TAG, "Control task started. Loop Interval: %d ms, Frequency: %lu ticks", intervalMs, (unsigned long)xFrequency);
+
+    bool safetyStopActive = false; // Safety stop logic local to the task runner
+    TickType_t safetyStopTime = 0;
+    const int MAX_CONSECUTIVE_ERRORS = 100; // Define error threshold locally if needed
+    int consecutiveErrorCounter = 0; // Local error counter if needed
+
+    while (1) {
+        controller->runCycle();
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+    }
+}
+
 
 extern "C" void app_main(void)
 {
     esp_log_level_set("*", ESP_LOG_INFO);
-    // Create and start the PID control task
+    ESP_LOGI(TAG, "Starting Balancing Robot Initialization");
+
+    // Initialize Config
     RuntimeConfig config;
-    config.init("/spiffs/config.json");
+    if (config.init("/spiffs/config.json") != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize RuntimeConfig. Halting."); return;
+    }
+    ESP_LOGI(TAG, "RuntimeConfig Initialized.");
+
+    // Initialize Components
     ComponentHandler handler(config);
-    handler.init();
+    if (handler.init() != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize ComponentHandler. Halting."); return;
+    }
+    ESP_LOGI(TAG, "ComponentHandler Initialized.");
 
-    ControlContext context = {
-        .mpu6050Manager = handler.getMPU6050Manager(),
-        .motorLeft = handler.getMotorLeft(),
-        .motorRight = handler.getMotorRight(),
-        .encoderLeft = handler.getEncoderLeft(),
-        .encoderRight = handler.getEncoderRight(),
-        .anglePidController = handler.getAnglePIDController(),
-        .speedPidController = handler.getSpeedPIDController(),
-        .webServer = handler.getWebServer(),
-        .pitch = 0.0f,
-        .angleSetPoint = 0.0f,
-        .angleIntegral = 0.0f,
-        .angleLastError = 0.0f,
-        .lastSpeedSetPoint = 0.0f,
-        .speedSetPoint = 0.0f,
-        .speedLeftIntegral = 0.0f,
-        .speedLeftLastError = 0.0f,
-        .currentSpeedLeft = 0.0f,
-        .dutyLeft = 0.0f,
-        .speedRightIntegral = 0.0f,
-        .speedRightLastError = 0.0f,
-        .currentSpeedRight = 0.0f,
-        .dutyRight = 0.0f,
-        .lastTimeMPU6050 = esp_timer_get_time(),
-        .lastTimeLeftMotor = esp_timer_get_time(),
-        .lastTimeRightMotor = esp_timer_get_time(),
-        .logCounter = 0,
-    };   
-
-    const esp_timer_create_args_t timer_args = {
-        .callback = &control_loop_callback,
-        .arg = &context,
-        .dispatch_method = ESP_TIMER_TASK,
-        .name = "control_loop"
-    };
-    
+    // Get Loop Interval
     int intervalMs = config.getMainLoopIntervalMs();
+    if (intervalMs <= 0) {
+        ESP_LOGW(TAG, "Invalid main_loop_interval_ms (%d). Using 5ms.", intervalMs);
+        intervalMs = 5;
+    }
 
-    esp_timer_handle_t control_loop_timer;
-    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &control_loop_timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(control_loop_timer, intervalMs * 1000));
+    ESP_LOGI(TAG, "Creating Telemetry Queue (Length: %d)", TELEMETRY_QUEUE_LENGTH);
+    telemetryQueue = xQueueCreate(TELEMETRY_QUEUE_LENGTH, sizeof(TelemetryDataPoint));
+    if (!telemetryQueue) {
+        ESP_LOGE(TAG, "Failed to create Telemetry Queue! Halting."); return;
+    }
+    ESP_LOGI(TAG, "Telemetry Queue created successfully.");
 
+    static BalancingController controllerInstance(
+        handler.getMPU6050Manager(),
+        handler.getMotorLeft(),
+        handler.getMotorRight(),
+        handler.getEncoderLeft(),
+        handler.getEncoderRight(),
+        handler.getAnglePIDController(),
+        handler.getSpeedPIDControllerLeft(),
+        handler.getSpeedPIDControllerRight(),
+        telemetryQueue, 
+        intervalMs
+    );
+    ESP_LOGI(TAG, "BalancingController instance created.");
+
+    const uint32_t controlTaskStackSize = 4096;
+    const UBaseType_t controlTaskPriority = configMAX_PRIORITIES - 1;
+    const BaseType_t controlTaskCoreID = 1;
+
+    struct ControlTaskArgs { 
+        BalancingController* controller;
+        int loopIntervalMs;
+    };
+    static ControlTaskArgs controlArgs = { 
+        .controller = &controllerInstance,
+        .loopIntervalMs = intervalMs
+    };
+    // -----------------------------------------
+
+    ESP_LOGI(TAG, "Creating Control Task (Stack: %u words, Priority: %u, Core: %d)",
+             (unsigned int)controlTaskStackSize, (unsigned int)controlTaskPriority, (int)controlTaskCoreID);
+    BaseType_t controlTaskCreated = xTaskCreatePinnedToCore(
+        control_task, CONTROL_TASK_TAG, controlTaskStackSize,
+        &controlArgs, // Pass address of the args struct
+        controlTaskPriority, NULL, controlTaskCoreID
+    );
+    if (controlTaskCreated != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create Control Task! Halting."); return;
+    }
+    ESP_LOGI(TAG, "Control Task created successfully.");
+
+
+    const uint32_t telemetryTaskStackSize = 2048;
+    const UBaseType_t telemetryTaskPriority = tskIDLE_PRIORITY + 2;
+    const BaseType_t telemetryTaskCoreID = tskNO_AFFINITY;
+    static TelemetryTaskArgs telemetryArgs = {
+        .queue = telemetryQueue,
+        .webServer = handler.getWebServer()
+    };
+    ESP_LOGI(TAG, "Creating Telemetry Handler Task (Stack: %u words, Priority: %u, Core: %s)",
+             (unsigned int)telemetryTaskStackSize, (unsigned int)telemetryTaskPriority,
+             (telemetryTaskCoreID == tskNO_AFFINITY) ? "Any" : "Pinned");
+    BaseType_t telemetryTaskCreated = xTaskCreatePinnedToCore(
+        telemetry_handler_task, TELEMETRY_TAG, telemetryTaskStackSize,
+        &telemetryArgs, telemetryTaskPriority, NULL, telemetryTaskCoreID
+    );
+    if ( telemetryTaskCreated != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create Telemetry Handler Task! Telemetry may not work.");
+    } else {
+        ESP_LOGI(TAG, "Telemetry Handler Task created successfully.");
+    }
+
+    ESP_LOGI(TAG, "Initialization complete. Main task entering idle state.");
     while (true) {
-        vTaskDelay(pdMS_TO_TICKS(1000)); // Delay for 1000 ms
+        vTaskDelay(pdMS_TO_TICKS(10000));
     }
 }
 
-static void control_loop_callback(void* arg) {
-    ControlContext* ctx = (ControlContext*)arg;
-    if (!ctx) {
-        ESP_LOGE(TAG, "Control context is NULL!");
-        return;
-    }
-        int64_t currentTime = esp_timer_get_time();
-        float dt = (currentTime - ctx->lastTimeMPU6050) / 1000000.0f;
-        ctx->lastTimeMPU6050 = currentTime;
-        ctx->pitch = ctx->mpu6050Manager.calculateFifoPitch(ctx->pitch); 
-        ctx->speedSetPoint = ctx->anglePidController.compute(ctx->angleSetPoint, ctx->angleIntegral, ctx->angleLastError, ctx->pitch, dt);      
-
-        // //left motor
-        currentTime = esp_timer_get_time();
-        dt = (currentTime - ctx->lastTimeLeftMotor) / 1000000.0f;
-        ctx->lastTimeLeftMotor = currentTime;
-
-        ctx->currentSpeedLeft = ctx->encoderLeft.getSpeed(dt); //speed in deg/s of the outer shaft
-        ctx->dutyLeft = ctx->speedPidController.compute(ctx->speedSetPoint, ctx->speedLeftIntegral, ctx->speedLeftLastError, ctx->currentSpeedLeft, dt);
-        ctx->motorLeft.setSpeed(ctx->dutyLeft);
-    
-        ctx->speedErrorBuffer[ctx->errorBufferIndex] = ctx->lastSpeedSetPoint - ctx->currentSpeedLeft;
-        ctx->lastSpeedSetPoint = ctx->speedSetPoint;
-        ctx->errorBufferIndex = (ctx->errorBufferIndex + 1) % ERROR_BUFFER_SIZE;
-        float rmseSpeedErrorLeft = calculateRMSE(ctx->speedErrorBuffer, ERROR_BUFFER_SIZE);
-
-        //right motor
-        currentTime = esp_timer_get_time();
-        dt = (currentTime - ctx->lastTimeRightMotor) / 1000000.0f;
-        ctx->lastTimeRightMotor = currentTime;
-
-        ctx->currentSpeedRight = ctx->encoderRight.getSpeed(dt);//speed in deg/s of the outer shaft 
-        ctx->dutyRight = ctx->speedPidController.compute(ctx->speedSetPoint, ctx->speedRightIntegral, ctx->speedRightLastError, ctx->currentSpeedRight, dt);
-        ctx->motorRight.setSpeed(ctx->dutyRight);
-
-        // Create telemetry data point and add it to the web server buffer
-        TelemetryDataPoint currentData = {
-            .pitch = ctx->pitch,
-            .desiredSpeed = ctx->speedSetPoint,
-            .currentSpeed = ctx->currentSpeedLeft, // Using left speed for telemetry
-            .rmse = rmseSpeedErrorLeft             // Using left RMSE for telemetry
-        };
-        ctx->webServer.addTelemetryData(currentData);
-
-        if (ctx->logCounter > 20) {
-         ESP_LOGI(TAG, "Pitch: %.2f, Speed Set Point: %.2f, Encoder Speed Left: %.2f, dt: %.8f, RMSE: %.3f",
-            ctx->pitch, ctx->speedSetPoint, ctx->currentSpeedLeft, dt, rmseSpeedErrorLeft);  
-            ctx->logCounter = 0;         
-        }
-        //ctx->logCounter++;
-}

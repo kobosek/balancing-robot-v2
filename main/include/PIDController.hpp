@@ -2,29 +2,32 @@
 
 #include "interfaces/IPIDController.hpp"
 #include "esp_log.h"
-
-enum PIDControllerType { ANGLE, SPEED };
+#include <string>
 
 class PIDController : public IPIDController {
 public:
-    PIDController(PIDControllerType p_type) : m_type(p_type), m_kp(0), m_ki(0), m_kd(0),
-      m_outputMin(0), m_outputMax(0), m_iTermMin(0), m_iTermMax(0) {}
+    PIDController(std::string config_key);
 
-    esp_err_t init(const IRuntimeConfig&) override;
-    esp_err_t onConfigUpdate(const IRuntimeConfig&) override;
+    esp_err_t init(const PIDConfig& config) override;
+    esp_err_t onConfigUpdate(const PIDConfig& config) override;
 
-    float compute(float, float&, float&, float, float) const override;
+    // Implement compute and reset
+    float compute(float setpoint, float currentValue, float dt) override;
+    void reset() override;
+
+    // Implement IConfigObserver methods using the key
+    esp_err_t init(const IRuntimeConfig& runtimeConfig) override;
+    esp_err_t onConfigUpdate(const IRuntimeConfig& runtimeConfig) override;
 private:
     static constexpr const char* TAG = "PIDController";
     
-    PIDControllerType m_type;
+    float m_integral = 0.0f;
+    float m_lastError = 0.0f;
 
-    esp_err_t setParams(const IRuntimeConfig&);
-    void setKp(float);
-    void setKi(float);
-    void setKd(float);
-    void setOutputLimits(float, float);
-    void setItermLimits(float, float);
+    // Key to identify which config section applies to this instance
+    std::string m_config_key;
+
+    esp_err_t setParams(const PIDConfig& config);
 
     float m_kp, m_ki, m_kd;
     float m_outputMin, m_outputMax;

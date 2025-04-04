@@ -174,18 +174,21 @@ esp_err_t WebServer::handle_data_get(httpd_req_t *req) {
     std::vector<TelemetryDataPoint> dataToSend;
 
     // Safely copy and clear the shared buffer
-    if (xSemaphoreTake(telemetryMutex, pdMS_TO_TICKS(50)) == pdTRUE) { // Wait a bit longer here
-        dataToSend = telemetryBuffer; // Copy constructor
-        telemetryBuffer.clear();
+    if (xSemaphoreTake(telemetryMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        if (!telemetryBuffer.empty()) { // Avoid copying if empty
+             dataToSend = telemetryBuffer; // Copy construct
+             telemetryBuffer.clear();      // Clear original buffer
+        }
         xSemaphoreGive(telemetryMutex);
     } else {
-        ESP_LOGE(TAG, "Failed to acquire telemetry mutex for reading");
-        httpd_resp_send_500(req); // Indicate server error
-        return ESP_FAIL;
+        ESP_LOGW(TAG, "Failed to acquire telemetry mutex for reading /data");
+        // Send empty array instead of error? Or maybe 503 Service Unavailable?
+        // Sending empty is safer for the client graph.
+         dataToSend.clear(); // Ensure it's empty if mutex failed
+         // httpd_resp_send_503(req); return ESP_FAIL; // Alternative: send error
     }
 
     // Get the current loop interval from runtime config
-    // Note: Assumes RuntimeConfig class has this getter implemented later
     int intervalMs = runtimeConfig.getMainLoopIntervalMs();
 
     // Create JSON response
@@ -207,18 +210,24 @@ esp_err_t WebServer::handle_data_get(httpd_req_t *req) {
     }
     cJSON_AddItemToObject(root, "data", dataArray);
 
+    // --- Updated Loop to create JSON array elements ---
     for (const auto& point : dataToSend) {
         cJSON *pointArray = cJSON_CreateArray();
         if (!pointArray) {
             ESP_LOGW(TAG, "Failed to create point cJSON array, skipping point");
             continue; // Skip this point if allocation fails
         }
+        // Add elements in the order expected by JavaScript:
+        // [pitch, desiredSpeed, currentSpeedL, currentSpeedR, rmseL]
         cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.pitch));
         cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.desiredSpeed));
-        cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.currentSpeed));
-        cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.rmse));
-        cJSON_AddItemToArray(dataArray, pointArray);
+        cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.currentSpeedLeft));  // Index 2
+        cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.currentSpeedRight)); // Index 3
+        cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.rmseLeft));       // Index 4
+        cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.rmseRight)); 
+        cJSON_AddItemToArray(dataArray, pointArray); // Add the point array to the main data array
     }
+    // --- End Updated Loop ---
 
     char *json_string = cJSON_PrintUnformatted(root); // Use unformatted for smaller size
     cJSON_Delete(root); // Clean up cJSON structure
