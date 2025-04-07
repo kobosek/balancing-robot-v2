@@ -1,39 +1,86 @@
 {
-    "wifi": {
-      "ssid": "StajniaAugiasza",
-      "password": "Lubieplacki4321"
-    },
-    "pid_angle": {
-      "kp": 15.0,
-      "ki": 0.0,
-      "kd": 0.0,
-      "output_min": -720.0,
-      "output_max": 720.0,
-      "iterm_min": -1000.0,
-      "iterm_max": 1000.0
-    },
-    "pid_speed_left": {
-      "kp": 0.01,
-      "ki": 0.05,
-      "kd": 0.00001,
-      "output_min": -1.0,
-      "output_max": 1.0,
-      "iterm_min": -100.0,
-      "iterm_max": 100.0
-    },
-    "pid_speed_right": {
-      "kp": 0.01,
-      "ki": 0.05,
-      "kd": 0.00001,
-      "output_min": -1.0,
-      "output_max": 1.0,
-      "iterm_min": -100.0,
-      "iterm_max": 100.0
-    },
-    "mpu6050": {
-      "calibration_samples": 1000
-    },
-    "main_loop": {
-      "interval_ms": 5
-    }
+  "wifi": {
+    "ssid": "StajniaAugiasza",
+    "password": "Lubieplacki4321"
+  },
+  "mainLoop": {
+    "interval_ms": 5
+  },
+  "imu": {
+    "i2c_port": 0,
+    "sda_pin": 7,
+    "scl_pin": 8,
+    "device_address": 104,
+    "i2c_freq_hz": 400000,
+    "int_pin": 9,
+    "interrupt_active_high": true,
+    "accel_range": 8,
+    "gyro_range": 8,
+    "dlpf_config": 3,
+    "sample_rate_divisor": 0,
+    "calibration_samples": 100,
+    "comp_filter_alpha": 0.98,
+    "fifo_read_threshold": 10
+  },
+  "encoder": {
+    "left_pin_a": 11,
+    "left_pin_b": 10,
+    "right_pin_a": 12,
+    "right_pin_b": 13,
+    "pcnt_high_limit": 30000,
+    "pcnt_low_limit": -30000,
+    "pcnt_filter_ns": 1000,
+    "pulses_per_revolution_motor": 28.0,
+    "gear_ratio": 100.0,
+    "wheel_diameter_mm": 65.0,
+    "speed_filter_alpha": 0.1
+  },
+  "motor": {
+    "left_pin_in1": 6,
+    "left_pin_in2": 5,
+    "left_channel_1": 2,
+    "left_channel_2": 3,
+    "right_pin_in1": 3,
+    "right_pin_in2": 4,
+    "right_channel_1": 0,
+    "right_channel_2": 1,
+    "timer_num": 0,
+    "speed_mode": 0,
+    "pwm_frequency_hz": 25000,
+    "duty_resolution": 10,
+    "deadzone_duty": 500
+  },
+  "battery": {
+    "adc_pin": 2,
+    "voltage_divider_ratio": 2.0,
+    "voltage_max": 4.2,
+    "voltage_min": 3.3
+  },
+  "pid_angle": {
+    "kp": 15.0,
+    "ki": 0.0,
+    "kd": 0.0,
+    "output_min": -720.0,
+    "output_max": 720.0,
+    "iterm_min": -10.0,  
+    "iterm_max": 10.0
+  },
+  "pid_speed_left": {
+    "kp": 0.01,         
+    "ki": 0.05,
+    "kd": 0.0001,
+    "output_min": -1.0,
+    "output_max": 1.0,
+    "iterm_min": -10.0,  
+    "iterm_max": 10.0
+  },
+  "pid_speed_right": {
+    "kp": 0.01,       
+    "ki": 0.05,
+    "kd": 0.0001,
+    "output_min": -1.0,
+    "output_max": 1.0,
+    "iterm_min": -10.0, 
+    "iterm_max": 10.0
   }
+}

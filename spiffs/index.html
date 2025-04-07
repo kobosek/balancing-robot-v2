@@ -1,490 +1,415 @@
-      
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>ESP32 Balancing Robot Control Panel</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.10.1/nipplejs.min.js"></script>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            margin: 0;
-            padding: 20px;
-            background-color: #f4f4f4;
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; margin: 0; padding: 20px; background-color: #f8f9fa; color: #212529; overscroll-behavior: none; }
+        .container { max-width: 1600px; margin: auto; background: #ffffff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 15px rgba(0,0,0,0.08); }
+        h1 { font-size: 1.8rem; border-bottom: none; text-align: center; margin-bottom: 1rem; color: #343a40; }
+        h2 { font-size: 1.5rem; margin-top: 1.5rem; color: #343a40; padding-bottom: 5px; border-bottom: 1px solid #eee; }
+        h3 { font-size: 1.25rem; margin-top: 1rem; color: #495057; border-bottom: none;}
+        button { padding: 10px 18px; border: none; border-radius: 5px; cursor: pointer; font-size: 0.95rem; font-weight: 500; transition: background-color 0.2s ease, box-shadow 0.2s ease; box-shadow: 0 1px 3px rgba(0,0,0,0.1); color: white; user-select: none; -webkit-user-select: none; }
+        button:hover { opacity: 0.9; box-shadow: 0 2px 5px rgba(0,0,0,0.15); }
+        button:active { box-shadow: inset 0 1px 3px rgba(0,0,0,0.2); }
+        .config-section, .command-section, .status-section { margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid #dee2e6; }
+        .config-section:last-child, .command-section:last-child, .status-section:last-child { border-bottom: none; }
+        .config-section button, .command-section button { margin-right: 10px; margin-bottom: 10px; }
+        .command-section button.start { background-color: #28a745; }
+        .command-section button.start:hover { background-color: #218838; }
+        .command-section button.stop { background-color: #dc3545; }
+        .command-section button.stop:hover { background-color: #c82333; }
+        .command-section button.calibrate { background-color: #ffc107; color: #212529;}
+        .command-section button.calibrate:hover { background-color: #e0a800; }
+        .command-section .toggle-button { background-color: #6c757d; }
+        .command-section .toggle-button.enabled { background-color: #198754; }
+        .command-section .toggle-button:hover { opacity: 0.9; }
+        .config-section button { background-color: #0d6efd; }
+        .config-section button:hover { background-color: #0b5ed7; }
+        .form-container { margin-top: 15px; border: 1px solid #ced4da; padding: 20px; border-radius: 6px; background-color: #f8f9fa; }
+        .form-group { margin-bottom: 12px; display: flex; align-items: center; flex-wrap: wrap; }
+        label { display: inline-block; width: 90px; text-align: right; margin-right: 15px; font-size: 0.9rem; color: #495057; font-weight: 500; }
+        input[type="number"] { width: 110px; padding: 8px 10px; border: 1px solid #ced4da; border-radius: 4px; font-size: 0.9rem; box-sizing: border-box; transition: border-color 0.2s ease, box-shadow 0.2s ease; }
+        input[type="number"]:focus { border-color: #80bdff; outline: 0; box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25); }
+        .graph-container { margin-top: 30px; background: white; padding: 20px; border-radius: 8px; border: 1px solid #dee2e6; width: 100%; box-sizing: border-box; height: 60vh; position: relative; box-shadow: 0 1px 5px rgba(0,0,0,0.05); }
+        .graph-container canvas { display: block; border: none; width: 100%; height: 100%; margin: 0; }
+        .legend { position: absolute; top: 15px; right: 20px; background: rgba(255, 255, 255, 0.9); padding: 10px 15px; border-radius: 6px; border: 1px solid #e9ecef; box-shadow: 0 1px 3px rgba(0,0,0,0.1); font-size: 0.8rem; z-index: 10; }
+        .legend-item { margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+        .legend-color { width: 18px; height: 3px; display: inline-block; border-radius: 2px; }
+        .legend-value { font-weight: 600; min-width: 50px; text-align: right; color: #495057; font-family: 'Courier New', Courier, monospace; }
+        .status-section { padding: 15px; background-color: #e9f7fd; border-radius: 6px; border: 1px solid #bce8f1; }
+        .status-item { margin-bottom: 8px; font-size: 14px;}
+        .status-label { font-weight: 600; min-width: 100px; display: inline-block; color: #31708f; }
+        .status-value { font-weight: bold; padding-left: 5px;}
+        .config-save-btn { background-color: #0d6efd; margin-top: 15px; }
+
+        /* Command Section Layout - Simplified */
+         .command-section {
+            /* position: relative; */ /* Try removing relative positioning here */
+            padding-bottom: 180px; /* Space for joystick below */
+            text-align: center;
+         }
+         .command-section .button-group {
+             margin-bottom: 15px;
+         }
+        #joystickZone {
+            position: relative; /* NippleJS needs this on the zone */
+            width: 160px; height: 160px;
+            background-color: #e9ecef;
+            border: 2px solid #adb5bd;
+            border-radius: 50%;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.1);
+            user-select: none; -webkit-user-select: none; touch-action: none;
+            margin: 20px auto; /* Center the zone */
         }
-        .container {
-            max-width: 1800px;
-            margin: auto;
-            background: white;
-            padding: 20px;
-            border-radius: 5px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-        }
-        h1, h2, h3 {
-            color: #333;
-        }
-        button {
-            background-color: #4CAF50;
-            color: white;
-            padding: 10px 15px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-        }
-        button:hover {
-            background-color: #45a049;
-        }
-        .config-section button {
-            margin-right: 10px;
-            margin-bottom: 10px;
-        }
-        .form-container {
-             margin-top: 15px;
-             border: 1px dashed #ccc;
-             padding: 15px;
-             border-radius: 4px;
-             background-color: #f9f9f9;
-        }
-        .form-group {
-            margin-bottom: 10px;
-            display: flex;
-            align-items: center;
-        }
-        label {
-            display: inline-block;
-            margin-bottom: 0;
-            width: 80px;
-            text-align: right;
-            margin-right: 10px;
-            font-size: 14px;
-        }
-        input[type="number"] {
-            width: 100px;
-            padding: 6px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
-        }
-        .graph-container {
-            margin-top: 30px;
-            background: white;
-            padding: 15px; /* Reduced padding slightly */
-            border-radius: 5px;
-            border: 1px solid #ddd; /* Keep the container border */
-            width: 100%;
-            box-sizing: border-box;
-            /* Let height be determined by aspect ratio or content, or set explicitly */
-             height: 60vh; /* Use viewport height for responsiveness */
-            position: relative;
-        }
-        /* Target the canvas directly inside the container */
-        .graph-container canvas {
-            display: block; /* Remove extra space below canvas */
-            border: none; /* Ensure no canvas border */
-            width: 100%;
-            height: 100%;
-            margin: 0; /* Reset margin */
-        }
-        .legend {
-            position: absolute;
-            top: 10px;
-            right: 15px; /* Adjusted for container padding */
-            background: rgba(255, 255, 255, 0.85); /* Slightly less transparent */
-            padding: 8px 12px;
-            border-radius: 5px;
-            border: 1px solid #eee;
-        }
-        .legend-item {
-            margin-bottom: 5px;
-            font-size: 13px; /* Slightly smaller legend font */
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .legend-color {
-            width: 18px; /* Adjusted */
-            height: 3px;
-            display: inline-block;
-        }
-        .legend-value {
-            font-weight: bold;
-            min-width: 40px;
-            text-align: right;
-        }
+        .nipple .front { background-color: #0d6efd !important; opacity: 0.7 !important; }
+        .nipple .back { background-color: #ced4da !important; opacity: 0.6 !important; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>ESP32 Balancing Robot Control Panel</h1>
+        <h1>ESP32 Balancing Robot</h1>
+
+        <!-- Status Section -->
+        <div class="status-section">
+             <h2>Status</h2>
+            <div class="status-item"><span class="status-label">System State:</span> <span id="systemStateValue" class="status-value">LOADING...</span> (<span id="systemStateId">?</span>)</div>
+            <div class="status-item"><span class="status-label">Battery:</span> <span id="batteryVoltageValue" class="status-value">?.??</span> V (<span id="batteryPercentValue" class="status-value">??</span>%)</div>
+            <div class="status-item"><span class="status-label">Auto Recovery:</span> <span id="autoRecoveryStatus" class="status-value">UNKNOWN</span></div>
+            <div class="status-item"><span class="status-label">Fall Detect:</span> <span id="fallDetectStatus" class="status-value">UNKNOWN</span></div>
+            <div class="status-item"><span class="status-label">Control Conn:</span> <span id="wsStatus" class="status-value" style="font-weight: bold;">INIT</span></div>
+        </div>
+
+         <!-- Command Section -->
+        <div class="command-section">
+            <h2>Commands</h2>
+            <div class="button-group">
+                <button id="startBtn" class="start">Start Balancing</button>
+                <button id="stopBtn" class="stop">Stop / Idle</button>
+                <button id="calibrateBtn" class="calibrate">Calibrate IMU</button>
+                <button id="toggleRecoveryBtn" class="toggle-button">Enable Auto Recovery</button>
+                <button id="toggleFallDetectBtn" class="toggle-button">Enable Fall Detect</button>
+            </div>
+            <!-- Joystick Zone -->
+            <div id="joystickZone"></div>
+        </div>
 
         <!-- Configuration Section -->
         <div class="config-section">
-            <h2>Configuration</h2>
+             <h2>Configuration</h2>
             <button id="openConfigBtn">Show/Hide Config</button>
             <div id="configMenu" style="display: none;">
-                <button id="angleConfigBtn">Angle PID</button>
-                <button id="speedLeftConfigBtn">Speed PID Left</button>
-                <button id="speedRightConfigBtn">Speed PID Right</button>
-
-                <div id="angleConfigFormContainer" class="form-container" style="display: none;">
-                    <h3>Angle PID</h3> <!-- Shortened Title -->
-                    <!-- Angle form content will be added by JS -->
-                </div>
-                <div id="speedLeftConfigFormContainer" class="form-container" style="display: none;">
-                     <h3>Speed PID Left</h3>
-                     <!-- Speed Left form content will be added by JS -->
-                </div>
-                <div id="speedRightConfigFormContainer" class="form-container" style="display: none;">
-                     <h3>Speed PID Right</h3>
-                     <!-- Speed Right form content will be added by JS -->
-                </div>
+                 <button id="angleConfigBtn">Angle PID</button>
+                 <button id="speedLeftConfigBtn">Speed PID Left</button>
+                 <button id="speedRightConfigBtn">Speed PID Right</button>
+                 <button id="generalConfigBtn">General</button>
+                 <div id="angleConfigFormContainer" class="form-container" style="display: none;"></div>
+                 <div id="speedLeftConfigFormContainer" class="form-container" style="display: none;"></div>
+                 <div id="speedRightConfigFormContainer" class="form-container" style="display: none;"></div>
+                 <div id="generalConfigFormContainer" class="form-container" style="display: none;"></div>
             </div>
         </div>
 
         <!-- Graph Section -->
-        <h2>Telemetry Graph</h2>
+        <h2>Telemetry</h2>
         <div class="graph-container">
             <div id="legend" class="legend">
-                 <!-- Legend items updated by JS -->
-                 <div class="legend-item">
-                    <span class="legend-color" style="background: #9C27B0;"></span> <!-- Purple - Angle -->
-                    Angle: <span class="legend-value" id="angleValueLegend">0</span>
-                </div>
-                 <div class="legend-item">
-                    <span class="legend-color" style="background: #2196F3;"></span>
-                    Desired Speed: <span class="legend-value" id="desiredSpeedValueLegend">0</span>
-                </div>
-                <div class="legend-item">
-                    <span class="legend-color" style="background: #f44336;"></span>
-                    Speed (L): <span class="legend-value" id="currentSpeedValueLLegend">0</span>
-                </div>
-                 <div class="legend-item">
-                    <span class="legend-color" style="background: #4CAF50;"></span>
-                    Speed (R): <span class="legend-value" id="currentSpeedValueRLegend">0</span>
-                </div>
-                <div class="legend-item">
-                    <span class="legend-color" style="background: #ffeb3b;"></span>
-                    RMSE (L): <span class="legend-value" id="rmseValueLLegend">0</span>
-                </div>
-                <div class="legend-item">
-                    <span class="legend-color" style="background: #FF9800;"></span>
-                    RMSE (R): <span class="legend-value" id="rmseValueRLegend">0</span>
-                </div>
+                <!-- Indices match telemetryData object keys order -->
+                <div class="legend-item"><span class="legend-color" style="background-color: #6f42c1;"></span> Pitch (deg): <span class="legend-value" id="telemetryValue0">0.00</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #0d6efd;"></span> Bal Spd (dps): <span class="legend-value" id="telemetryValue1">0.0</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #dc3545;"></span> Speed L (dps): <span class="legend-value" id="telemetryValue2">0.0</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #198754;"></span> Speed R (dps): <span class="legend-value" id="telemetryValue3">0.0</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #ffc107;"></span> Effort L (-1:1): <span class="legend-value" id="telemetryValue4">0.00</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #fd7e14;"></span> Effort R (-1:1): <span class="legend-value" id="telemetryValue5">0.00</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #20c997;"></span> Targ AngVel (dps): <span class="legend-value" id="telemetryValue6">0.0</span></div>
             </div>
-            <canvas id="telemetryGraph"></canvas> <!-- Changed ID for clarity -->
+            <canvas id="telemetryGraph"></canvas>
         </div>
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            // --- Get DOM Elements ---
-            const openConfigBtn = document.getElementById('openConfigBtn');
-            const configMenu = document.getElementById('configMenu');
-            const graphCanvas = document.getElementById('telemetryGraph'); // Updated ID
-            const graphCtx = graphCanvas.getContext('2d');
-            const graphContainer = document.querySelector('.graph-container');
+        (function() {
+            "use strict";
 
-            // Config Elements
-            const angleConfigBtn = document.getElementById('angleConfigBtn');
-            const speedLeftConfigBtn = document.getElementById('speedLeftConfigBtn');
-            const speedRightConfigBtn = document.getElementById('speedRightConfigBtn');
-            const angleFormContainer = document.getElementById('angleConfigFormContainer');
-            const speedLeftFormContainer = document.getElementById('speedLeftConfigFormContainer');
-            const speedRightFormContainer = document.getElementById('speedRightConfigFormContainer');
+            // --- Constants ---
+            const MAX_DATA_POINTS = 400;
+            const DATA_FETCH_INTERVAL_MS = 150;
+            const STATE_FETCH_INTERVAL_MS = 1000;
+            const JOYSTICK_SEND_INTERVAL_MS = 75;
+            const WS_RECONNECT_DELAY_MS = 3000;
 
-            // --- Data Storage ---
-            const maxDataPoints = 400; // Keep ~2 seconds of data at 5ms interval
+            // --- DOM Elements ---
+            let openConfigBtn, configMenu, graphCanvas, graphCtx, graphContainer;
+            let angleConfigBtn, speedLeftConfigBtn, speedRightConfigBtn, generalConfigBtn;
+            let angleFormContainer, speedLeftFormContainer, speedRightFormContainer, generalFormContainer;
+            let systemStateValueEl, systemStateIdEl, batteryVoltageValueEl, batteryPercentValueEl;
+            let autoRecoveryStatusEl, fallDetectStatusEl;
+            let startBtn, stopBtn, calibrateBtn, toggleRecoveryBtn, toggleFallDetectBtn;
+            let joystickZone, wsStatusEl;
+            let legendValueElements = [];
+
+            // --- Data Storage & State ---
             const telemetryData = {
-                angle: Array(maxDataPoints).fill(0),
-                desired: Array(maxDataPoints).fill(0),
-                currentL: Array(maxDataPoints).fill(0),
-                currentR: Array(maxDataPoints).fill(0),
-                rmseL: Array(maxDataPoints).fill(0),
-                rmseR: Array(maxDataPoints).fill(0)
+                pitchDeg: Array(MAX_DATA_POINTS).fill(null),
+                balanceSpeedDPS: Array(MAX_DATA_POINTS).fill(null),
+                speedLDPS: Array(MAX_DATA_POINTS).fill(null),
+                speedRDPS: Array(MAX_DATA_POINTS).fill(null),
+                effortL: Array(MAX_DATA_POINTS).fill(null),
+                effortR: Array(MAX_DATA_POINTS).fill(null),
+                targetAngVelDPS: Array(MAX_DATA_POINTS).fill(null),
             };
+            const telemetryKeys = Object.keys(telemetryData);
 
-            // --- Create Config Forms ---
-            const angleForm = createConfigForm('pid_angle');
-            angleFormContainer.appendChild(angleForm);
-            const speedLeftForm = createConfigForm('pid_speed_left');
-            speedLeftFormContainer.appendChild(speedLeftForm);
-            const speedRightForm = createConfigForm('pid_speed_right');
-            speedRightFormContainer.appendChild(speedRightForm);
+            let currentSystemState = { id: -1, name: 'UNKNOWN', auto_recovery_enabled: false, fall_detection_enabled: false };
+            let currentBattery = { voltage: 0, percentage: 0 };
+            let configDataCache = null;
+            let dataFetchTimer = null;
+            let stateFetchTimer = null;
+            let telemetryJsonCache = null;
 
-            // --- Configuration Handling Functions ---
-             openConfigBtn.addEventListener('click', function () {
-                const isHidden = configMenu.style.display === 'none' || configMenu.style.display === '';
-                configMenu.style.display = isHidden ? 'block' : 'none';
-                if (!isHidden) { // If hiding menu, hide all forms
-                    angleFormContainer.style.display = 'none';
-                    speedLeftFormContainer.style.display = 'none';
-                    speedRightFormContainer.style.display = 'none';
-                }
-            });
+            // --- WebSocket & Joystick State ---
+            let ws = null;
+            let wsReconnectTimer = null;
+            let joystick = null;
+            let currentJoystickData = { x: 0, y: 0 };
+            let lastSentJoystickData = { x: -99, y: -99 };
+            let joystickSendTimer = null;
+            let isJoystickActive = false;
 
-            angleConfigBtn.addEventListener('click', function() {
-                toggleForms(angleFormContainer, [speedLeftFormContainer, speedRightFormContainer]);
-                loadConfig('pid_angle', angleForm);
-            });
+            // --- Initialization ---
+            document.addEventListener('DOMContentLoaded', initialize);
 
-            speedLeftConfigBtn.addEventListener('click', function() {
-                toggleForms(speedLeftFormContainer, [angleFormContainer, speedRightFormContainer]);
-                loadConfig('pid_speed_left', speedLeftForm);
-            });
-
-             speedRightConfigBtn.addEventListener('click', function() {
-                toggleForms(speedRightFormContainer, [angleFormContainer, speedLeftFormContainer]);
-                loadConfig('pid_speed_right', speedRightForm);
-            });
-
-            function createConfigForm(idPrefix) {
-                const formDiv = document.createElement('div');
-                const fields = [
-                    { label: 'Kp', id: `${idPrefix}_kp`, step: '0.01' }, { label: 'Ki', id: `${idPrefix}_ki`, step: '0.01' }, { label: 'Kd', id: `${idPrefix}_kd`, step: '0.0001' },
-                    { label: 'Out Min', id: `${idPrefix}_output_min`, step: '0.1' }, { label: 'Out Max', id: `${idPrefix}_output_max`, step: '0.1' },
-                    { label: 'ITerm Min', id: `${idPrefix}_iterm_min`, step: '0.1' }, { label: 'ITerm Max', id: `${idPrefix}_iterm_max`, step: '0.1' }
-                ];
-                fields.forEach(field => {
-                    const group = document.createElement('div'); group.className = 'form-group';
-                    const lbl = document.createElement('label'); lbl.htmlFor = field.id; lbl.textContent = field.label + ':';
-                    const inp = document.createElement('input'); inp.type = 'number'; inp.id = field.id; inp.name = field.id; if (field.step) inp.step = field.step;
-                    group.appendChild(lbl); group.appendChild(inp); formDiv.appendChild(group);
-                });
-                const btn = document.createElement('button'); btn.textContent = 'Save'; btn.style.marginTop = '10px';
-                btn.addEventListener('click', () => saveConfig(idPrefix, formDiv));
-                formDiv.appendChild(btn);
-                return formDiv;
+            function initialize() {
+                console.log("DOM Loaded, Initializing...");
+                assignElements();
+                setupEventListeners();
+                createForms();
+                setupWebSocket();
+                setupJoystick();
+                resizeGraphCanvas();
+                startDataFetching();
+                loadConfigSection('pid_angle', angleFormContainer.querySelector('div'));
+                console.log("Initialization complete.");
             }
 
-            function toggleForms(showContainer, hideContainers) {
-                showContainer.style.display = 'block';
-                hideContainers.forEach(container => container.style.display = 'none');
+            function assignElements() {
+                try {
+                    openConfigBtn = document.getElementById('openConfigBtn'); configMenu = document.getElementById('configMenu'); graphCanvas = document.getElementById('telemetryGraph'); graphContainer = document.querySelector('.graph-container'); angleConfigBtn = document.getElementById('angleConfigBtn'); speedLeftConfigBtn = document.getElementById('speedLeftConfigBtn'); speedRightConfigBtn = document.getElementById('speedRightConfigBtn'); generalConfigBtn = document.getElementById('generalConfigBtn'); angleFormContainer = document.getElementById('angleConfigFormContainer'); speedLeftFormContainer = document.getElementById('speedLeftConfigFormContainer'); speedRightFormContainer = document.getElementById('speedRightConfigFormContainer'); generalFormContainer = document.getElementById('generalConfigFormContainer'); systemStateValueEl = document.getElementById('systemStateValue'); systemStateIdEl = document.getElementById('systemStateId'); batteryVoltageValueEl = document.getElementById('batteryVoltageValue'); batteryPercentValueEl = document.getElementById('batteryPercentValue'); autoRecoveryStatusEl = document.getElementById('autoRecoveryStatus'); fallDetectStatusEl = document.getElementById('fallDetectStatus'); startBtn = document.getElementById('startBtn'); stopBtn = document.getElementById('stopBtn'); calibrateBtn = document.getElementById('calibrateBtn'); toggleRecoveryBtn = document.getElementById('toggleRecoveryBtn'); toggleFallDetectBtn = document.getElementById('toggleFallDetectBtn'); joystickZone = document.getElementById('joystickZone'); wsStatusEl = document.getElementById('wsStatus');
+                    if (graphCanvas) { graphCtx = graphCanvas.getContext('2d'); } else { throw new Error("Canvas element missing"); }
+                    legendValueElements = [];
+                    for (let i = 0; i <= 6; i++) { const el = document.getElementById(`telemetryValue${i}`); if (!el) throw new Error(`Legend ${i}`); legendValueElements.push(el); }
+                    if (!joystickZone) throw new Error("No joystick zone"); if (!wsStatusEl) throw new Error("No WS Status");
+                } catch (error) { console.error("Assign Elements Error:", error); alert("Page Error: Element missing - " + error.message); }
             }
 
-            function loadConfig(type, formElement) {
-                console.log(`Loading config for: ${type}`);
-                fetch('/api/config').then(r => r.ok ? r.json() : Promise.reject(`Fetch failed: ${r.status}`))
-                    .then(data => {
-                        if (!data || !data[type]) { throw new Error(`Config type "${type}" not found`); }
-                        const config = data[type];
-                        Object.keys(config).forEach(key => {
-                            const inputId = `${type}_${key}`; const input = formElement.querySelector(`#${inputId}`);
-                            if (input) { input.value = config[key]; } else { console.warn(`Input not found for ${inputId}`); }
-                        });
-                        console.log(`Config loaded for ${type}`);
-                    }).catch(error => console.error(`Error loading ${type} config:`, error));
+             function setupEventListeners() {
+                 window.addEventListener('resize', resizeGraphCanvas); openConfigBtn.addEventListener('click', toggleConfigMenu); angleConfigBtn.addEventListener('click', () => showConfigForm('pid_angle', angleFormContainer)); speedLeftConfigBtn.addEventListener('click', () => showConfigForm('pid_speed_left', speedLeftFormContainer)); speedRightConfigBtn.addEventListener('click', () => showConfigForm('pid_speed_right', speedRightFormContainer)); generalConfigBtn.addEventListener('click', () => showGeneralConfigForm(generalFormContainer)); startBtn.addEventListener('click', () => sendHttpCommand('start')); stopBtn.addEventListener('click', () => sendHttpCommand('stop')); calibrateBtn.addEventListener('click', () => sendHttpCommand('calibrate')); toggleRecoveryBtn.addEventListener('click', toggleAutoRecovery); toggleFallDetectBtn.addEventListener('click', toggleFallDetection);
             }
 
-            function saveConfig(type, formElement) {
-                console.log(`Attempting to save config for: ${type}`);
-                const newConfigSection = {}; let isValid = true;
-                const inputs = formElement.querySelectorAll('input[type="number"]');
-                inputs.forEach(input => {
-                    const key = input.id.replace(`${type}_`, ''); const value = parseFloat(input.value);
-                    if (isNaN(value)) { alert(`Invalid number for ${input.id}`); isValid = false; return; }
-                    newConfigSection[key] = value;
-                });
-                if (!isValid) return; console.log(`New config for ${type}:`, newConfigSection);
-                fetch('/api/config').then(r => r.ok ? r.json() : Promise.reject(`Fetch failed: ${r.status}`))
-                    .then(currentConfig => { currentConfig[type] = newConfigSection; return currentConfig; })
-                    .then(configToSend => fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(configToSend) }))
-                    .then(response => { if (!response.ok) { return response.text().then(text => Promise.reject(`Save failed: ${response.status} ${text}`)); } return response.json(); })
-                    .then(data => { console.log('Save response:', data); alert(`${type.replace('pid_','').replace('_',' ')} config saved!`); })
-                    .catch(error => { console.error(`Error saving ${type} config:`, error); alert(`Error saving: ${error}`); });
+            // --- WebSocket Functions ---
+            function setupWebSocket() { const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'; const wsUrl = `${wsProtocol}//${window.location.host}/ws`; console.log(`Connecting WebSocket: ${wsUrl}`); updateWsStatus('CONNECTING', '#ffc107'); if (wsReconnectTimer) clearTimeout(wsReconnectTimer); ws = new WebSocket(wsUrl); ws.onopen = () => { console.log("WebSocket Connected"); updateWsStatus('CONNECTED', '#198754'); }; ws.onmessage = (event) => { /* Process incoming messages */ }; ws.onerror = (error) => { console.error("WebSocket Error:", error); }; ws.onclose = (event) => { console.log("WebSocket Closed."); updateWsStatus('DISCONNECTED', '#dc3545'); ws = null; stopJoystickSendInterval(); if (wsReconnectTimer) clearTimeout(wsReconnectTimer); wsReconnectTimer = setTimeout(setupWebSocket, WS_RECONNECT_DELAY_MS); }; }
+            function updateWsStatus(text, color) { if (wsStatusEl) { wsStatusEl.textContent = text; wsStatusEl.style.color = color; } }
+            function sendWebSocketMessage(payload) { if (ws && ws.readyState === WebSocket.OPEN) { try { ws.send(JSON.stringify(payload)); return true; } catch (e) { console.error("WS Send Error:", e); return false; } } return false; }
+
+            // --- Joystick Functions ---
+            function setupJoystick() {
+    if (!nipplejs || typeof nipplejs.create !== 'function') {
+        console.error("NippleJS library not loaded!");
+        return;
+    }
+    if (!joystickZone) {
+        console.error("joystickZone element not found!");
+        return;
+    }
+
+    // --- DEFER INITIALIZATION ---
+    requestAnimationFrame(() => { // Or setTimeout(..., 0)
+        console.log("Creating joystick...");
+        const options = {
+            zone: joystickZone,
+            mode: 'static',
+            position: { left: '50%', top: '50%' }, // Center handle within zone
+            color: '#6c757d',
+            size: 150,
+            threshold: 0.1,
+            restJoystick: true,
+            restOpacity: 0.5,
+            lockX: false,
+            lockY: false,
+            shape: 'circle'
+        };
+        try {
+            // Check if joystick already exists to prevent duplicates if called multiple times
+            if (joystick) {
+                joystick.destroy();
+                joystick = null;
             }
-            // --- End Configuration Handling ---
+            joystick = nipplejs.create(options);
+            joystick.on('start', handleJoystickStart);
+            joystick.on('move', handleJoystickMove);
+            joystick.on('end', handleJoystickEnd);
+            console.log("Joystick initialized.");
+        } catch (error) {
+            console.error("Failed to create joystick:", error);
+        }
+    }); // End deferral wrapper
+}
+            function handleJoystickStart(evt, nipple) { isJoystickActive = true; startJoystickSendInterval(); /* console.log("Joystick Start"); */ }
+            function handleJoystickMove(evt, nipple) { if (!nipple || typeof nipple.force !== 'number' || typeof nipple.angle?.radian !== 'number' || !nipple.options?.size) { return; } const force = Math.min(nipple.force, nipple.options.size / 2); const normalizedForce = nipple.options.size > 1 ? (force / (nipple.options.size / 2)) : 0; const angleRad = nipple.angle.radian; currentJoystickData.y = normalizedForce * Math.sin(angleRad); currentJoystickData.x = normalizedForce * Math.cos(angleRad); /* console.log(`Joystick Move -> X:${currentJoystickData.x.toFixed(2)}, Y:${currentJoystickData.y.toFixed(2)}`); */ }
+            function handleJoystickEnd(evt, nipple) { isJoystickActive = false; currentJoystickData.x = 0; currentJoystickData.y = 0; sendJoystickDataIfNeeded(); stopJoystickSendInterval(); /* console.log("Joystick End -> Sent {0, 0}"); */ }
+            function startJoystickSendInterval() { if (!joystickSendTimer) { sendJoystickDataIfNeeded(); joystickSendTimer = setInterval(sendJoystickDataIfNeeded, JOYSTICK_SEND_INTERVAL_MS); } }
+            function stopJoystickSendInterval() { if (joystickSendTimer) { clearInterval(joystickSendTimer); joystickSendTimer = null; } }
+            function sendJoystickDataIfNeeded() { if (Math.abs(currentJoystickData.x - lastSentJoystickData.x) > 0.01 || Math.abs(currentJoystickData.y - lastSentJoystickData.y) > 0.01 || (!isJoystickActive && (lastSentJoystickData.x !== 0 || lastSentJoystickData.y !== 0))) { const payload = { type: "joystick", x: currentJoystickData.x, y: currentJoystickData.y }; if (sendWebSocketMessage(payload)) { lastSentJoystickData.x = currentJoystickData.x; lastSentJoystickData.y = currentJoystickData.y; } } }
 
+            // --- Configuration UI Functions --- (No changes)
+             function createForms() { angleFormContainer.innerHTML = '<h3>Angle PID</h3>'; speedLeftFormContainer.innerHTML = '<h3>Speed PID Left</h3>'; speedRightFormContainer.innerHTML = '<h3>Speed PID Right</h3>'; generalFormContainer.innerHTML = '<h3>General Settings</h3>'; angleFormContainer.appendChild(createConfigFormDiv('pid_angle', 'Angle PID')); speedLeftFormContainer.appendChild(createConfigFormDiv('pid_speed_left', 'Speed L PID')); speedRightFormContainer.appendChild(createConfigFormDiv('pid_speed_right', 'Speed R PID')); createGeneralConfigForm(generalFormContainer); }
+             function toggleConfigMenu() { const isHidden = configMenu.style.display === 'none' || configMenu.style.display === ''; configMenu.style.display = isHidden ? 'block' : 'none'; if (isHidden && !configDataCache) { loadFullConfig(); } if (!isHidden) { hideAllConfigForms(); } }
+             function hideAllConfigForms() { [angleFormContainer, speedLeftFormContainer, speedRightFormContainer, generalFormContainer].forEach(el => el.style.display = 'none'); }
+             function showConfigForm(sectionKey, container) { hideAllConfigForms(); container.style.display = 'block'; loadConfigSection(sectionKey, container.querySelector('div')); }
+             function showGeneralConfigForm(container) { hideAllConfigForms(); container.style.display = 'block'; loadGeneralConfig(container.querySelector('div')); }
+             function addFormField(parent, fieldConfig) { const group = document.createElement('div'); group.className = 'form-group'; const lbl = document.createElement('label'); lbl.htmlFor = fieldConfig.id; lbl.textContent = fieldConfig.label + ':'; const inp = document.createElement('input'); inp.type = 'number'; inp.id = fieldConfig.id; inp.name = fieldConfig.id; if (fieldConfig.step) inp.step = fieldConfig.step; group.appendChild(lbl); group.appendChild(inp); parent.appendChild(group); }
+             function createConfigFormDiv(idPrefix, saveButtonSuffix = 'PID') { const formDiv = document.createElement('div'); const fields = [ { label: 'Kp', id: `${idPrefix}_kp`, step: '0.1' }, { label: 'Ki', id: `${idPrefix}_ki`, step: '0.01' }, { label: 'Kd', id: `${idPrefix}_kd`, step: '0.001' }, { label: 'Out Min', id: `${idPrefix}_output_min`, step: '1' }, { label: 'Out Max', id: `${idPrefix}_output_max`, step: '1' }, { label: 'ITerm Min', id: `${idPrefix}_iterm_min`, step: '1' }, { label: 'ITerm Max', id: `${idPrefix}_iterm_max`, step: '1' } ]; fields.forEach(field => addFormField(formDiv, field)); const btn = document.createElement('button'); btn.textContent = `Save ${saveButtonSuffix}`; btn.className = 'config-save-btn'; btn.addEventListener('click', () => saveConfigSection(idPrefix, formDiv)); formDiv.appendChild(btn); return formDiv; }
+             function createGeneralConfigForm(container) { const formDiv = document.createElement('div'); const fields = [ { label: 'Loop (ms)', id: `mainLoop_interval_ms`, step: '1', section: 'mainLoop', key: 'interval_ms' }, { label: 'IMU Alpha', id: `imu_comp_filter_alpha`, step: '0.001', section: 'imu', key: 'comp_filter_alpha'}, { label: 'IMU Calib Samp', id: `imu_calibration_samples`, step: '100', section: 'imu', key: 'calibration_samples'}, { label: 'M Deadzone', id: `motor_deadzone_duty`, step: '1', section: 'motor', key: 'deadzone_duty'}, { label: 'Enc Gear Ratio', id: `encoder_gear_ratio`, step: '0.1', section: 'encoder', key: 'gear_ratio'}, { label: 'Enc Whl Diam mm', id: `encoder_wheel_diameter_mm`, step: '0.1', section: 'encoder', key: 'wheel_diameter_mm'}, { label: 'Batt Max V', id: `battery_voltage_max`, step: '0.01', section: 'battery', key: 'voltage_max'}, { label: 'Batt Min V', id: `battery_voltage_min`, step: '0.01', section: 'battery', key: 'voltage_min'} ]; fields.forEach(field => addFormField(formDiv, field)); const btn = document.createElement('button'); btn.textContent = 'Save General'; btn.className = 'config-save-btn'; btn.addEventListener('click', () => saveGeneralConfig(formDiv, fields)); formDiv.appendChild(btn); container.appendChild(formDiv); }
+             async function fetchConfig() { if (configDataCache) return configDataCache; try { const response = await fetch('/api/config', { cache: 'no-cache' }); if (!response.ok) throw new Error(`HTTP error ${response.status}`); configDataCache = await response.json(); return configDataCache; } catch (error) { console.error("Failed to fetch config:", error); return null; } }
+             function invalidateConfigCache() { configDataCache = null; }
+             async function postConfig(configData) { try { const response = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(configData) }); const result = await response.json(); if (!response.ok) { throw new Error(result.message || `HTTP error ${response.status}`); } invalidateConfigCache(); return result; } catch (error) { console.error("Failed to save config:", error); return null; } }
+             async function loadFullConfig() { if (!configDataCache) { await fetchConfig(); } return configDataCache; }
+             async function loadConfigSection(sectionKey, formElement) { const fullConfig = await loadFullConfig(); if (!fullConfig || !fullConfig[sectionKey] || !formElement) return; const config = fullConfig[sectionKey]; Object.keys(config).forEach(key => { const input = formElement.querySelector(`#${sectionKey}_${key}`); if (input) input.value = config[key]; }); }
+             async function loadGeneralConfig(formElement) { const fullConfig = await loadFullConfig(); if (!fullConfig || !formElement) return; const inputs = formElement.querySelectorAll('input[type="number"]'); inputs.forEach(input => { const idParts = input.id.split('_'); if (idParts.length < 2) return; const sectionKey = idParts[0]; const valueKey = idParts.slice(1).join('_'); if (fullConfig[sectionKey]?.[valueKey] !== undefined) { input.value = fullConfig[sectionKey][valueKey]; } }); }
+             async function saveConfigSection(sectionKey, formElement) { const newSectionData = {}; let isValid = true; formElement.querySelectorAll('input[type="number"]').forEach(input => { if (!isValid) return; const key = input.id.replace(`${sectionKey}_`, ''); const value = parseFloat(input.value); if (isNaN(value)) { alert(`Invalid number for ${input.id}`); isValid = false; } else { newSectionData[key] = value; } }); if (!isValid) return; const currentConfig = await loadFullConfig(); if (!currentConfig) return; const configToSend = { ...currentConfig, [sectionKey]: newSectionData }; const saveResult = await postConfig(configToSend); if (saveResult) { alert(`${sectionKey.replace(/_/g,' ')} config saved!`); } }
+             async function saveGeneralConfig(formElement, fieldMapping) { let isValid = true; const currentConfig = await loadFullConfig(); if (!currentConfig) return; const configToSend = JSON.parse(JSON.stringify(currentConfig)); fieldMapping.forEach(field => { if (!isValid) return; const input = formElement.querySelector(`#${field.id}`); if (input) { const value = parseFloat(input.value); if (isNaN(value)) { alert(`Invalid number for ${field.label}`); isValid = false; } else if (configToSend[field.section]) { configToSend[field.section][field.key] = value; } } }); if (!isValid) return; const saveResult = await postConfig(configToSend); if (saveResult) { alert(`General config saved!`); } }
 
-            // --- Graphing Functions ---
+            // --- HTTP Command Handling --- (No changes)
+             async function sendHttpCommand(commandName) { console.log(`Sending HTTP command: ${commandName}`); try { const response = await fetch('/api/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: commandName }) }); const result = await response.json(); if (!response.ok) { throw new Error(result.message || `HTTP error ${response.status}`); } console.log('HTTP Command response:', result); if (['start', 'stop', 'calibrate'].includes(commandName)) { alert(`Command '${commandName}' sent.`); } setTimeout(fetchSystemState, 300); return true; } catch (error) { console.error(`Error sending HTTP command '${commandName}':`, error); alert(`Error sending command: ${error.message || 'Unknown error'}`); return false; } }
+             function toggleAutoRecovery() { const cmd = currentSystemState.auto_recovery_enabled ? 'disable_recovery' : 'enable_recovery'; toggleRecoveryBtn.disabled = true; sendHttpCommand(cmd).finally(() => { setTimeout(() => { toggleRecoveryBtn.disabled = false; }, 500); }); }
+             function toggleFallDetection() { const cmd = currentSystemState.fall_detection_enabled ? 'disable_fall_detect' : 'enable_fall_detect'; toggleFallDetectBtn.disabled = true; sendHttpCommand(cmd).finally(() => { setTimeout(() => { toggleFallDetectBtn.disabled = false; }, 500); }); }
+
+            // --- Status Update Functions --- (No changes)
+             function updateRecoveryButtonUI() { if (!toggleRecoveryBtn || !autoRecoveryStatusEl) return; if (currentSystemState.auto_recovery_enabled) { toggleRecoveryBtn.textContent = 'Disable Auto Recovery'; toggleRecoveryBtn.classList.add('enabled'); autoRecoveryStatusEl.textContent = 'ENABLED'; } else { toggleRecoveryBtn.textContent = 'Enable Auto Recovery'; toggleRecoveryBtn.classList.remove('enabled'); autoRecoveryStatusEl.textContent = 'DISABLED'; } toggleRecoveryBtn.disabled = false; }
+             function updateFallDetectButtonUI() { if (!toggleFallDetectBtn || !fallDetectStatusEl) return; if (currentSystemState.fall_detection_enabled) { toggleFallDetectBtn.textContent = 'Disable Fall Detect'; toggleFallDetectBtn.classList.add('enabled'); fallDetectStatusEl.textContent = 'ENABLED'; } else { toggleFallDetectBtn.textContent = 'Enable Fall Detect'; toggleFallDetectBtn.classList.remove('enabled'); fallDetectStatusEl.textContent = 'DISABLED'; } toggleFallDetectBtn.disabled = false; }
+             async function fetchSystemState() { try { const response = await fetch('/api/state', { cache: 'no-cache' }); if (!response.ok) throw new Error(`HTTP error ${response.status}`); const data = await response.json(); if (data && typeof data === 'object') { if(currentSystemState.name !== data.state_name || currentSystemState.id !== data.state_id) { /*console.log(`System State: ${currentSystemState.name} -> ${data.state_name}`);*/ if(systemStateValueEl) systemStateValueEl.textContent = data.state_name; if(systemStateIdEl) systemStateIdEl.textContent = data.state_id; } currentSystemState = { ...currentSystemState, ...data }; updateRecoveryButtonUI(); updateFallDetectButtonUI(); } else { console.warn("Invalid state data:", data); } } catch (error) { console.error('Error fetching state:', error); if(systemStateValueEl) systemStateValueEl.textContent = 'ERROR'; if(systemStateIdEl) systemStateIdEl.textContent = 'X'; if (autoRecoveryStatusEl) autoRecoveryStatusEl.textContent = 'ERROR'; if (fallDetectStatusEl) fallDetectStatusEl.textContent = 'ERROR'; } }
+
+            // --- Graphing ---
             function resizeGraphCanvas() {
-                // Resize canvas to fit container, considering device pixel ratio for sharpness
-                const rect = graphContainer.getBoundingClientRect();
-                const dpr = window.devicePixelRatio || 1;
-                graphCanvas.width = rect.width * dpr;
-                graphCanvas.height = rect.height * dpr;
-                graphCtx.scale(dpr, dpr); // Scale context to account for DPI
-                graphCanvas.style.width = `${rect.width}px`;
-                graphCanvas.style.height = `${rect.height}px`;
-                console.log(`Resized canvas to: ${graphCanvas.width}x${graphCanvas.height} (logical: ${rect.width}x${rect.height})`);
-                drawGraph(); // Redraw after resize
-            }
-
+                 if (!graphContainer || !graphCanvas || !graphCtx) return;
+                 try { const rect = graphContainer.getBoundingClientRect(); const dpr = window.devicePixelRatio || 1; graphCanvas.width = rect.width * dpr; graphCanvas.height = rect.height * dpr; graphCtx.scale(dpr, dpr); graphCanvas.style.width = `${rect.width}px`; graphCanvas.style.height = `${rect.height}px`; drawGraph(); }
+                 catch(e) { console.error("Resize Error:", e); }
+             }
             function drawGraph() {
-                // Use logical width/height for calculations after scaling context
-                const logicalWidth = graphCanvas.width / (window.devicePixelRatio || 1);
-                const logicalHeight = graphCanvas.height / (window.devicePixelRatio || 1);
+                 if (!graphCtx || !graphCanvas || graphCanvas.width === 0) { /* console.log("Skipping drawGraph - canvas not ready"); */ return; }
+                 try {
+                     const logicalWidth = graphCanvas.width / (window.devicePixelRatio || 1); const logicalHeight = graphCanvas.height / (window.devicePixelRatio || 1); const padding = { top: 20, right: 100, bottom: 30, left: 50 }; const graphWidth = logicalWidth - padding.left - padding.right; const graphHeight = logicalHeight - padding.top - padding.bottom; graphCtx.clearRect(0, 0, logicalWidth, logicalHeight); graphCtx.lineWidth = 0.5; graphCtx.font = '10px Arial'; const ySpeedRange = 800; const yAngleRange = 45; const yEffortRange = 1.0;
+                     /* Axes drawing */ const ySpeedSteps = 8; graphCtx.fillStyle = '#666'; graphCtx.strokeStyle = '#ccc'; for (let i = 0; i <= ySpeedSteps; i++) { const v = ySpeedRange - (i * (2 * ySpeedRange) / ySpeedSteps); const y = padding.top + graphHeight * (i / ySpeedSteps); graphCtx.beginPath(); graphCtx.moveTo(padding.left - 5, y); graphCtx.lineTo(padding.left + graphWidth, y); graphCtx.stroke(); graphCtx.textAlign = 'right'; graphCtx.fillText(v.toFixed(0), padding.left - 8, y + 3); } graphCtx.save(); graphCtx.translate(padding.left - 35, padding.top + graphHeight / 2); graphCtx.rotate(-Math.PI / 2); graphCtx.textAlign = 'center'; graphCtx.fillText('Speed (dps)', 0, 0); graphCtx.restore(); const yAngleSteps = 4; graphCtx.fillStyle = '#6f42c1'; for (let i = 0; i <= yAngleSteps; i++) { const v = yAngleRange - (i * (2 * yAngleRange) / yAngleSteps); const y = padding.top + (graphHeight / 2) * (i / yAngleSteps); graphCtx.beginPath(); graphCtx.moveTo(padding.left + graphWidth, y); graphCtx.lineTo(padding.left + graphWidth + 5, y); graphCtx.strokeStyle = '#ccc'; graphCtx.stroke(); graphCtx.textAlign = 'left'; graphCtx.fillText(v.toFixed(0) + '°', padding.left + graphWidth + 8, y + 3); } graphCtx.save(); graphCtx.translate(padding.left + graphWidth + 45, padding.top + graphHeight / 4); graphCtx.rotate(Math.PI / 2); graphCtx.textAlign = 'center'; graphCtx.fillText('Angle (deg)', 0, 0); graphCtx.restore(); const yEffortSteps = 4; graphCtx.fillStyle = '#fd7e14'; for (let i = 0; i <= yEffortSteps; i++) { const v = yEffortRange - (i * (2 * yEffortRange) / yEffortSteps); const y = padding.top + graphHeight / 2 + (graphHeight / 2) * (i / yEffortSteps); graphCtx.beginPath(); graphCtx.moveTo(padding.left + graphWidth, y); graphCtx.lineTo(padding.left + graphWidth + 5, y); graphCtx.strokeStyle = '#ccc'; graphCtx.stroke(); graphCtx.textAlign = 'left'; graphCtx.fillText(v.toFixed(1), padding.left + graphWidth + 8, y + 3); } graphCtx.save(); graphCtx.translate(padding.left + graphWidth + 45, padding.top + 3 * graphHeight / 4); graphCtx.rotate(Math.PI / 2); graphCtx.textAlign = 'center'; graphCtx.fillText('Effort (-1:1)', 0, 0); graphCtx.restore(); const intervalMs = parseInt(telemetryJsonCache?.interval_ms || 5); const totalTimeSec = (MAX_DATA_POINTS * intervalMs) / 1000.0; const xTimeSteps = 4; graphCtx.fillStyle = '#666'; for (let i = 0; i <= xTimeSteps; i++) { const x = padding.left + graphWidth * (i / xTimeSteps); graphCtx.beginPath(); graphCtx.moveTo(x, padding.top); graphCtx.lineTo(x, padding.top + graphHeight); graphCtx.strokeStyle = '#ccc'; graphCtx.stroke(); graphCtx.textAlign = 'center'; const s = (totalTimeSec - (i * totalTimeSec / xTimeSteps)).toFixed(1); graphCtx.fillText(`${s}s ago`, x, padding.top + graphHeight + 15); }
+                     /* Draw lines */ const drawLine = (data, color, yMin, yMax, yBase = padding.top, yHeight = graphHeight, lineWidth = 1.5) => { graphCtx.strokeStyle = color; graphCtx.lineWidth = lineWidth; graphCtx.beginPath(); let firstValidPoint = true; const range = yMax - yMin; if (Math.abs(range) < 1e-6) return; let pointsDrawn = 0; for(let i=0; i<data.length; i++){ const val = data[i]; if(val === null || isNaN(val)) { firstValidPoint = true; continue; } const x = padding.left + graphWidth * (i / (MAX_DATA_POINTS - 1)); const norm = (val - yMin) / range; const y = yBase + yHeight * (1 - norm); const clampY = Math.max(yBase, Math.min(yBase + yHeight, y)); if(firstValidPoint){ graphCtx.moveTo(x, clampY); firstValidPoint = false; } else { graphCtx.lineTo(x, clampY); } pointsDrawn++;} if(pointsDrawn > 1) graphCtx.stroke(); };
+                     /* Plot Data */
+                     drawLine(telemetryData.speedLDPS, '#dc3545', -ySpeedRange, ySpeedRange);
+                     drawLine(telemetryData.speedRDPS, '#198754', -ySpeedRange, ySpeedRange);
+                     drawLine(telemetryData.balanceSpeedDPS, '#0d6efd', -ySpeedRange, ySpeedRange);
+                     drawLine(telemetryData.targetAngVelDPS, '#20c997', -ySpeedRange, ySpeedRange, padding.top, graphHeight, 1.0);
+                     drawLine(telemetryData.pitchDeg, '#6f42c1', -yAngleRange, yAngleRange, padding.top, graphHeight / 2, 2.0);
+                     drawLine(telemetryData.effortL, '#ffc107', -yEffortRange, yEffortRange, padding.top + graphHeight / 2, graphHeight / 2);
+                     drawLine(telemetryData.effortR, '#fd7e14', -yEffortRange, yEffortRange, padding.top + graphHeight / 2, graphHeight / 2);
+                 } catch (e) { console.error("Draw Graph Error:", e); }
+            }
 
-                const padding = { top: 10, right: 90, bottom: 30, left: 50 }; // Adjusted padding
-                const graphWidth = logicalWidth - padding.left - padding.right;
-                const graphHeight = logicalHeight - padding.top - padding.bottom;
+            // --- Update Data & Legend ---
+             async function updateData() {
+                 try {
+                     const response = await fetch('/data', { cache: 'no-cache' });
+                     if (!response.ok) throw new Error(`HTTP error ${response.status} fetching /data`);
+                     telemetryJsonCache = await response.json();
+                     if (!telemetryJsonCache || !Array.isArray(telemetryJsonCache.data) || !telemetryJsonCache.hasOwnProperty('interval_ms')) { console.warn("Invalid telemetry response:", telemetryJsonCache); return; }
 
-                graphCtx.clearRect(0, 0, logicalWidth, logicalHeight); // Use logical size for clearRect
+                     const batchData = telemetryJsonCache.data;
+                     if (batchData.length === 0) return;
 
-                // --- Draw Axes and Grid ---
-                graphCtx.strokeStyle = '#ccc'; // Lighter grid
-                graphCtx.lineWidth = 0.5; // Thinner grid lines
-                graphCtx.font = '10px Arial'; // Smaller axis labels
-                graphCtx.fillStyle = '#666';
+                     let dataUpdated = false;
+                     let latestPoint = null;
 
-                // Y-Axis (Speed range) - Centered at 0
-                const ySpeedRange = 800; // Max absolute speed
-                const ySpeedSteps = 8;
-                for (let i = 0; i <= ySpeedSteps; i++) {
-                    const value = ySpeedRange - (i * (2 * ySpeedRange) / ySpeedSteps);
-                    const y = padding.top + graphHeight * (i / ySpeedSteps);
-                    graphCtx.beginPath();
-                    graphCtx.moveTo(padding.left, y);
-                    graphCtx.lineTo(padding.left + graphWidth, y);
-                    graphCtx.stroke();
-                    graphCtx.textAlign = 'right';
-                    graphCtx.fillText(value.toFixed(0), padding.left - 8, y + 3);
-                }
+                     batchData.forEach((point) => {
+     if (Array.isArray(point) && point.length >= 9) { // <<<--- CHECK LENGTH >= 9 now
+         // Ensure the indices here match the C++ order after the fix
+         const dataMap = [
+             point[0], // pitchDeg
+             point[1], // balanceSpeedDPS
+             point[2], // speedLDPS
+             point[3], // speedRDPS
+             point[4], // effortL
+             point[5], // effortR
+             point[6]  // targetAngVelDPS
+             // point[7] is battery, point[8] is state - handled separately
+         ];
 
-                // Y-Axis Secondary (Angle range) - Placed on the right
-                const yAngleRange = 45; // Max absolute angle degrees
-                const yAngleSteps = 6; // e.g., -45, -30, -15, 0, 15, 30, 45
-                graphCtx.fillStyle = '#9C27B0'; // Angle color
-                for (let i = 0; i <= yAngleSteps; i++) {
-                     const value = yAngleRange - (i * (2 * yAngleRange) / yAngleSteps);
-                     const y = padding.top + graphHeight * (i / yAngleSteps);
-                     // Draw angle tick mark slightly offset
-                     graphCtx.beginPath();
-                     graphCtx.moveTo(padding.left + graphWidth, y);
-                     graphCtx.lineTo(padding.left + graphWidth + 5, y); // Tick pointing right
-                     graphCtx.stroke(); // Use default stroke color or set angle color
-                     graphCtx.textAlign = 'left';
-                     graphCtx.fillText(value.toFixed(0) + '°', padding.left + graphWidth + 10, y + 3);
-                }
+         telemetryKeys.forEach((key, index) => {
+             // Check if index is within the range we map (0-6)
+             if (index < dataMap.length) {
+                 const rawValue = dataMap[index];
+                 const value = parseFloat(rawValue);
+                 // Check for NaN specifically BEFORE pushing
+                 if (!isNaN(value)) {
+                     telemetryData[key].push(value);
+                 } else {
+                     // Push null or previous value if parsing fails, avoid NaN
+                     const lastVal = telemetryData[key].length > 0 ? telemetryData[key][telemetryData[key].length - 1] : null;
+                     telemetryData[key].push(lastVal);
+                     console.warn(`Parsed NaN for ${key}, pushing ${lastVal}. Raw:`, rawValue);
+                 }
+             } else {
+                 // Should not happen if telemetryKeys length matches dataMap, but good sanity check
+                 console.warn(`Index ${index} out of bounds for dataMap.`);
+                 telemetryData[key].push(null); // Push null if something is wrong
+             }
 
+             // Shift if exceeding max points
+             if (telemetryData[key].length > MAX_DATA_POINTS) {
+                 telemetryData[key].shift();
+             }
+         });
+         latestPoint = point;
+         dataUpdated = true;
+        } else {
+            console.warn("Skipping invalid point array:", point);
+        }
+    });
 
-                // X-Axis (Time)
-                const totalTimeSec = (maxDataPoints * 5) / 1000.0; // Assumed 5ms ESP loop interval
-                const xTimeSteps = 4; // e.g., 0, 0.5, 1.0, 1.5, 2.0s
-                graphCtx.fillStyle = '#666'; // Reset color
-                for (let i = 0; i <= xTimeSteps; i++) {
-                    const x = padding.left + graphWidth * (i / xTimeSteps);
-                    graphCtx.beginPath();
-                    graphCtx.moveTo(x, padding.top);
-                    graphCtx.lineTo(x, padding.top + graphHeight);
-                    graphCtx.stroke();
-                    graphCtx.textAlign = 'center';
-                    const seconds = (i * totalTimeSec / xTimeSteps).toFixed(1);
-                    graphCtx.fillText(`${seconds}s`, x, padding.top + graphHeight + 15);
-                }
+    // Update Legend/Status using the LATEST received point
+    if (latestPoint) {
+        const values = latestPoint.map(v => parseFloat(v) || 0); // Parse all values safely
+        // Update Legend (Indices 0-6)
+        if(legendValueElements.length >= 7) {
+            legendValueElements[0].textContent = values[0].toFixed(1); // Pitch
+            legendValueElements[1].textContent = values[1].toFixed(1); // Bal Spd
+            legendValueElements[2].textContent = values[2].toFixed(1); // Speed L
+            legendValueElements[3].textContent = values[3].toFixed(1); // Speed R
+            legendValueElements[4].textContent = values[4].toFixed(2); // Effort L
+            legendValueElements[5].textContent = values[5].toFixed(2); // Effort R
+            legendValueElements[6].textContent = values[6].toFixed(1); // Targ AngVel <-- Corrected Index
+        }
+        // Update Battery/Status (Indices 7 and 8)
+        if(values.length >= 8 && batteryVoltageValueEl && batteryPercentValueEl) { // Check for battery at index 7
+            currentBattery.voltage = values[7];
+            const vMax = configDataCache?.battery?.voltage_max || 4.2;
+            const vMin = configDataCache?.battery?.voltage_min || 3.3;
+            const vRange = vMax - vMin;
+            currentBattery.percentage = vRange > 0.1 ? Math.max(0, Math.min(100, Math.round(((values[7] - vMin) / vRange) * 100))) : (values[7] >= vMax ? 100 : 0);
+            batteryVoltageValueEl.textContent = currentBattery.voltage.toFixed(2);
+            batteryPercentValueEl.textContent = currentBattery.percentage;
+        }
+        // Optionally update status based on state value[8] if needed elsewhere
+    }
 
-
-                // --- Draw Data Lines ---
-                const drawLine = (data, color, yAxisRange = ySpeedRange) => { // Default to speed range
-                    graphCtx.strokeStyle = color;
-                    graphCtx.lineWidth = 1.5; // Slightly thicker lines
-                    graphCtx.beginPath();
-                    let firstValidPoint = true;
-                    for (let index = 0; index < data.length; index++) {
-                        const value = data[index];
-                        if (value === null || isNaN(value)) continue; // Skip invalid points
-
-                        const x = padding.left + graphWidth * (index / (maxDataPoints - 1));
-                        const normalizedValue = (value + yAxisRange) / (2 * yAxisRange); // Normalize [-range, +range] -> [0, 1]
-                        const y = padding.top + graphHeight * (1 - normalizedValue); // Invert for canvas Y-coord
-                        const clampedY = Math.max(padding.top, Math.min(padding.top + graphHeight, y)); // Clamp within graph area
-
-                        if (firstValidPoint) {
-                            graphCtx.moveTo(x, clampedY);
-                            firstValidPoint = false;
-                        } else {
-                            graphCtx.lineTo(x, clampedY);
-                        }
-                    }
-                     if (!firstValidPoint) { // Only stroke if there were valid points
-                         graphCtx.stroke();
+                     if (dataUpdated) {
+                         drawGraph();
                      }
-                };
-
-                drawLine(telemetryData.desired, '#2196F3');
-                drawLine(telemetryData.currentL, '#f44336');
-                drawLine(telemetryData.currentR, '#4CAF50');
-                drawLine(telemetryData.rmseL, '#ffeb3b');
-                drawLine(telemetryData.rmseR, '#FF9800');
-                drawLine(telemetryData.angle, '#9C27B0', yAngleRange); // Use angle range for angle plot
-
-
+                 } catch (error) { console.error('Telemetry Update Error:', error); }
             }
 
-             function updateData() {
-                fetch('/data', { cache: 'no-cache' })
-                .then(response => {
-                     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                     return response.json();
-                 })
-                .then(jsonData => {
-                    // Basic validation of received data structure
-                    if (!jsonData || !jsonData.data || !Array.isArray(jsonData.data)) {
-                         console.warn("Invalid or missing data array in response:", jsonData);
-                         return;
-                    }
+            function startDataFetching() { stopDataFetching(); console.log("Starting periodic data fetching..."); dataFetchTimer = setInterval(updateData, DATA_FETCH_INTERVAL_MS); stateFetchTimer = setInterval(fetchSystemState, STATE_FETCH_INTERVAL_MS); fetchSystemState(); updateData(); }
+            function stopDataFetching() { if (dataFetchTimer) clearInterval(dataFetchTimer); dataFetchTimer = null; if (stateFetchTimer) clearInterval(stateFetchTimer); stateFetchTimer = null; }
 
-                    const batchData = jsonData.data;
-                    let dataUpdated = false; // Flag to redraw graph only if needed
-
-                    batchData.forEach(point => {
-                        // Expecting: [pitch(0), desired(1), currentL(2), currentR(3), rmseL(4), rmseR(5)]
-                        if (Array.isArray(point) && point.length >= 6) {
-                             // Convert to numbers immediately, handle potential non-numeric values
-                             const [
-                                 pitch = 0, desiredSpeed = 0, currentSpeedL = 0, currentSpeedR = 0, rmseL = 0, rmseR = 0
-                             ] = point.map(v => parseFloat(v) || 0); // Default to 0 if parsing fails
-
-                            telemetryData.angle.push(pitch); telemetryData.angle.shift();
-                            telemetryData.desired.push(desiredSpeed); telemetryData.desired.shift();
-                            telemetryData.currentL.push(currentSpeedL); telemetryData.currentL.shift();
-                            telemetryData.currentR.push(currentSpeedR); telemetryData.currentR.shift();
-                            telemetryData.rmseL.push(rmseL); telemetryData.rmseL.shift();
-                            telemetryData.rmseR.push(rmseR); telemetryData.rmseR.shift();
-                            dataUpdated = true; // Mark data as updated
-                        } else {
-                             console.warn("Received data point with unexpected structure:", point);
-                        }
-                    });
-
-                    // Update Legend Values if data was received
-                    if (dataUpdated && batchData.length > 0) {
-                        const lastPoint = batchData[batchData.length - 1];
-                         if (Array.isArray(lastPoint) && lastPoint.length >= 6) {
-                             const [
-                                 pitch = 0, desiredSpeed = 0, currentSpeedL = 0, currentSpeedR = 0, rmseL = 0, rmseR = 0
-                             ] = lastPoint.map(v => parseFloat(v) || 0);
-
-                             // Update legend text - use .toFixed() for formatting
-                             document.getElementById('angleValueLegend').textContent = pitch.toFixed(2);
-                             document.getElementById('desiredSpeedValueLegend').textContent = desiredSpeed.toFixed(1);
-                             document.getElementById('currentSpeedValueLLegend').textContent = currentSpeedL.toFixed(1);
-                             document.getElementById('currentSpeedValueRLegend').textContent = currentSpeedR.toFixed(1);
-                             document.getElementById('rmseValueLLegend').textContent = rmseL.toFixed(2);
-                             document.getElementById('rmseValueRLegend').textContent = rmseR.toFixed(2);
-                         }
-                    }
-
-                    // Redraw graph only if data was actually updated
-                    if (dataUpdated) {
-                       drawGraph();
-                    }
-
-                })
-                .catch(error => console.error('Error fetching data:', error));
-            }
-
-            // --- Initial Setup ---
-            resizeGraphCanvas(); // Size the canvas initially
-            window.addEventListener('resize', resizeGraphCanvas); // Adjust canvas on window resize
-            const updateInterval = 100; // Fetch data every 100ms
-            setInterval(updateData, updateInterval);
-            updateData(); // Initial data fetch
-
-        });
+        })(); // End IIFE
     </script>
 </body>
 </html>
-
-    

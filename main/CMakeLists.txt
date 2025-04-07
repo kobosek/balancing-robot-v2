@@ -1,24 +1,43 @@
 # main/CMakeLists.txt
-idf_component_register(SRCS  "PCNTEncoder.cpp" "Encoder.cpp" "MPU6050Manager.cpp"
-                            "RuntimeConfig.cpp"
-                            "ComponentHandler.cpp"
-                            "WiFiManager.cpp"
-                            "WebServer.cpp"
-                            "MotorDriver.cpp"
-                            "PIDController.cpp"
-                            "BalancingController.cpp" # <-- Add this line
-                            "mpu6050.cpp"
+
+idf_component_register(SRCS  "core/ComponentHandler.cpp"
+                            "config/SPIFFSStorageService.cpp"
+                            "config/JsonConfigParser.cpp"
+                            "config/ConfigurationService.cpp"
+                            "state/StateManager.cpp"
+                            "core/EventBus.cpp"
+                            "services/WiFiManager.cpp"
+                            # --- Web Handlers ---
+                            "web/WebServer.cpp"
+                            "web/StaticFileHandler.cpp" # Added
+                            "web/TelemetryHandler.cpp"  # Added
+                            "web/ConfigApiHandler.cpp"  # Added
+                            "web/CommandApiHandler.cpp" # Added
+                            "web/StateApiHandler.cpp"   # Added
+                            # --- End Web Handlers ---
+                            "algorithms/PIDController.cpp"
+                            "drivers/mpu6050.cpp"
+                            "services/IMUService.cpp"
+                            "algorithms/OrientationEstimator.cpp"
+                            "services/EncoderService.cpp"
+                            "drivers/MX1616H_HWDriver.cpp"
+                            "services/MotorService.cpp"
+                            "algorithms/BalancingAlgorithm.cpp"
+                            "services/BatteryService.cpp"
+                            "algorithms/FallDetector.cpp"
+                            "algorithms/CommandProcessor.cpp"
+                            "core/RobotController.cpp" # Facade
                             "main.cpp"
                        INCLUDE_DIRS "."
-                       REQUIRES esp_wifi
-                                esp_event
-                                esp_netif
-                                esp_http_server
-                                nvs_flash
-                                esp_timer
-                                spiffs
-                                driver
-                                json
-                                pthread)
-
-set(EXTRA_COMPONENT_DIRS $ENV{IDF_PATH}/components/json/cJSON)
+                                    "algorithms/include"
+                                    "config/include"
+                                    "core/include"
+                                    "drivers/include"
+                                    "events"
+                                    "services/include"
+                                    "state/include"
+                                    "web/include"
+                       REQUIRES esp_wifi esp_event esp_netif esp_http_server nvs_flash
+                                esp_timer spiffs driver json pthread esp_adc
+                       PRIV_REQUIRES json
+                      )
