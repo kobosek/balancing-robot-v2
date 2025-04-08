@@ -1,0 +1,216 @@
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    margin: 0;
+    padding: 20px;
+    background-color: #f8f9fa;
+    color: #212529;
+    overscroll-behavior: none; /* Prevent pull-to-refresh */
+}
+.container {
+    max-width: 1600px;
+    margin: auto;
+    background: #ffffff;
+    padding: 25px;
+    border-radius: 8px;
+    box-shadow: 0 2px 15px rgba(0,0,0,0.08);
+}
+h1 {
+    font-size: 1.8rem;
+    border-bottom: none;
+    text-align: center;
+    margin-bottom: 1rem;
+    color: #343a40;
+}
+h2 {
+    font-size: 1.5rem;
+    margin-top: 1.5rem;
+    color: #343a40;
+    padding-bottom: 5px;
+    border-bottom: 1px solid #eee;
+}
+h3 {
+    font-size: 1.25rem;
+    margin-top: 1rem;
+    color: #495057;
+    border-bottom: none;
+}
+button {
+    padding: 10px 18px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    font-weight: 500;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    color: white;
+    user-select: none;
+    -webkit-user-select: none; /* Disable text selection on buttons */
+}
+button:hover {
+    opacity: 0.9;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+}
+button:active {
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
+}
+.config-section, .command-section, .status-section {
+    margin-bottom: 25px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #dee2e6;
+}
+.config-section:last-child, .command-section:last-child, .status-section:last-child {
+    border-bottom: none;
+}
+.config-section button, .command-section button {
+    margin-right: 10px;
+    margin-bottom: 10px;
+}
+.command-section button.start { background-color: #28a745; }
+.command-section button.start:hover { background-color: #218838; }
+.command-section button.stop { background-color: #dc3545; }
+.command-section button.stop:hover { background-color: #c82333; }
+.command-section button.calibrate { background-color: #ffc107; color: #212529; }
+.command-section button.calibrate:hover { background-color: #e0a800; }
+.command-section .toggle-button { background-color: #6c757d; }
+.command-section .toggle-button.enabled { background-color: #198754; } /* Green when enabled */
+.command-section .toggle-button:hover { opacity: 0.9; }
+
+.config-section button { background-color: #0d6efd; }
+.config-section button:hover { background-color: #0b5ed7; }
+
+.form-container {
+    margin-top: 15px;
+    border: 1px solid #ced4da;
+    padding: 20px;
+    border-radius: 6px;
+    background-color: #f8f9fa;
+}
+.form-group {
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap; /* Allow wrapping on small screens */
+}
+label {
+    display: inline-block;
+    width: 90px; /* Fixed width for alignment */
+    text-align: right;
+    margin-right: 15px;
+    font-size: 0.9rem;
+    color: #495057;
+    font-weight: 500;
+}
+input[type="number"] {
+    width: 110px; /* Adjust as needed */
+    padding: 8px 10px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    box-sizing: border-box;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+input[type="number"]:focus {
+    border-color: #80bdff;
+    outline: 0;
+    box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
+}
+.graph-container {
+    margin-top: 30px;
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+    width: 100%; /* Take full width of parent */
+    box-sizing: border-box; /* Include padding/border in width */
+    height: 60vh; /* Viewport height based */
+    position: relative;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.05);
+}
+.graph-container canvas {
+    display: block; /* Remove extra space below canvas */
+    border: none;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+}
+.legend {
+    position: absolute;
+    top: 15px;
+    right: 20px;
+    background: rgba(255, 255, 255, 0.9);
+    padding: 10px 15px;
+    border-radius: 6px;
+    border: 1px solid #e9ecef;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    font-size: 0.8rem;
+    z-index: 10;
+}
+.legend-item {
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.legend-color {
+    width: 18px;
+    height: 3px;
+    display: inline-block;
+    border-radius: 2px;
+}
+.legend-value {
+    font-weight: 600;
+    min-width: 50px; /* Ensure alignment */
+    text-align: right;
+    color: #495057;
+    font-family: 'Courier New', Courier, monospace;
+}
+.status-section {
+    padding: 15px;
+    background-color: #e9f7fd;
+    border-radius: 6px;
+    border: 1px solid #bce8f1;
+}
+.status-item {
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+.status-label {
+    font-weight: 600;
+    min-width: 100px;
+    display: inline-block; /* Align labels */
+    color: #31708f;
+}
+.status-value {
+    font-weight: bold;
+    padding-left: 5px;
+}
+.config-save-btn {
+    background-color: #0d6efd;
+    margin-top: 15px;
+}
+
+/* Command Section Layout */
+ .command-section {
+    padding-bottom: 180px; /* Space for joystick below */
+    text-align: center; /* Center buttons and joystick zone */
+ }
+ .command-section .button-group {
+     margin-bottom: 15px;
+ }
+#joystickZone {
+    position: relative; /* NippleJS needs this */
+    width: 160px; height: 160px;
+    background-color: #e9ecef;
+    border: 2px solid #adb5bd;
+    border-radius: 50%;
+    box-shadow: inset 0 0 10px rgba(0,0,0,0.1);
+    user-select: none;
+    -webkit-user-select: none; /* Prevent selection */
+    touch-action: none; /* Prevent browser touch actions (scrolling, zooming) */
+    margin: 20px auto; /* Center the zone horizontally */
+}
+/* Style the joystick handle */
+.nipple .front { background-color: #0d6efd !important; opacity: 0.7 !important; }
+.nipple .back { background-color: #ced4da !important; opacity: 0.6 !important; }

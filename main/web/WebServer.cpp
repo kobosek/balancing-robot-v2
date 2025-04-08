@@ -54,42 +54,74 @@ esp_err_t WebServer::init() {
     ESP_LOGI(TAG, "Initializing web server routing...");
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true;
-    config.max_uri_handlers = 12;
+    config.max_uri_handlers = 24;
     config.global_user_ctx = this; // Pass 'this' WebServer instance
 
     ESP_RETURN_ON_ERROR(httpd_start(&server, &config), TAG, "Error starting httpd server");
     ESP_LOGI(TAG, "HTTPD server started.");
 
-    // --- Register HTTP URI handlers ---
-    ESP_LOGI(TAG, "Registering HTTP URI handlers...");
     const httpd_uri_t root_uri = { "/", HTTP_GET, static_get_handler, nullptr };
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &root_uri), TAG, "Failed register root URI");
-    const httpd_uri_t file_uri = { "/*", HTTP_GET, static_get_handler, nullptr };
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &file_uri), TAG, "Failed register file URI");
-    const httpd_uri_t data_uri = { "/data", HTTP_GET, data_get_handler, nullptr };
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &data_uri), TAG, "Failed register data URI");
-    const httpd_uri_t get_config_uri = { "/api/config", HTTP_GET, get_config_handler, nullptr };
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &get_config_uri), TAG, "Failed register get_config URI");
-    const httpd_uri_t set_config_uri = { "/api/config", HTTP_POST, set_config_handler, nullptr };
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &set_config_uri), TAG, "Failed register set_config URI");
-    const httpd_uri_t command_uri = { "/api/command", HTTP_POST, command_handler, nullptr }; // Keeps start/stop/etc.
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &command_uri), TAG, "Failed register command URI");
-    const httpd_uri_t get_state_uri = { "/api/state", HTTP_GET, get_state_handler, nullptr };
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &get_state_uri), TAG, "Failed register get_state URI");
+    esp_err_t ret = httpd_register_uri_handler(server, &root_uri); // Assign ret
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register root URI");
+    ESP_LOGI(TAG, "Registered handler for: / (GET)"); // <<< ADD LOG
 
-    // --- ADDED: Register WebSocket URI Handler ---
-    ESP_LOGI(TAG, "Registering WebSocket URI handler...");
-    const httpd_uri_t ws_uri = {
-        .uri        = "/ws", // The URI for WebSocket connections
-        .method     = HTTP_GET, // WebSocket upgrade starts with GET
-        .handler    = websocket_handler, // Use the static handler
-        .user_ctx   = nullptr,    // Use global context ('this')
-        .is_websocket = true // Important: Mark this as a WebSocket endpoint
+    const httpd_uri_t style_uri = { "/style.css", HTTP_GET, static_get_handler, nullptr };
+    ret = httpd_register_uri_handler(server, &style_uri);
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register style URI");
+    ESP_LOGI(TAG, "Registered handler for: /style.css (GET)");
+
+    // Register all JS files explicitly
+    const char* js_files[] = {
+        "/js/main.js", "/js/api.js", "/js/configUI.js", "/js/constants.js",
+        "/js/graph.js", "/js/joystick.js", "/js/state.js", "/js/telemetry.js",
+        "/js/ui.js", "/js/websocket.js"
     };
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &ws_uri), TAG, "Failed register WebSocket URI");
-    // --- END ADDED ---
+    for (const char* js_file : js_files) {
+        httpd_uri_t js_uri = { js_file, HTTP_GET, static_get_handler, nullptr };
+        ret = httpd_register_uri_handler(server, &js_uri);
+        // Log error but continue, maybe some JS files aren't critical? Or ESP_RETURN_ON_ERROR if all are needed.
+        if (ret != ESP_OK) { ESP_LOGE(TAG, "Failed register JS URI: %s (%s)", js_file, esp_err_to_name(ret)); }
+        else { ESP_LOGI(TAG, "Registered handler for: %s (GET)", js_file); }
+    }
 
-    ESP_LOGI(TAG, "All URI handlers registered.");
+    const httpd_uri_t data_uri = { "/data", HTTP_GET, data_get_handler, nullptr };
+    ret = httpd_register_uri_handler(server, &data_uri); // Assign ret
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register data URI");
+    ESP_LOGI(TAG, "Registered handler for: /data (GET)"); // <<< ADD LOG
+
+    const httpd_uri_t get_config_uri = { "/api/config", HTTP_GET, get_config_handler, nullptr };
+    ret = httpd_register_uri_handler(server, &get_config_uri); // Assign ret
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register get_config URI");
+    ESP_LOGI(TAG, "Registered handler for: /api/config (GET)"); // <<< ADD LOG
+
+    const httpd_uri_t set_config_uri = { "/api/config", HTTP_POST, set_config_handler, nullptr };
+    ret = httpd_register_uri_handler(server, &set_config_uri); // Assign ret
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register set_config URI");
+    ESP_LOGI(TAG, "Registered handler for: /api/config (POST)"); // <<< ADD LOG
+
+    const httpd_uri_t command_uri = { "/api/command", HTTP_POST, command_handler, nullptr };
+    ret = httpd_register_uri_handler(server, &command_uri); // Assign ret
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register command URI");
+    ESP_LOGI(TAG, "Registered handler for: /api/command (POST)"); // <<< ADD LOG
+
+    const httpd_uri_t get_state_uri = { "/api/state", HTTP_GET, get_state_handler, nullptr };
+    ret = httpd_register_uri_handler(server, &get_state_uri); // Assign ret
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register get_state URI");
+    ESP_LOGI(TAG, "Registered handler for: /api/state (GET)"); // <<< ADD LOG
+
+    // --- Register WebSocket URI Handler ---
+    const httpd_uri_t ws_uri = { "/ws", HTTP_GET, websocket_handler, nullptr, true };
+    ret = httpd_register_uri_handler(server, &ws_uri); // Assign ret
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register WebSocket URI");
+    ESP_LOGI(TAG, "Registered handler for: /ws (WebSocket)"); // <<< ADD LOG
+
+    // --- Register FALLBACK/WILDCARD file handler LAST ---
+    const httpd_uri_t file_uri = { "/*", HTTP_GET, static_get_handler, nullptr };
+    ret = httpd_register_uri_handler(server, &file_uri); // Assign ret
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register fallback file URI");
+    ESP_LOGI(TAG, "Registered handler for: /* (GET) - Fallback"); // <<< ADD LOG
+
+    ESP_LOGI(TAG, "All URI handlers registration attempted.");
     return ESP_OK;
 }
 
