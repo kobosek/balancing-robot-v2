@@ -12,10 +12,9 @@
 
 
 FallDetector::FallDetector(EventBus& bus, float pitch_threshold_rad,
-                           float roll_threshold_rad, uint64_t threshold_duration_ms) :
+                           uint64_t threshold_duration_ms) :
     m_eventBus(bus),
     m_pitch_threshold_rad(pitch_threshold_rad),
-    m_roll_threshold_rad(roll_threshold_rad),
     m_threshold_duration_us(threshold_duration_ms * 1000),
     m_potentially_fallen(false), // Ensure members are initialized
     m_fall_start_time_us(0),
@@ -32,9 +31,8 @@ void FallDetector::reset() {
     ESP_LOGI(TAG, "Fall detector state reset.");
 }
 
-void FallDetector::check(float pitch_rad, float roll_rad) {
-    bool threshold_exceeded = (std::abs(pitch_rad) > m_pitch_threshold_rad) ||
-                              (std::abs(roll_rad) > m_roll_threshold_rad);
+void FallDetector::check(float pitch_rad) {
+    bool threshold_exceeded = (std::abs(pitch_rad) > m_pitch_threshold_rad);
 
     int64_t current_time_us = esp_timer_get_time();
 
@@ -44,8 +42,8 @@ void FallDetector::check(float pitch_rad, float roll_rad) {
             m_potentially_fallen = true;
             m_fall_start_time_us = current_time_us;
             m_fall_event_published = false; // Ensure flag is reset when potentially falling again
-            ESP_LOGD(TAG, "Potential fall detected, angle threshold exceeded (P:%.2f, R:%.2f)",
-                     pitch_rad * (180.0/M_PI), roll_rad * (180.0/M_PI));
+            ESP_LOGD(TAG, "Potential fall detected, angle threshold exceeded (P:%.2f)",
+                     pitch_rad * (180.0/M_PI));
         } else {
             // Threshold still exceeded, check duration
             // Only publish ONCE per fall event

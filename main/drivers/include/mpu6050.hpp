@@ -5,7 +5,7 @@
 #include "driver/i2c_master.h"
 #include "esp_log.h"
 #include <stdint.h>
-
+#include <mutex> // <<< ADDED for I2C mutex
     
 
 // Enums remain the same...
@@ -14,7 +14,8 @@ enum class MPU6050Register : uint8_t {
     INT_PIN_CFG = 0x37, INTERRUPT_EN = 0x38, INTERRUPT_STATUS = 0x3A,
     DLPF_CONFIG = 0x1A, GYRO_CONFIG = 0x1B, ACCEL_CONFIG = 0x1C,
     FIFO_COUNT_H = 0x72, FIFO_R_W = 0x74,
-    ACCEL_XOUT_H = 0x3B, GYRO_XOUT_H = 0x43
+    ACCEL_XOUT_H = 0x3B, GYRO_XOUT_H = 0x43,
+    WHO_AM_I = 0x75,
     // Add other registers if needed
 };
 
@@ -139,9 +140,11 @@ public:
 private:
     static constexpr const char* TAG = "MPU6050";
 
-    i2c_master_dev_handle_t _dev_handle = nullptr; // Initialize to nullptr
+    i2c_master_dev_handle_t _dev_handle;    
+    mutable std::mutex _i2c_mutex; // <<< ADDED Mutex to protect I2C operations
     float _accel_scale = 16384.0f; // Default scale for +/- 2g
     float _gyro_scale = 131.0f;   // Default scale for +/- 250 deg/s
+
 
     // Private members removed as methods moved to public
     // esp_err_t writeRegister(MPU6050Register, uint8_t);

@@ -6,6 +6,7 @@ enum class SystemState {
     CALIBRATING_IMU,  // Performing IMU calibration sequence
     BALANCING,        // Actively balancing
     FALLEN,           // Robot has fallen (detected by angle threshold)
-    ERROR             // Unrecoverable error state
+    IMU_RECOVERY,     // Attempting to recover IMU communication
+    FATAL_ERROR       // Unrecoverable error state (renamed from ERROR)
     // Add more states as needed (e.g., LOW_BATTERY, MANUAL_CONTROL)
 };

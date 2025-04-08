@@ -25,6 +25,11 @@ public:
     esp_err_t init();
     esp_err_t triggerCalibration(); // This can now be called by event handler
 
+    // --- Methods for Recovery State ---
+    esp_err_t resetSensor();
+    esp_err_t reinitializeSensor();
+    esp_err_t verifyCommunication();
+
 private:
     static constexpr const char* TAG = "IMUService";
 
@@ -39,6 +44,10 @@ private:
     float m_gyro_offset_radps[3]; // Declaration
 
     std::atomic<uint8_t> m_isr_data_counter; // Declaration
+
+    // --- Failure Tracking ---
+    static const uint8_t I2C_FAILURE_THRESHOLD = 5; // Max consecutive failures before reporting
+    uint8_t m_consecutive_i2c_failures = 0;
 
 
     // --- Event Handling ---

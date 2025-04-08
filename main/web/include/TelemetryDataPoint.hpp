@@ -7,7 +7,6 @@
 struct TelemetryDataPoint {
     int64_t timestamp_us = 0;
     float pitch_deg = 0.0f;
-    float roll_deg = 0.0f;
     float balanceSpeed_dps = 0.0f; // Target speed from angle PID
     float targetAngVel_dps = 0.0f; // <<<--- Final Target Angular Velocity (deg/s)
     float speedLeft_dps = 0.0f;   // Actual speed dps

@@ -17,7 +17,6 @@ public:
 
     // Getters for estimated orientation (thread-safe) - Returns DEGREES
     float getPitchDeg() const;
-    float getRollDeg() const;
     // float getPitchRateDPS() const; // Optional: return filtered rate if needed
 
     void reset(); // Reset filter state
@@ -32,11 +31,6 @@ private:
 
     const float m_alpha; // Complementary filter coefficient
 
-    // Estimated state - Store in DEGREES now
     float m_pitch_deg = 0.0f;
-    float m_roll_deg = 0.0f;
-    // float m_pitch_rate_dps = 0.0f; // If storing filtered rate
-
-    // Mutex to protect access to shared state variables (m_pitch_deg, m_roll_deg)
     mutable std::mutex m_stateMutex;
 };

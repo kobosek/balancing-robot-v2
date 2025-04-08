@@ -47,19 +47,25 @@ RobotController::RobotController(
 void RobotController::runControlStep(float dt) {
     int64_t startTimeMicros = esp_timer_get_time();
 
-    // 1. Get Orientation Data
+    // --- Check State ---
+    SystemState currentState = m_stateManager.getCurrentState();
+    if (currentState == SystemState::IMU_RECOVERY || currentState == SystemState::FATAL_ERROR) {
+        m_motorService.setMotorEffort(0.0f, 0.0f); // Ensure motors are off
+        m_algorithm.resetState(); // Reset algorithm state
+        ESP_LOGV(TAG, "Skipping control step due to state: %d", static_cast<int>(currentState));
+        return; // Skip control logic in these states
+    }
+
+    // 1. Get Orientation Data (Only if not in recovery/error)
     float pitch_deg = m_estimator.getPitchDeg();
-    float roll_deg = m_estimator.getRollDeg();
-    // --- TODO: Get Pitch Rate ---
     float pitch_rate_dps = 0.0f; // Placeholder - NEEDS IMPLEMENTATION in OrientationEstimator
 
     // 2. Check for Fall & Update State
-    SystemState currentState = m_stateManager.getCurrentState();
+    // currentState = m_stateManager.getCurrentState(); // Already fetched above
     if (currentState == SystemState::BALANCING && m_stateManager.isFallDetectionEnabled()) {
-         m_fallDetector.check(pitch_deg * OrientationEstimator::DEG_TO_RAD,
-                              roll_deg * OrientationEstimator::DEG_TO_RAD);
+         m_fallDetector.check(pitch_deg * OrientationEstimator::DEG_TO_RAD);
     }
-    currentState = m_stateManager.getCurrentState(); // Re-fetch state
+    currentState = m_stateManager.getCurrentState(); // Re-fetch state in case fall detector changed it
 
     // 3. Update Encoder Speeds
     m_encoderService.update(dt);
@@ -90,7 +96,6 @@ void RobotController::runControlStep(float dt) {
     TelemetryDataPoint snapshot = {};
     snapshot.timestamp_us = startTimeMicros;
     snapshot.pitch_deg = pitch_deg;
-    snapshot.roll_deg = roll_deg;
     snapshot.balanceSpeed_dps = m_algorithm.getLastBalancingSpeedDPS();
     snapshot.targetAngVel_dps = targetAngVel_dps; // Store target DPS
     snapshot.speedLeft_dps = speedL_dps;

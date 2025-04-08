@@ -18,7 +18,8 @@ static const char* stateToString(SystemState state) {
         case SystemState::CALIBRATING_IMU:  return "CALIBRATING_IMU"; // Use correct enum name if changed
         case SystemState::BALANCING:        return "BALANCING";
         case SystemState::FALLEN:           return "FALLEN";
-        case SystemState::ERROR:            return "ERROR";
+        case SystemState::IMU_RECOVERY:     return "IMU_RECOVERY";
+        case SystemState::FATAL_ERROR:      return "ERROR";
         default:                            return "UNKNOWN";
     }
 }

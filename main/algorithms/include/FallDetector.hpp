@@ -9,11 +9,10 @@
 class FallDetector {
 public:
     FallDetector(EventBus& bus, float pitch_threshold_rad = 0.785f, // 45 degrees
-                 float roll_threshold_rad = 0.785f, // 45 degrees
                  uint64_t threshold_duration_ms = 500);
 
     // Called by control loop
-    void check(float pitch_rad, float roll_rad);
+    void check(float pitch_rad);
 
     // Call externally (e.g. from StateManager) when leaving FALLEN state if needed
     void reset();
@@ -22,7 +21,6 @@ private:
     static constexpr const char* TAG = "FallDetector";
     EventBus& m_eventBus;
     const float m_pitch_threshold_rad;
-    const float m_roll_threshold_rad;
     const uint64_t m_threshold_duration_us;
 
     // Internal state

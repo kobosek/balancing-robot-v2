@@ -6,8 +6,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"              // For vTaskDelay
 
-MPU6050::MPU6050() : _dev_handle(nullptr) {} // Initialize handle
-
+MPU6050::MPU6050() :
+    _dev_handle(nullptr),
+    _i2c_mutex() // Explicitly default-initialize the mutex
+{}
 esp_err_t MPU6050::init(const i2c_port_t i2c_port,
                         const gpio_num_t sda_io,
                         const gpio_num_t scl_io,
@@ -171,8 +173,6 @@ esp_err_t MPU6050::isFIFOOverflow() const {
     }
 }
 
-// --- REMOVED readFromFifo definition ---
-// esp_err_t MPU6050::readFromFifo(...) { ... }
 
 esp_err_t MPU6050::getAcceleration(float& ax, float& ay, float& az) const {
     uint8_t data[6];
@@ -212,9 +212,10 @@ esp_err_t MPU6050::getRotation(float& gx, float& gy, float& gz) const {
 
 // --- Low-level I2C Read/Write (Moved to public in header) ---
 esp_err_t MPU6050::writeRegister(MPU6050Register reg, uint8_t data) {
+    std::lock_guard<std::mutex> lock(_i2c_mutex); // <<< Acquire I2C lock
      if (_dev_handle == nullptr) {
         ESP_LOGE(TAG, "Device handle not initialized for writeRegister");
-        return ESP_ERR_INVALID_STATE;
+        return ESP_ERR_INVALID_STATE; // Lock released automatically
     }
     uint8_t write_buf[2] = {static_cast<uint8_t>(reg), data};
     // Use i2c_master_transmit with timeout (e.g., 100ms)
@@ -228,9 +229,10 @@ esp_err_t MPU6050::writeRegister(MPU6050Register reg, uint8_t data) {
 }
 
 esp_err_t MPU6050::readRegisters(MPU6050Register reg, uint8_t* data, size_t len) const {
+    std::lock_guard<std::mutex> lock(_i2c_mutex); // <<< Acquire I2C lock
      if (_dev_handle == nullptr) {
         ESP_LOGE(TAG, "Device handle not initialized for readRegisters");
-        return ESP_ERR_INVALID_STATE;
+        return ESP_ERR_INVALID_STATE; // Lock released automatically
     }
      if (data == nullptr || len == 0) {
         return ESP_ERR_INVALID_ARG;

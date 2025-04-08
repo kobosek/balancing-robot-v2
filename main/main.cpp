@@ -14,6 +14,7 @@
 #include "JsonConfigParser.hpp"
 #include "ConfigurationService.hpp"
 #include "StateManager.hpp"
+#include "IMUService.hpp" // <<< ADDED Include
 #include "SystemState.hpp"
 #include "ConfigData.hpp"
 
@@ -77,14 +78,19 @@ extern "C" void app_main(void)
     static JsonConfigParser configParser; ESP_LOGI(TAG, "Parser Init.");
     static ConfigurationService configService(storageService, configParser, eventBus); ESP_ERROR_CHECK_WITHOUT_ABORT(configService.init()); ESP_LOGI(TAG, "ConfigService Init.");
 
-    // StateManager (Dependency for ComponentHandler)
-    static StateManager stateManager(eventBus); ESP_LOGI(TAG, "StateManager Created.");
-
     // ComponentHandler creates and initializes all internal components
-    static ComponentHandler componentHandler(configService, stateManager, eventBus);
-    if (componentHandler.init() != ESP_OK) {
+    static ComponentHandler componentHandler(configService, eventBus); // Removed stateManager
+
+    // StateManager needs IMUService, create it after ComponentHandler
+    // ComponentHandler::init needs StateManager, call it after StateManager is created
+
+    // Create StateManager AFTER ComponentHandler, passing IMUService
+    static StateManager stateManager(eventBus, componentHandler.getIMUService()); ESP_LOGI(TAG, "StateManager Created.");
+
+    // Now initialize ComponentHandler, passing StateManager
+    if (componentHandler.init(stateManager) != ESP_OK) { // Pass stateManager here
         ESP_LOGE(TAG, "ComponentHandler Init Failed. Halting.");
-        stateManager.setState(SystemState::ERROR); // Set error state
+        stateManager.setState(SystemState::FATAL_ERROR); // Set fatal error state
         return; // Stop execution
     }
     ESP_LOGI(TAG, "ComponentHandler Initialized.");
@@ -92,12 +98,14 @@ extern "C" void app_main(void)
     // Initialize StateManager subscriptions *after* ComponentHandler has created everything
      if (stateManager.init() != ESP_OK) {
          ESP_LOGE(TAG, "StateManager Subscription Init Failed. Halting.");
-         stateManager.setState(SystemState::ERROR);
+         stateManager.setState(SystemState::FATAL_ERROR);
          return;
      }
      ESP_LOGI(TAG, "StateManager Initialized (Subscriptions Active).");
 
 
+    // --- Create RobotController Facade ---
+    // Pass components obtained from the handler
     // --- Create RobotController Facade ---
     // Pass components obtained from the handler
     static RobotController robotController(
@@ -110,6 +118,7 @@ extern "C" void app_main(void)
         componentHandler.getWebServer(),
         componentHandler.getBatteryService(),
         componentHandler.getCommandProcessor() // <<<--- Pass CommandProcessor
+        // IMUService is not directly needed by RobotController, only via OrientationEstimator
     );
     ESP_LOGI(TAG, "RobotController Facade Created.");
     // --- END Facade Creation ---
@@ -142,7 +151,7 @@ extern "C" void app_main(void)
 
     if (controlTaskCreated != pdPASS) {
         ESP_LOGE(TAG, "Failed Create Control Task! Halting.");
-        stateManager.setState(SystemState::ERROR);
+        stateManager.setState(SystemState::FATAL_ERROR);
         return; // Stop execution
     }
     ESP_LOGI(TAG, "Control Task created successfully on Core %d.", controlTaskCoreID);

@@ -23,10 +23,10 @@ class CommandProcessor;     // <<<--- Already Forward Declared
 
 class ComponentHandler {
 public:
-    ComponentHandler(ConfigurationService& config, StateManager& stateMgr, EventBus& bus);
+    ComponentHandler(ConfigurationService& config, EventBus& bus); // Removed StateManager
     ~ComponentHandler() = default;
 
-    esp_err_t init();
+    esp_err_t init(StateManager& stateMgr); // Pass StateManager here now
 
     // Getters (ensure CommandProcessor is available)
     WiFiManager& getWifiManager() { return *m_wifiManager; }
@@ -45,7 +45,7 @@ private:
     static constexpr const char* TAG = "ComponentHandler";
 
     ConfigurationService& m_configService;
-    StateManager& m_stateManager;
+    // StateManager& m_stateManager; // Removed member
     EventBus& m_eventBus;
 
     // Managed components

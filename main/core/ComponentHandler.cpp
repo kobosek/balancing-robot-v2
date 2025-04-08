@@ -19,14 +19,14 @@
 #include "esp_log.h"
 #include "esp_check.h"
 
-ComponentHandler::ComponentHandler(ConfigurationService& config, StateManager& stateMgr, EventBus& bus) :
+ComponentHandler::ComponentHandler(ConfigurationService& config, EventBus& bus) : // Removed StateManager
     m_configService(config),
-    m_stateManager(stateMgr),
+    // m_stateManager(stateMgr), // Removed member initialization
     m_eventBus(bus)
 {}
 
 
-esp_err_t ComponentHandler::init() {
+esp_err_t ComponentHandler::init(StateManager& stateMgr) { // Added StateManager parameter
     ESP_LOGI(TAG, "Initializing Components via ComponentHandler");
     esp_err_t ret = ESP_OK;
 
@@ -36,7 +36,7 @@ esp_err_t ComponentHandler::init() {
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize WiFiManager");
 
     // WebServer needs EventBus now for WebSocket handler
-    m_webServer = std::make_shared<WebServer>(m_configService, m_stateManager, m_eventBus);
+    m_webServer = std::make_shared<WebServer>(m_configService, stateMgr, m_eventBus); // Use passed-in stateMgr
     ret = m_webServer->init();
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize WebServer");
 

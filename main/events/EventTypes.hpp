@@ -32,6 +32,7 @@ enum class EventType {
     TELEMETRY_SNAPSHOT_READY, // Likely unused now
     FALL_DETECTED,
     LOW_BATTERY_WARNING,
+    IMU_COMMUNICATION_ERROR, // Added for IMU recovery
     ERROR_REPORTED
 };
 

@@ -15,12 +15,14 @@
 #include "DisableRecoveryCommandEvent.hpp"
 #include "EnableFallDetectCommandEvent.hpp" // <<< ADDED
 #include "DisableFallDetectCommandEvent.hpp" // <<< ADDED
+#include "IMU_CommunicationErrorEvent.hpp" // <<< ADDED
 
 // Other includes
 #include "EventTypes.hpp"
 #include "BaseEvent.hpp"
 #include "EventBus.hpp"
 #include "SystemState.hpp"
+#include "IMUService.hpp" // <<< ADDED explicit include
 #include <cmath>
 #include "esp_timer.h"
 #include <string>
@@ -32,12 +34,19 @@
 #endif
 static constexpr float RAD_TO_DEG = 180.0f / M_PI;
 
-StateManager::StateManager(EventBus& eventBus) :
+// Forward declare IMUService if not included via header (it should be via StateManager.hpp now)
+// class IMUService; // No longer needed if included above
+
+StateManager::StateManager(EventBus& eventBus, IMUService& imuService) : // <<< MODIFIED
     m_eventBus(eventBus),
+    m_imuService(imuService), // <<< ADDED
     m_currentState(SystemState::INIT),
     m_withinRecoveryAngle(false),
     m_recoveryAngleStartTimeUs(0),
-    m_autoRecoveryEnabled(true) // Initialize new member
+    m_autoRecoveryEnabled(true), // Initialize new member
+    m_fallDetectionEnabled(true), // Initialize new member
+    m_preImuRecoveryState(SystemState::IDLE), // Initialize new member
+    m_imu_recovery_attempts(0) // Initialize new member
 {}
 
 esp_err_t StateManager::init() {
@@ -56,6 +65,9 @@ esp_err_t StateManager::init() {
     // Subscriptions for fall detection enable/disable <<< ADDED
     m_eventBus.subscribe(EventType::ENABLE_FALL_DETECT_COMMAND_RECEIVED, [this](const BaseEvent& ev){ this->handleEnableFallDetect(static_cast<const EnableFallDetectCommandEvent&>(ev)); });
     m_eventBus.subscribe(EventType::DISABLE_FALL_DETECT_COMMAND_RECEIVED, [this](const BaseEvent& ev){ this->handleDisableFallDetect(static_cast<const DisableFallDetectCommandEvent&>(ev)); });
+
+    // Subscribe to IMU communication errors <<< ADDED
+    m_eventBus.subscribe(EventType::IMU_COMMUNICATION_ERROR, [this](const BaseEvent& ev){ this->handleImuCommunicationError(static_cast<const IMU_CommunicationErrorEvent&>(ev)); });
 
     ESP_LOGI(TAG, "StateManager Initialized and subscribed.");
     return ESP_OK;
@@ -96,7 +108,8 @@ std::string StateManager::stateToString(SystemState state) const {
           case SystemState::CALIBRATING_IMU: return "CALIBRATING_IMU"; // <<< ADDED
           case SystemState::BALANCING: return "BALANCING";
           case SystemState::FALLEN: return "FALLEN";
-          case SystemState::ERROR: return "ERROR";
+          case SystemState::IMU_RECOVERY: return "IMU_RECOVERY"; // <<< ADDED
+          case SystemState::FATAL_ERROR: return "FATAL_ERROR"; // <<< MODIFIED
           default: return "UNKNOWN";
      }
 }
@@ -117,10 +130,25 @@ void StateManager::setState(SystemState newState) {
              m_withinRecoveryAngle = false;
              m_recoveryAngleStartTimeUs = 0;
         }
+
+        // Reset IMU recovery attempt counter when leaving recovery state
+        if (previousState == SystemState::IMU_RECOVERY && newState != SystemState::IMU_RECOVERY) {
+            ESP_LOGD(TAG, "Leaving IMU_RECOVERY state, resetting attempt counter.");
+            m_imu_recovery_attempts = 0;
+        }
     }
+
     if (stateChanged) {
         SystemStateChangedEvent event(previousState, newState);
         m_eventBus.publish(event);
+
+        // Trigger recovery sequence if entering IMU_RECOVERY state
+        if (newState == SystemState::IMU_RECOVERY) {
+            // NOTE: This recovery logic runs synchronously within the setState call.
+            // If recovery takes too long, consider moving it to a separate task
+            // signaled by the state change event. For simplicity, we do it here.
+            attemptImuRecovery();
+        }
     }
 }
 
@@ -196,8 +224,7 @@ void StateManager::handleOrientationUpdate(const OrientationDataEvent& event) {
         return; // Don't proceed with recovery check
     }
 
-    bool is_upright_now = (std::abs(event.pitch_rad) < RECOVERY_ANGLE_THRESHOLD_RAD) &&
-                          (std::abs(event.roll_rad) < RECOVERY_ANGLE_THRESHOLD_RAD);
+    bool is_upright_now = (std::abs(event.pitch_rad) < RECOVERY_ANGLE_THRESHOLD_RAD);
 
     int64_t current_time_us = esp_timer_get_time();
 
@@ -206,8 +233,8 @@ void StateManager::handleOrientationUpdate(const OrientationDataEvent& event) {
             // Just entered upright threshold
             m_withinRecoveryAngle = true;
             m_recoveryAngleStartTimeUs = current_time_us;
-            ESP_LOGI(TAG, "Robot potentially upright in FALLEN state (P:%.1f R:%.1f), starting recovery timer (%llu us)...",
-                     event.pitch_rad * RAD_TO_DEG, event.roll_rad * RAD_TO_DEG, RECOVERY_HOLD_TIME_US);
+            ESP_LOGI(TAG, "Robot potentially upright in FALLEN state (P:%.1f), starting recovery timer (%llu us)...",
+                     event.pitch_rad * RAD_TO_DEG, RECOVERY_HOLD_TIME_US);
         } else {
             // Still upright, check duration
             uint64_t time_held_upright_us = current_time_us - m_recoveryAngleStartTimeUs;
@@ -225,8 +252,8 @@ void StateManager::handleOrientationUpdate(const OrientationDataEvent& event) {
         // Not upright now
         if (m_withinRecoveryAngle) {
             // Just fell out of upright threshold
-            ESP_LOGI(TAG, "Robot moved out of recovery angle threshold (P:%.1f R:%.1f). Resetting recovery timer.",
-                     event.pitch_rad * RAD_TO_DEG, event.roll_rad * RAD_TO_DEG);
+            ESP_LOGI(TAG, "Robot moved out of recovery angle threshold (P:%.1f). Resetting recovery timer.",
+                     event.pitch_rad * RAD_TO_DEG);
             m_withinRecoveryAngle = false;
             m_recoveryAngleStartTimeUs = 0;
         }
@@ -247,6 +274,8 @@ void StateManager::handleCalibrateCommand(const CalibrateCommandEvent& event) {
 
 void StateManager::handleCalibrationComplete(const CalibrationCompleteEvent& event) {
     ESP_LOGI(TAG, "Calibration Complete Event Received (Status: %s).", esp_err_to_name(event.status));
+    // Only transition back to IDLE if we are *actually* in the CALIBRATING state.
+    // This prevents interrupting an IMU_RECOVERY process that also involves calibration.
     if (m_currentState == SystemState::CALIBRATING_IMU) {
         ESP_LOGI(TAG, "Transitioning back to IDLE state after calibration.");
         setState(SystemState::IDLE);
@@ -255,6 +284,98 @@ void StateManager::handleCalibrationComplete(const CalibrationCompleteEvent& eve
          ESP_LOGW(TAG, "Received Calibration Complete event but not in CALIBRATING_IMU state (%s). Ignoring.", stateToString(m_currentState).c_str());
     }
 }
+
+void StateManager::handleImuCommunicationError(const IMU_CommunicationErrorEvent& event) {
+    ESP_LOGE(TAG, "IMU Communication Error Event Received!");
+    // Avoid re-entering recovery if already recovering or in fatal error
+    if (m_currentState == SystemState::IMU_RECOVERY || m_currentState == SystemState::FATAL_ERROR) {
+        ESP_LOGW(TAG, "Already in recovery or fatal error state (%s), ignoring IMU error event.", stateToString(m_currentState).c_str());
+        return;
+    }
+
+    ESP_LOGW(TAG, "Transitioning to IMU_RECOVERY state from %s.", stateToString(m_currentState).c_str());
+    m_preImuRecoveryState = m_currentState; // Store state before recovery
+    m_imu_recovery_attempts = 0; // Reset attempt counter
+    setState(SystemState::IMU_RECOVERY);
+    // The actual recovery attempt logic is triggered within setState now
+}
+
+// --- Private Helper Methods ---
+
+void StateManager::attemptImuRecovery() {
+    ESP_LOGI(TAG, "--- Starting IMU Recovery Attempt %d/%d ---", m_imu_recovery_attempts + 1, MAX_IMU_RECOVERY_ATTEMPTS);
+
+    // Ensure motors are off (should be handled by RobotController based on state, but belt-and-suspenders)
+    // m_motorService.setMotorEffort(0, 0); // Requires MotorService reference if done here
+
+    m_imu_recovery_attempts++;
+    esp_err_t ret = ESP_OK;
+
+    // 1. Reset Sensor
+    ret = m_imuService.resetSensor();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Recovery Step 1/4: Sensor Reset Failed (%s).", esp_err_to_name(ret));
+        handleRecoveryFailure(); // Call failure handler
+        return; // Exit after handling failure
+    }
+    ESP_LOGI(TAG, "Recovery Step 1/4: Sensor Reset OK.");
+
+    // 2. Reinitialize Sensor
+    ret = m_imuService.reinitializeSensor();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Recovery Step 2/4: Sensor Reinitialize Failed (%s).", esp_err_to_name(ret));
+        handleRecoveryFailure(); // Call failure handler
+        return; // Exit after handling failure
+    }
+    ESP_LOGI(TAG, "Recovery Step 2/4: Sensor Reinitialize OK.");
+
+    // 3. Perform Calibration (Optional but recommended after reset/reinit)
+    // Note: This blocks for the duration of calibration.
+    ret = m_imuService.triggerCalibration(); // Use triggerCalibration to handle mutex & publish event
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Recovery Step 3/4: Sensor Calibration Failed (%s).", esp_err_to_name(ret));
+        // Decide if calibration failure is fatal for recovery or just a warning
+        // For now, let's treat it as fatal for this attempt.
+        handleRecoveryFailure(); // Call failure handler
+        return; // Exit after handling failure
+    }
+     ESP_LOGI(TAG, "Recovery Step 3/4: Sensor Calibration OK.");
+
+    // 4. Verify Communication
+    ret = m_imuService.verifyCommunication();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Recovery Step 4/4: Communication Verification Failed (%s).", esp_err_to_name(ret));
+        handleRecoveryFailure(); // Call failure handler
+        return; // Exit after handling failure
+    }
+    ESP_LOGI(TAG, "Recovery Step 4/4: Communication Verification OK.");
+
+    // --- Recovery Succeeded --- (If we reach here, all steps passed)
+    ESP_LOGI(TAG, "--- IMU Recovery Attempt %d Successful! ---", m_imu_recovery_attempts);
+    ESP_LOGI(TAG, "Transitioning back to previous state: %s", stateToString(m_preImuRecoveryState).c_str());
+    // Reset counter implicitly by leaving state via setState
+    setState(m_preImuRecoveryState); // Transition back
+}
+
+
+// --- NEW: Helper to handle recovery failure logic ---
+void StateManager::handleRecoveryFailure() {
+    ESP_LOGW(TAG, "--- IMU Recovery Attempt %d Failed. ---", m_imu_recovery_attempts);
+    if (m_imu_recovery_attempts >= MAX_IMU_RECOVERY_ATTEMPTS) {
+        ESP_LOGE(TAG, "Maximum IMU recovery attempts reached (%d). Transitioning to FATAL_ERROR.", MAX_IMU_RECOVERY_ATTEMPTS);
+        setState(SystemState::FATAL_ERROR);
+    } else {
+        ESP_LOGI(TAG, "Waiting %lu ms before next recovery attempt...", IMU_RECOVERY_DELAY_MS);
+        vTaskDelay(pdMS_TO_TICKS(IMU_RECOVERY_DELAY_MS));
+        // Re-trigger the attempt (recursive call)
+        // Note: This recursive call is simple but increases stack depth.
+        // For a small number of retries (like 3), this is usually fine.
+        // If MAX_IMU_RECOVERY_ATTEMPTS were large, a loop or separate task might be better.
+        attemptImuRecovery();
+    }
+}
+// --- END NEW HELPER ---
+
 
 void StateManager::handleEnableRecovery(const EnableRecoveryCommandEvent& event) {
     setAutoRecovery(true);
