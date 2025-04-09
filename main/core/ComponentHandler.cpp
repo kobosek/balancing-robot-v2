@@ -1,4 +1,3 @@
-// main/core/ComponentHandler.cpp
 #include "ComponentHandler.hpp"
 
 // Include ALL necessary service/component headers
@@ -14,14 +13,13 @@
 #include "BalancingAlgorithm.hpp"
 #include "FallDetector.hpp"
 #include "BatteryService.hpp"
-#include "CommandProcessor.hpp" // <<<--- Already Included
+#include "CommandProcessor.hpp" // Already Included
 
 #include "esp_log.h"
 #include "esp_check.h"
 
 ComponentHandler::ComponentHandler(ConfigurationService& config, EventBus& bus) : // Removed StateManager
     m_configService(config),
-    // m_stateManager(stateMgr), // Removed member initialization
     m_eventBus(bus)
 {}
 
@@ -30,17 +28,14 @@ esp_err_t ComponentHandler::init(StateManager& stateMgr) { // Added StateManager
     ESP_LOGI(TAG, "Initializing Components via ComponentHandler");
     esp_err_t ret = ESP_OK;
 
-    // --- Network ---
     m_wifiManager = std::make_shared<WiFiManager>();
     ret = m_wifiManager->init(m_configService);
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize WiFiManager");
 
-    // WebServer needs EventBus now for WebSocket handler
     m_webServer = std::make_shared<WebServer>(m_configService, stateMgr, m_eventBus); // Use passed-in stateMgr
     ret = m_webServer->init();
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize WebServer");
 
-    // --- Sensors ---
     m_orientationEstimator = std::make_shared<OrientationEstimator>(m_configService.getConfigData().imu);
     m_orientationEstimator->reset();
     m_imuService = std::make_shared<IMUService>(m_configService.getConfigData().imu, m_eventBus, *m_orientationEstimator);
@@ -54,16 +49,14 @@ esp_err_t ComponentHandler::init(StateManager& stateMgr) { // Added StateManager
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize BatteryService");
     m_batteryService->start();
 
-    // --- Actuators ---
     m_motorService = std::make_shared<MotorService>(m_configService.getConfigData().motor, m_eventBus);
     ret = m_motorService->init();
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize MotorService");
 
-    // --- Logic ---
-    // Command Processor needs to be created before RobotController
-    m_commandProcessor = std::make_shared<CommandProcessor>(m_eventBus); // <<<--- Already Added
-    ret = m_commandProcessor->init();
+    m_commandProcessor = std::make_shared<CommandProcessor>(m_eventBus, m_configService);
+    ret = m_commandProcessor->init(); // Init loads config, sets up timer etc.
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize CommandProcessor");
+    // <<< END MODIFICATION >>>
 
     m_balancingAlgorithm = std::make_shared<BalancingAlgorithm>(m_configService, m_eventBus);
     ret = m_balancingAlgorithm->init();
@@ -71,10 +64,6 @@ esp_err_t ComponentHandler::init(StateManager& stateMgr) { // Added StateManager
 
     m_fallDetector = std::make_shared<FallDetector>(m_eventBus);
     m_fallDetector->reset();
-
-    // StateManager init (subscribes to events) can happen now or in main
-    // ret = m_stateManager.init();
-    // ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize StateManager subscriptions");
 
     ESP_LOGI(TAG, "ComponentHandler initialization complete");
     return ESP_OK;

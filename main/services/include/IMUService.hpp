@@ -1,18 +1,19 @@
-// main/services/include/IMUService.hpp
+// ================================================
+// File: main/services/include/IMUService.hpp
+// ================================================
 #pragma once
 
 #include "mpu6050.hpp"
 #include "ConfigData.hpp"
 #include "EventBus.hpp"
-#include "OrientationEstimator.hpp" // Keep include
-#include "freertos/FreeRTOS.h" // For BaseType_t if needed in header, maybe not
-#include "freertos/task.h" // For TaskHandle_t
-#include "freertos/semphr.h" // For SemaphoreHandle_t
-// #include "esp_log.h" // Move to cpp if possible
+#include "OrientationEstimator.hpp"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
 #include <atomic>
-#include <memory> // Not needed for fwd decls
+#include <vector> // For calibration storage
 
-// Forward declare events handled/published
+// Forward declarations
 class BaseEvent;
 class StartCalibrationRequestEvent;
 class CalibrationCompleteEvent;
@@ -23,9 +24,9 @@ public:
     ~IMUService();
 
     esp_err_t init();
-    esp_err_t triggerCalibration(); // This can now be called by event handler
+    esp_err_t triggerCalibration();
 
-    // --- Methods for Recovery State ---
+    // Recovery Methods
     esp_err_t resetSensor();
     esp_err_t reinitializeSensor();
     esp_err_t verifyCommunication();
@@ -38,28 +39,34 @@ private:
     OrientationEstimator& m_estimator;
     MPU6050 m_sensor;
 
-    TaskHandle_t m_fifo_task_handle; // Declaration
-    SemaphoreHandle_t m_calibration_mutex; // Declaration
-    volatile bool m_is_calibrating; // Declaration
-    float m_gyro_offset_radps[3]; // Declaration
+    TaskHandle_t m_fifo_task_handle;
+    SemaphoreHandle_t m_calibration_mutex;
+    volatile bool m_is_calibrating; // Should be accessed carefully across tasks/ISRs
 
-    std::atomic<uint8_t> m_isr_data_counter; // Declaration
+    // Store offsets directly in DPS (Degrees Per Second)
+    float m_gyro_offset_dps[3]; // Index 0:X, 1:Y, 2:Z
 
-    // --- Failure Tracking ---
-    static const uint8_t I2C_FAILURE_THRESHOLD = 5; // Max consecutive failures before reporting
+    std::atomic<uint8_t> m_isr_data_counter; // Counter for FIFO samples read by ISR
+
+    // Failure Tracking
+    static const uint8_t I2C_FAILURE_THRESHOLD = 5; // Consecutive I2C errors before reporting
     uint8_t m_consecutive_i2c_failures = 0;
 
-
-    // --- Event Handling ---
+    // Event Handling (Example, could be lambda in init)
     void handleStartCalibrationRequest(const BaseEvent& event);
 
-    // --- Existing methods ---
-    // Static ISR handler needs IRAM_ATTR on definition ONLY
+    // Internal Methods
+    // Static ISR handler (needs IRAM_ATTR on definition)
     static void IRAM_ATTR isrHandler(void* arg);
-    // Member function called by static handler also needs IRAM_ATTR on definition ONLY
-    void handleInterrupt(); // REMOVED IRAM_ATTR from declaration
+    // Member function called by static handler (no IRAM_ATTR needed here)
+    void handleInterrupt();
 
     static void fifo_task_wrapper(void *arg);
     void fifo_task();
     esp_err_t performCalibration();
+
+    // Calibration storage vectors (example for stdev calculation)
+    std::vector<float> m_calib_gx_samples;
+    std::vector<float> m_calib_gy_samples;
+    std::vector<float> m_calib_gz_samples;
 };

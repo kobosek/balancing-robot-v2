@@ -13,14 +13,14 @@
 #include "StateManager.hpp"
 #include "EventBus.hpp"
 #include "TelemetryDataPoint.hpp"
-#include "JoystickInputEvent.hpp"   // <<<--- ADDED: Event to publish
+#include "JoystickInputEvent.hpp"   // <<<--- Already Included
 
 #include "esp_check.h"
 #include "esp_http_server.h"
-#include "cJSON.h"                  // <<<--- ADDED: For parsing WS messages
+#include "cJSON.h"                  // <<<--- Already Included
 #include <memory>                   // For unique_ptr
-#include <cstring>                  // <<<--- ADDED: For strlen
-#include <algorithm>                // <<<--- ADDED: For std::max/min
+#include <cstring>                  // <<<--- Already Included
+#include <algorithm>                // <<<--- Already Included
 
 // Constructor: Instantiate handlers, injecting dependencies
 WebServer::WebServer(ConfigurationService& configService, StateManager& stateManager, EventBus& eventBus)
@@ -50,6 +50,7 @@ void WebServer::addTelemetrySnapshot(const TelemetryDataPoint& data) {
 }
 
 // init: Register handlers, including WebSocket
+// ... (init function remains the same) ...
 esp_err_t WebServer::init() {
     ESP_LOGI(TAG, "Initializing web server routing...");
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -127,7 +128,7 @@ esp_err_t WebServer::init() {
 
 
 // --- Static HTTP Handler Implementations ---
-// (No changes needed in these delegators)
+// ... (static handlers remain the same) ...
 esp_err_t WebServer::static_get_handler(httpd_req_t *req) {
     httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
     if (!instance || !instance->m_staticFileHandler) { ESP_LOGE(TAG, "Static file handler ctx invalid!"); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); return ESP_FAIL; }
@@ -159,15 +160,12 @@ esp_err_t WebServer::get_state_handler(httpd_req_t *req) {
     return instance->m_stateApiHandler->handleRequest(req);
 }
 
-
 // --- WebSocket Static Handler ---
+// ... (websocket_handler remains the same) ...
 esp_err_t WebServer::websocket_handler(httpd_req_t *req) {
     // Handle initial GET upgrade request
     if (req->method == HTTP_GET) {
         ESP_LOGI(TAG, "WebSocket client connecting (fd=%d)...", httpd_req_to_sockfd(req));
-        // Assign socket descriptor to user context for potential future use (e.g., targeted pushes)
-        // Note: This simple example doesn't use it, but it's good practice.
-        // req->sess_ctx = (void*)(intptr_t)httpd_req_to_sockfd(req); // Store fd
         return ESP_OK;
     }
 
@@ -180,30 +178,27 @@ esp_err_t WebServer::websocket_handler(httpd_req_t *req) {
     // Receive frame header to get length
     esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 0);
     if (ret != ESP_OK) {
-        // Check for normal disconnect codes
         if (ret == ESP_ERR_HTTPD_INVALID_REQ || ret == ESP_FAIL) {
              ESP_LOGI(TAG, "WebSocket client disconnected (fd=%d).", httpd_req_to_sockfd(req));
-             // Clean up session context if used: httpd_sess_trigger_close(req->handle, httpd_req_to_sockfd(req));
         } else {
              ESP_LOGE(TAG, "httpd_ws_recv_frame (len) failed: %s", esp_err_to_name(ret));
         }
-        return ret; // Return error or ESP_OK if handled disconnect
+        return ret;
     }
     ESP_LOGV(TAG, "WS frame len is %d", ws_pkt.len);
 
     // Receive payload if available
     if (ws_pkt.len > 0) {
-        buf = (uint8_t*)calloc(1, ws_pkt.len + 1); // +1 for null terminator
+        buf = (uint8_t*)calloc(1, ws_pkt.len + 1);
         if (!buf) { ESP_LOGE(TAG, "Failed calloc for WS payload"); return ESP_ERR_NO_MEM; }
         ws_pkt.payload = buf;
         ret = httpd_ws_recv_frame(req, &ws_pkt, ws_pkt.len);
         if (ret != ESP_OK) { ESP_LOGE(TAG, "httpd_ws_recv_frame (payload) failed: %s", esp_err_to_name(ret)); free(buf); return ret; }
-        buf[ws_pkt.len] = '\0'; // Null-terminate received data
+        buf[ws_pkt.len] = '\0';
         ESP_LOGV(TAG, "WS[%d]: RX Pkt type=%d, len=%d, data=%s", httpd_req_to_sockfd(req), ws_pkt.type, ws_pkt.len, (char*)ws_pkt.payload);
     } else {
          ESP_LOGV(TAG, "WS[%d]: RX Empty frame type=%d", httpd_req_to_sockfd(req), ws_pkt.type);
-         // Handle PING/PONG or other control frames if needed
-         return ESP_OK; // Ignore empty frames for now
+         return ESP_OK;
     }
 
     // Process the received frame using the member function
@@ -214,6 +209,7 @@ esp_err_t WebServer::websocket_handler(httpd_req_t *req) {
     free(buf); // Free payload buffer
     return ret;
 }
+
 
 // --- WebSocket Member Function Frame Handler ---
 esp_err_t WebServer::handleWebSocketFrame(httpd_req_t *req, httpd_ws_frame_t *ws_pkt) {
@@ -252,10 +248,9 @@ esp_err_t WebServer::handleWebSocketFrame(httpd_req_t *req, httpd_ws_frame_t *ws
         joystick_x = std::max(-1.0f, std::min(1.0f, joystick_x));
         joystick_y = std::max(-1.0f, std::min(1.0f, joystick_y));
 
-        // Publish the raw joystick data event
         ESP_LOGV(TAG, "WS: Publishing JOYSTICK_INPUT_RECEIVED: X=%.3f, Y=%.3f", joystick_x, joystick_y);
         JoystickInputEvent js_event(joystick_x, joystick_y);
-        m_eventBus.publish(js_event);
+        m_eventBus.publish(js_event); // Use the member variable
 
         ret = ESP_OK; // Successfully processed
 

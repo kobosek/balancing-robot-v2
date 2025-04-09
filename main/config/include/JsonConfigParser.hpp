@@ -1,14 +1,13 @@
 #pragma once
 
 #include "esp_err.h"
-#include <string>                     // For std::string
-#include "cJSON.h"                    // Needed for private helper declarations
+#include <string>
+#include "cJSON.h"
 
-// Forward declare ConfigData struct (if not including ConfigData.hpp directly)
-struct ConfigData; // Defined in config/include
-struct PIDConfig;  // Defined in config/include
+struct ConfigData;
+struct PIDConfig;
+struct ControlConfig;
 
-// Define the interface if still needed, otherwise remove
 class IConfigParser {
 public:
     virtual ~IConfigParser() = default;
@@ -16,7 +15,7 @@ public:
     virtual esp_err_t deserialize(const std::string& input, ConfigData& configOutput) const = 0;
 };
 
-class JsonConfigParser : public IConfigParser { // Inherit from interface if kept
+class JsonConfigParser : public IConfigParser {
 public:
     JsonConfigParser() = default;
     ~JsonConfigParser() override = default;
@@ -28,4 +27,6 @@ private:
     static constexpr const char* TAG = "JsonConfigParser";
     cJSON* serializePid(const PIDConfig& pidConfig) const;
     bool deserializePid(cJSON* pid_obj, PIDConfig& pidConfigOutput) const;
+    cJSON* serializeControl(const ControlConfig& controlConfig) const;
+    bool deserializeControl(cJSON* control_obj, ControlConfig& controlConfigOutput) const;
 };

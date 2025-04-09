@@ -1,4 +1,3 @@
-// js/constants.js
 export const MAX_DATA_POINTS = 400;
 export const DATA_FETCH_INTERVAL_MS = 150;
 export const STATE_FETCH_INTERVAL_MS = 1000;
@@ -17,7 +16,8 @@ export function getWsUrl() {
 }
 
 // Graphing constants
-export const GRAPH_COLORS = ['#6f42c1', '#0d6efd', '#dc3545', '#198754', '#ffc107', '#fd7e14', '#20c997'];
+export const GRAPH_COLORS = ['#6f42c1', '#0d6efd', '#dc3545', '#198754', '#ffc107', '#fd7e14', '#20c997', '#0dcaf0']; // Added color for yaw
 export const Y_SPEED_RANGE_DPS = 800;
-export const Y_ANGLE_RANGE_DEG = 45;
+export const Y_ANGLE_RANGE_DEG = 90;
 export const Y_EFFORT_RANGE = 1.0;
+export const Y_YAWRATE_RANGE_DPS = 180; // <<< ADDED: Range for Yaw Rate Graph (+/- 180 dps)

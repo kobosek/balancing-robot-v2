@@ -1,4 +1,3 @@
-// main/ConfigurationService.cpp
 #include "ConfigurationService.hpp"     // Relative path within module's include dir
 #include "ConfigUpdatedEvent.hpp"       // Found via INCLUDE_DIRS
 #include "SPIFFSStorageService.hpp"     // Relative path within module's include dir
@@ -37,9 +36,14 @@ esp_err_t ConfigurationService::init() {
             }
         }
     } else if (ret == ESP_ERR_NOT_FOUND) {
-         ESP_LOGW(TAG, "Configuration file '%s' not found. Using default values.", m_configKey.c_str());
+         ESP_LOGW(TAG, "Configuration file '%s' not found. Using default values and attempting to save them.", m_configKey.c_str());
          // Optionally save defaults here if desired
-         // saveInternal();
+         m_configData = ConfigData(); // Ensure defaults are set
+         esp_err_t save_ret = saveInternal(); // Attempt to save defaults
+         if (save_ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to save default configuration to '%s'.", m_configKey.c_str());
+            // Decide if this is a fatal error for init. Let's continue for now.
+         }
          ret = ESP_OK; // Treat not found as OK for init, using defaults
     }
     else {
@@ -87,7 +91,6 @@ esp_err_t ConfigurationService::updateConfigFromJson(const std::string& json) {
     return ret; // Return the result of the save operation
 }
 
-// --- Added Method Implementation ---
 esp_err_t ConfigurationService::getJsonString(std::string& jsonOutput) const {
     std::lock_guard<std::mutex> lock(m_mutex); // Lock for reading m_configData
     // Use the member parser instance to serialize the current data
@@ -97,7 +100,6 @@ esp_err_t ConfigurationService::getJsonString(std::string& jsonOutput) const {
     }
     return ret;
 }
-// --- End Added Method ---
 
 
 esp_err_t ConfigurationService::saveInternal() {

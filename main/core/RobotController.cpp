@@ -1,7 +1,5 @@
-// main/core/RobotController.cpp
 #include "RobotController.hpp"
 
-// --- Include full definitions for classes used ---
 #include "OrientationEstimator.hpp"
 #include "BalancingAlgorithm.hpp"
 #include "FallDetector.hpp"
@@ -12,8 +10,11 @@
 #include "SystemState.hpp"
 #include "WebServer.hpp"
 #include "TelemetryDataPoint.hpp"
-#include "BatteryStatusUpdatedEvent.hpp" // Should be included if used, though not directly here
-#include "CommandProcessor.hpp"     // <<<--- Already included previously
+#include "BatteryStatusUpdatedEvent.hpp"
+#include "CommandProcessor.hpp"
+#include "EventBus.hpp"
+#include "EventTypes.hpp"
+#include "TargetMovementCommand.hpp"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -29,8 +30,8 @@ RobotController::RobotController(
     FallDetector& fallDetector,
     WebServer& webServer,
     BatteryService& batteryService,
-    CommandProcessor& commandProcessor // <<<--- Already added previously
-) : // Use initializer list
+    CommandProcessor& commandProcessor
+) :
     m_estimator(estimator),
     m_encoderService(encoderService),
     m_motorService(motorService),
@@ -39,54 +40,88 @@ RobotController::RobotController(
     m_fallDetector(fallDetector),
     m_webServer(webServer),
     m_batteryService(batteryService),
-    m_commandProcessor(commandProcessor) // <<<--- Already added previously
+    m_commandProcessor(commandProcessor),
+    m_latestTargetPitchOffset_deg(0.0f),
+    m_latestTargetAngVel_dps(0.0f)
+    // m_target_values_mutex default constructed
 {
-    ESP_LOGI(TAG, "RobotController initialized.");
+    ESP_LOGI(TAG, "RobotController constructed.");
 }
+
+esp_err_t RobotController::init(EventBus& bus) {
+    ESP_LOGI(TAG, "Initializing RobotController subscriptions...");
+    bus.subscribe(EventType::TARGET_MOVEMENT_CMD_SET,
+        [this](const BaseEvent& ev) {
+            this->handleTargetMovementCommand(ev);
+        }
+    );
+    ESP_LOGI(TAG, "Subscribed to TARGET_MOVEMENT_CMD_SET events.");
+    return ESP_OK;
+}
+
+void RobotController::handleTargetMovementCommand(const BaseEvent& event) {
+    if (event.type == EventType::TARGET_MOVEMENT_CMD_SET) {
+        const auto& cmd = static_cast<const TargetMovementCommand&>(event);
+        { // Lock scope
+            std::lock_guard<std::mutex> lock(m_target_values_mutex);
+            m_latestTargetPitchOffset_deg = cmd.targetPitchOffset_deg;
+            m_latestTargetAngVel_dps = cmd.targetAngularVelocity_dps;
+        }
+        ESP_LOGV(TAG, "RC Handler: Updated targets: PitchOffset=%.2f, AngVel=%.2f", cmd.targetPitchOffset_deg, cmd.targetAngularVelocity_dps);
+    }
+}
+
 
 void RobotController::runControlStep(float dt) {
     int64_t startTimeMicros = esp_timer_get_time();
 
-    // --- Check State ---
+    // Check State
     SystemState currentState = m_stateManager.getCurrentState();
-    if (currentState == SystemState::IMU_RECOVERY || currentState == SystemState::FATAL_ERROR) {
-        m_motorService.setMotorEffort(0.0f, 0.0f); // Ensure motors are off
-        m_algorithm.resetState(); // Reset algorithm state
+    if (currentState == SystemState::IMU_RECOVERY || currentState == SystemState::FATAL_ERROR || currentState == SystemState::INIT) {
+        m_motorService.setMotorEffort(0.0f, 0.0f);
+        m_algorithm.resetState();
         ESP_LOGV(TAG, "Skipping control step due to state: %d", static_cast<int>(currentState));
-        return; // Skip control logic in these states
+        return;
     }
 
-    // 1. Get Orientation Data (Only if not in recovery/error)
+    // 1. Get Orientation Data
     float pitch_deg = m_estimator.getPitchDeg();
-    float pitch_rate_dps = 0.0f; // Placeholder - NEEDS IMPLEMENTATION in OrientationEstimator
+    float pitch_rate_dps = 0.0f; // Placeholder
+    float yaw_rate_dps = m_estimator.getYawRateDPS(); // <<< GET YAW RATE
 
     // 2. Check for Fall & Update State
-    // currentState = m_stateManager.getCurrentState(); // Already fetched above
     if (currentState == SystemState::BALANCING && m_stateManager.isFallDetectionEnabled()) {
          m_fallDetector.check(pitch_deg * OrientationEstimator::DEG_TO_RAD);
     }
-    currentState = m_stateManager.getCurrentState(); // Re-fetch state in case fall detector changed it
+    currentState = m_stateManager.getCurrentState(); // Re-fetch
 
     // 3. Update Encoder Speeds
     m_encoderService.update(dt);
     float speedL_dps = m_encoderService.getLeftSpeedDegPerSec();
     float speedR_dps = m_encoderService.getRightSpeedDegPerSec();
 
-    // --- 4. Get Target Velocities from CommandProcessor ---
-    // Getters now implicitly check for input timeout via checkInputTimeout()
-    float targetLinVel_mps = m_commandProcessor.getTargetLinearVelocity();
-    float targetAngVel_dps = m_commandProcessor.getTargetAngularVelocity();
-    // --- END Get Targets ---
+    // 4. Get Target Control Values
+    float currentTargetPitchOffset_deg;
+    float currentTargetAngVel_dps;
+    { // Lock scope
+        std::lock_guard<std::mutex> lock(m_target_values_mutex);
+        currentTargetPitchOffset_deg = m_latestTargetPitchOffset_deg;
+        currentTargetAngVel_dps = m_latestTargetAngVel_dps;
+    }
 
     // 5. Run Balancing Algorithm
     MotorEffort effort = {0.0f, 0.0f};
     if (currentState == SystemState::BALANCING) {
-         // Pass pitch_rate_dps once available
-         effort = m_algorithm.update(dt, pitch_deg, pitch_rate_dps, /* <--- Needs rate */
+         // <<< Pass yaw_rate_dps to algorithm >>>
+         effort = m_algorithm.update(dt, pitch_deg, pitch_rate_dps, yaw_rate_dps,
                                     speedL_dps, speedR_dps,
-                                    targetLinVel_mps, targetAngVel_dps); // Pass fetched targets
+                                    currentTargetPitchOffset_deg,
+                                    currentTargetAngVel_dps);
     } else {
         m_algorithm.resetState();
+        effort = {0.0f, 0.0f};
+        currentTargetPitchOffset_deg = 0.0f;
+        currentTargetAngVel_dps = 0.0f;
     }
 
     // 6. Set Motor Effort
@@ -96,16 +131,19 @@ void RobotController::runControlStep(float dt) {
     TelemetryDataPoint snapshot = {};
     snapshot.timestamp_us = startTimeMicros;
     snapshot.pitch_deg = pitch_deg;
-    snapshot.balanceSpeed_dps = m_algorithm.getLastBalancingSpeedDPS();
-    snapshot.targetAngVel_dps = targetAngVel_dps; // Store target DPS
     snapshot.speedLeft_dps = speedL_dps;
     snapshot.speedRight_dps = speedR_dps;
-    snapshot.effortLeft = effort.left;
-    snapshot.effortRight = effort.right;
     snapshot.batteryVoltage = m_batteryService.getLatestStatus().voltage;
     snapshot.systemState = static_cast<int>(currentState);
+    snapshot.speedSetpointLeft_dps = m_algorithm.getLastSpeedSetpointLeftDPS();
+    snapshot.speedSetpointRight_dps = m_algorithm.getLastSpeedSetpointRightDPS();
+    snapshot.desiredAngle_deg = currentTargetPitchOffset_deg;
+    snapshot.yawRate_dps = yaw_rate_dps; // <<< ADD YAW RATE TO TELEMETRY
     m_webServer.addTelemetrySnapshot(snapshot);
 
-    ESP_LOGV(TAG, "Ctrl Step: dt=%.4f, P=%.1f, SL=%.1f, SR=%.1f | TL=%.2f, TA=%.1f | EL=%.2f, ER=%.2f",
-        dt, pitch_deg, speedL_dps, speedR_dps, targetLinVel_mps, targetAngVel_dps, effort.left, effort.right);
+    // Update Log (added Yaw)
+    ESP_LOGV(TAG, "Ctrl Step: dt=%.4f, P=%.1f YawR=%.1f | TgtPO=%.1f, TgtAV=%.1f | SSetL=%.1f, SSetR=%.1f | SActL=%.1f, SActR=%.1f | EffL=%.2f, EffR=%.2f",
+        dt, pitch_deg, yaw_rate_dps, currentTargetPitchOffset_deg, currentTargetAngVel_dps,
+        snapshot.speedSetpointLeft_dps, snapshot.speedSetpointRight_dps,
+        speedL_dps, speedR_dps, effort.left, effort.right);
 }

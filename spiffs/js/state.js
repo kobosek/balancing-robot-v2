@@ -1,96 +1,84 @@
-// js/state.js
-import { MAX_DATA_POINTS } from './constants.js'; // Assuming constants.js exists
+import { MAX_DATA_POINTS } from './constants.js';
 
-// --- Application State ---
-// Note: telemetryData is initialized here but primarily modified by telemetry.js
+// Helper to create initial data arrays
+const createDataArray = () => Array(MAX_DATA_POINTS).fill(null);
+
 export const appState = {
+    // Telemetry Data Arrays
     telemetryData: {
-        pitchDeg: Array(MAX_DATA_POINTS).fill(null),
-        balanceSpeedDPS: Array(MAX_DATA_POINTS).fill(null),
-        speedLDPS: Array(MAX_DATA_POINTS).fill(null),
-        speedRDPS: Array(MAX_DATA_POINTS).fill(null),
-        effortL: Array(MAX_DATA_POINTS).fill(null),
-        effortR: Array(MAX_DATA_POINTS).fill(null),
-        targetAngVelDPS: Array(MAX_DATA_POINTS).fill(null),
+        pitchDeg: createDataArray(),          // Index 0 (Actual Pitch)
+        speedLDPS: createDataArray(),         // Index 1 (Actual Left)
+        speedRDPS: createDataArray(),         // Index 2 (Actual Right)
+        speedSetpointLDPS: createDataArray(), // Index 5 (Target Left)
+        speedSetpointRDPS: createDataArray(), // Index 6 (Target Right)
+        desiredAngleDeg: createDataArray(),   // Index 7 (Target Pitch Offset)
+        yawRateDPS: createDataArray(),        // <<< ADDED: Index 8 (Actual Yaw Rate)
+        joystickX: createDataArray(),         // Populated locally
+        joystickY: createDataArray(),         // Populated locally
     },
-    telemetryKeys: [], // Populated in main.js after initialization
-    currentSystemState: { id: -1, name: 'UNKNOWN', auto_recovery_enabled: false, fall_detection_enabled: false },
+
+    // <<< UPDATED telemetryKeys - Reflects object structure >>>
+    telemetryKeys: [
+        'pitchDeg',
+        'speedLDPS',
+        'speedRDPS',
+        'speedSetpointLDPS',
+        'speedSetpointRDPS',
+        'desiredAngleDeg',
+        'yawRateDPS', // <<< ADDED Key
+        'joystickX',
+        'joystickY'
+    ],
+
+    // Current snapshot states
+    currentSystemState: { id: -1, state_id: null, name: 'UNKNOWN', state_name: 'UNKNOWN', auto_recovery_enabled: false, fall_detection_enabled: false },
     currentBattery: { voltage: 0, percentage: 0 },
+
+    // Caches
     configDataCache: null,
-    telemetryJsonCache: null, // Stores last received raw telemetry JSON from /data
-    timers: {
-        dataFetch: null,
-        stateFetch: null,
-        wsReconnect: null,
-        joystickSend: null,
-    },
-    ws: null, // WebSocket instance managed by websocket.js
-    joystick: { // Joystick state managed by joystick.js
-        instance: null,
-        currentData: { x: 0, y: 0 },
-        lastSentData: { x: -99, y: -99 }, // Force initial send
-        isActive: false,
-    },
-    graph: { // Graph state managed by graph.js
-        ctx: null,
-        canvas: null,
-        container: null,
-        legendValues: [],
-        dpr: 1,
-    }
+    telemetryJsonCache: null,
+
+    // Timers
+    timers: { dataFetch: null, stateFetch: null, wsReconnect: null, joystickSend: null },
+
+    // WebSocket instance
+    ws: null,
+
+    // Joystick state
+    joystick: { instance: null, currentData: { x: 0, y: 0 }, lastSentData: { x: -99, y: -99 }, isActive: false },
+
+    // Graph states ( <<< ADDED Graph 3 state placeholder >>> )
+    graphs: [
+        { ctx: null, canvas: null, container: null, legendValueElements: [], dpr: 1, config: null }, // Graph 1
+        { ctx: null, canvas: null, container: null, legendValueElements: [], dpr: 1, config: null }, // Graph 2
+        { ctx: null, canvas: null, container: null, legendValueElements: [], dpr: 1, config: null }  // Graph 3 <<< ADDED
+    ]
 };
 
 // --- State Modification Functions ---
+// (updateConfigCache, invalidateConfigCache, updateTelemetryJsonCache, updateCurrentSystemState, updateBatteryState, updateTelemetryArray)
+// No changes needed in the modification functions themselves.
 
-export function updateConfigCache(data) {
-    appState.configDataCache = data;
-    console.log("Config cache updated.");
-}
-
-export function invalidateConfigCache() {
-    appState.configDataCache = null;
-    console.log("Config cache invalidated.");
-}
-
-export function updateTelemetryJsonCache(data) {
-    appState.telemetryJsonCache = data;
-}
-
-// Example: Update system state safely
+export function updateConfigCache(data) { appState.configDataCache = data; console.log("Config cache updated."); }
+export function invalidateConfigCache() { appState.configDataCache = null; console.log("Config cache invalidated."); }
+export function updateTelemetryJsonCache(data) { appState.telemetryJsonCache = data; }
 export function updateCurrentSystemState(newStateData) {
-     // Only update if state actually changed
-    if (appState.currentSystemState.id !== newStateData.state_id ||
-        appState.currentSystemState.auto_recovery_enabled !== newStateData.auto_recovery_enabled ||
-        appState.currentSystemState.fall_detection_enabled !== newStateData.fall_detection_enabled) {
-        console.log("State Update:", newStateData);
-        appState.currentSystemState = { ...appState.currentSystemState, ...newStateData };
-        return true; // Indicate that state changed
-    }
-    return false; // Indicate no change
+    const previousState = { ...appState.currentSystemState };
+    appState.currentSystemState = { ...previousState, ...newStateData };
+    if (previousState.state_id !== appState.currentSystemState.state_id ||
+        previousState.state_name !== appState.currentSystemState.state_name ||
+        previousState.auto_recovery_enabled !== appState.currentSystemState.auto_recovery_enabled ||
+        previousState.fall_detection_enabled !== appState.currentSystemState.fall_detection_enabled)
+    { console.log("State Update:", appState.currentSystemState); return true; }
+    return false;
 }
-
-// Function to update battery state
-export function updateBatteryState(voltage, percentage) {
-    appState.currentBattery.voltage = voltage;
-    appState.currentBattery.percentage = percentage;
-}
-
-// Function to shift and push data, maintaining size limit
+export function updateBatteryState(voltage, percentage) { appState.currentBattery.voltage = voltage; appState.currentBattery.percentage = percentage; }
 export function updateTelemetryArray(key, value) {
-    if (!appState.telemetryData[key]) return; // Guard against invalid key
-
+    if (!appState.telemetryData.hasOwnProperty(key)) { console.warn(`Skipping non-existent telemetry key: ${key}`); return; }
+    const targetArray = appState.telemetryData[key];
     let validValue = null;
-     if (value !== null && value !== undefined && !isNaN(parseFloat(value))) {
-        validValue = parseFloat(value);
-    } else {
-        // Handle invalid data: push null or previous value
-        const lastVal = appState.telemetryData[key].length > 0 ? appState.telemetryData[key][appState.telemetryData[key].length - 1] : null;
-        validValue = lastVal; // Push previous value if current is invalid
-        // console.warn(`Parsed invalid value for ${key}, pushing ${validValue}. Raw:`, value);
-    }
-
-    appState.telemetryData[key].push(validValue);
-    if (appState.telemetryData[key].length > MAX_DATA_POINTS) {
-        appState.telemetryData[key].shift();
-    }
+    if (value !== null && value !== undefined) { const parsedValue = parseFloat(value); if (!isNaN(parsedValue)) { validValue = parsedValue; } }
+    if (validValue === null) { const lastVal = targetArray.length > 0 ? targetArray[targetArray.length - 1] : null; if (lastVal !== null) { validValue = lastVal; } }
+    targetArray.push(validValue);
+    if (targetArray.length > MAX_DATA_POINTS) { targetArray.shift(); }
 }

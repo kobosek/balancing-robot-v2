@@ -1,36 +1,40 @@
-// main/include/OrientationEstimator.hpp
 #pragma once
 
-#include "ConfigData.hpp"               // Found via INCLUDE_DIRS (needed for MPU6050Config)
-#include <stdint.h>                     // For uint8_t, uint16_t
-#include <cmath>                        // For atan2, sqrt, M_PI
-#include <mutex>                        // For thread safety
+#include "ConfigData.hpp"               // For MPU6050Config
+#include <stdint.h>
+#include <cmath>
+#include <mutex>
+#include "esp_log.h" // Added for logging tag
+
 class OrientationEstimator {
 public:
     OrientationEstimator(const MPU6050Config& imuConfig);
 
     // Method called by IMUService's fifo_task to process a batch of raw FIFO data
-    // Takes raw scales from sensor driver (LSB/g, LSB/dps) and calibrated gyro offset (dps)
+    // <<< ADDED gyroOffsetZ_dps >>>
     void processFifoBatch(const uint8_t* fifoBuffer, uint16_t fifoCount,
                           float accelScale_lsb_g, float gyroScale_lsb_dps,
-                          float gyroOffsetY_dps);
+                          float gyroOffsetY_dps, float gyroOffsetZ_dps);
 
-    // Getters for estimated orientation (thread-safe) - Returns DEGREES
+    // Getters (thread-safe)
     float getPitchDeg() const;
-    // float getPitchRateDPS() const; // Optional: return filtered rate if needed
+    float getYawRateDPS() const; // <<< ADDED Yaw Rate Getter
+    // float getPitchRateDPS() const; // Still optional
 
     void reset(); // Reset filter state
+
     static constexpr float RAD_TO_DEG = 180.0f / M_PI;
     static constexpr float DEG_TO_RAD = M_PI / 180.0f;
 private:
     static constexpr const char* TAG = "OrientationEst";
-    // Define conversion factors here if needed frequently
+    static constexpr float SENSOR_SAMPLE_PERIOD_S = 0.001f; // Assuming 1kHz from config
 
-    // Sensor sample period for integration (assuming 1kHz)
-    static constexpr float SENSOR_SAMPLE_PERIOD_S = 0.001f;
+    const float m_alpha; // Complementary filter coefficient for pitch
 
-    const float m_alpha; // Complementary filter coefficient
-
+    // State variables (protected by mutex)
     float m_pitch_deg = 0.0f;
+    float m_yaw_rate_dps = 0.0f; // <<< ADDED Yaw Rate State
+    // float m_pitch_rate_dps = 0.0f; // Filtered pitch rate (optional)
+
     mutable std::mutex m_stateMutex;
 };

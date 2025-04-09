@@ -4,74 +4,115 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>ESP32 Balancing Robot Control Panel</title>
-    <!-- Link to external CSS file -->
     <link rel="stylesheet" href="style.css">
-    <!-- Include NippleJS library -->
+    <!-- Include NippleJS library for the virtual joystick -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.10.1/nipplejs.min.js"></script>
+    <!-- Include Chart.js library for graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.0/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
 </head>
 <body>
     <div class="container">
         <h1>ESP32 Balancing Robot</h1>
 
-        <!-- Status Section -->
-        <div class="status-section">
-             <h2>Status</h2>
-            <div class="status-item"><span class="status-label">System State:</span> <span id="systemStateValue" class="status-value">LOADING...</span> (<span id="systemStateId">?</span>)</div>
-            <div class="status-item"><span class="status-label">Battery:</span> <span id="batteryVoltageValue" class="status-value">?.??</span> V (<span id="batteryPercentValue" class="status-value">??</span>%)</div>
-            <div class="status-item"><span class="status-label">Auto Recovery:</span> <span id="autoRecoveryStatus" class="status-value">UNKNOWN</span></div>
-            <div class="status-item"><span class="status-label">Fall Detect:</span> <span id="fallDetectStatus" class="status-value">UNKNOWN</span></div>
-            <div class="status-item"><span class="status-label">Control Conn:</span> <span id="wsStatus" class="status-value" style="font-weight: bold;">INIT</span></div>
-        </div>
+        <!-- Top Row: Status/Config and Commands/Joystick -->
+        <div class="top-row">
 
-         <!-- Command Section -->
-        <div class="command-section">
-            <h2>Commands</h2>
-            <div class="button-group">
-                <button id="startBtn" class="start">Start Balancing</button>
-                <button id="stopBtn" class="stop">Stop / Idle</button>
-                <button id="calibrateBtn" class="calibrate">Calibrate IMU</button>
-                <button id="toggleRecoveryBtn" class="toggle-button">Enable Auto Recovery</button>
-                <button id="toggleFallDetectBtn" class="toggle-button">Enable Fall Detect</button>
+            <!-- Combined Status & Config Section (Left Side) -->
+            <div class="status-config-section top-row-item">
+                <!-- Status Display -->
+                <h2>Status</h2>
+                <div class="status-item">
+                    <span class="status-label">System State:</span>
+                    <span class="status-value"><span id="systemStateValue">LOADING...</span> (<span id="systemStateId">?</span>)</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Battery:</span>
+                     <span class="status-value"><span id="batteryVoltageValue">?.??</span> V (<span id="batteryPercentValue">??</span>%)</span>
+                </div>
+                <div class="status-item"><span class="status-label">Auto Recovery:</span> <span id="autoRecoveryStatus" class="status-value">UNKNOWN</span></div>
+                <div class="status-item"><span class="status-label">Fall Detect:</span> <span id="fallDetectStatus" class="status-value">UNKNOWN</span></div>
+                <div class="status-item"><span class="status-label">Control Conn:</span> <span id="wsStatus" class="status-value" style="font-weight: bold;">INIT</span></div>
+
+                <!-- Configuration Section -->
+                <h2>Configuration</h2>
+                <button id="openConfigBtn">Show/Hide Config</button>
+                <div id="configMenu" style="display: none;">
+                     <!-- Buttons to show specific config forms -->
+                     <button id="angleConfigBtn">Angle PID</button>
+                     <button id="speedLeftConfigBtn">Speed PID Left</button>
+                     <button id="speedRightConfigBtn">Speed PID Right</button>
+                     <button id="yawRateConfigBtn">Yaw Rate PID</button> <!-- <<< ADDED Yaw Rate Button -->
+                     <button id="generalConfigBtn">General</button>
+                     <!-- Containers for the forms (populated by JS) -->
+                     <div id="angleConfigFormContainer" class="form-container" style="display: none;"></div>
+                     <div id="speedLeftConfigFormContainer" class="form-container" style="display: none;"></div>
+                     <div id="speedRightConfigFormContainer" class="form-container" style="display: none;"></div>
+                     <div id="yawRateConfigFormContainer" class="form-container" style="display: none;"></div> <!-- <<< ADDED Yaw Rate Container -->
+                     <div id="generalConfigFormContainer" class="form-container" style="display: none;"></div>
+                </div>
             </div>
-            <!-- Joystick Zone -->
-            <div id="joystickZone"></div>
-        </div>
 
-        <!-- Configuration Section -->
-        <div class="config-section">
-             <h2>Configuration</h2>
-            <button id="openConfigBtn">Show/Hide Config</button>
-            <div id="configMenu" style="display: none;">
-                 <button id="angleConfigBtn">Angle PID</button>
-                 <button id="speedLeftConfigBtn">Speed PID Left</button>
-                 <button id="speedRightConfigBtn">Speed PID Right</button>
-                 <button id="generalConfigBtn">General</button>
-                 <div id="angleConfigFormContainer" class="form-container" style="display: none;"></div>
-                 <div id="speedLeftConfigFormContainer" class="form-container" style="display: none;"></div>
-                 <div id="speedRightConfigFormContainer" class="form-container" style="display: none;"></div>
-                 <div id="generalConfigFormContainer" class="form-container" style="display: none;"></div>
+             <!-- Command Section (Right Side) -->
+            <div class="command-section top-row-item">
+                <h2>Commands</h2>
+                <div class="button-group">
+                    <button id="startBtn" class="start">Start Balancing</button>
+                    <button id="stopBtn" class="stop">Stop / Idle</button>
+                    <button id="calibrateBtn" class="calibrate">Calibrate IMU</button>
+                    <button id="toggleFallDetectBtn" class="toggle-button">Enable Fall Detect</button> <!-- Class used by JS -->
+                    <button id="toggleRecoveryBtn" class="toggle-button">Enable Auto Recovery</button> <!-- Class used by JS -->
+                </div>
+                <!-- Joystick Zone -->
+                <div id="joystickZone"></div> <!-- NippleJS target -->
             </div>
-        </div>
+        </div> <!-- End top-row -->
 
-        <!-- Graph Section -->
+        <!-- Telemetry Section -->
         <h2>Telemetry</h2>
-        <div class="graph-container">
-            <div id="legend" class="legend">
-                <!-- Indices match telemetryData object keys order -->
-                <div class="legend-item"><span class="legend-color" style="background-color: #6f42c1;"></span> Pitch (deg): <span class="legend-value" id="telemetryValue0">0.00</span></div>
-                <div class="legend-item"><span class="legend-color" style="background-color: #0d6efd;"></span> Bal Spd (dps): <span class="legend-value" id="telemetryValue1">0.0</span></div>
-                <div class="legend-item"><span class="legend-color" style="background-color: #dc3545;"></span> Speed L (dps): <span class="legend-value" id="telemetryValue2">0.0</span></div>
-                <div class="legend-item"><span class="legend-color" style="background-color: #198754;"></span> Speed R (dps): <span class="legend-value" id="telemetryValue3">0.0</span></div>
-                <div class="legend-item"><span class="legend-color" style="background-color: #ffc107;"></span> Effort L (-1:1): <span class="legend-value" id="telemetryValue4">0.00</span></div>
-                <div class="legend-item"><span class="legend-color" style="background-color: #fd7e14;"></span> Effort R (-1:1): <span class="legend-value" id="telemetryValue5">0.00</span></div>
-                <div class="legend-item"><span class="legend-color" style="background-color: #20c997;"></span> Targ AngVel (dps): <span class="legend-value" id="telemetryValue6">0.0</span></div>
-            </div>
-            <canvas id="telemetryGraph"></canvas>
-        </div>
-    </div>
 
-    <!-- Link to external JavaScript file -->
-    <!-- Use defer to ensure HTML is parsed before script runs -->
+        <!-- Graph 1: Pitch (Actual vs Desired) & Control Input -->
+        <div class="graph-container" id="graphContainer1">
+            <h3>Pitch (Actual vs Desired) & Control Input</h3>
+            <div id="legend1" class="legend">
+                <!-- Populated by JS, corresponds to graphConfigs[0].series -->
+                <div class="legend-item"><span class="legend-color" style="background-color: #6f42c1;"></span> Pitch Actual (deg): <span class="legend-value" id="legendValG1_0">0.0</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #20c997;"></span> Pitch Desired (deg): <span class="legend-value" id="legendValG1_1">0.0</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #0d6efd;"></span> Joy X (-1:1): <span class="legend-value" id="legendValG1_2">0.0</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #198754;"></span> Joy Y (-1:1): <span class="legend-value" id="legendValG1_3">0.0</span></div>
+            </div>
+            <canvas id="telemetryGraph1"></canvas>
+        </div>
+
+        <!-- Graph 2: Speeds (Actual and Setpoints) -->
+        <div class="graph-container" id="graphContainer2">
+             <h3>Speeds (Actual & Setpoints)</h3>
+             <div id="legend2" class="legend">
+                <!-- Populated by JS, corresponds to graphConfigs[1].series -->
+                <div class="legend-item"><span class="legend-color" style="background-color: #ffc107;"></span> Setpoint L (dps): <span class="legend-value" id="legendValG2_0">0.0</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #fd7e14;"></span> Setpoint R (dps): <span class="legend-value" id="legendValG2_1">0.0</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #dc3545;"></span> Actual L (dps): <span class="legend-value" id="legendValG2_2">0.0</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #198754;"></span> Actual R (dps): <span class="legend-value" id="legendValG2_3">0.0</span></div>
+             </div>
+             <canvas id="telemetryGraph2"></canvas>
+        </div>
+
+        <!-- Graph 3: Yaw Rate --> <!-- <<< ADDED Graph 3 Section >>> -->
+        <div class="graph-container" id="graphContainer3">
+             <h3>Yaw Rate</h3>
+             <div id="legend3" class="legend">
+                <!-- Populated by JS, corresponds to graphConfigs[2].series -->
+                <div class="legend-item"><span class="legend-color" style="background-color: #0dcaf0;"></span> Yaw Rate (dps): <span class="legend-value" id="legendValG3_0">0.0</span></div>
+                <!-- Add more series here later if needed (e.g., target yaw rate) -->
+             </div>
+             <canvas id="telemetryGraph3"></canvas>
+        </div>
+        <!-- <<< END ADDED Graph 3 Section >>> -->
+
+    </div> <!-- End container -->
+
+    <!-- Load main JS module last -->
     <script src="js/main.js" type="module" defer></script>
 </body>
 </html>

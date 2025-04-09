@@ -1,4 +1,3 @@
-// main/algorithms/include/FallDetector.hpp
 #pragma once
 
 #include "EventBus.hpp"

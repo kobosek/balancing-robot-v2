@@ -1,4 +1,3 @@
-// main/core/include/ComponentHandler.hpp
 #pragma once
 
 #include <vector>
@@ -19,7 +18,7 @@ class EncoderService;
 class MotorService;
 class FallDetector;
 class BatteryService;
-class CommandProcessor;     // <<<--- Already Forward Declared
+class CommandProcessor;
 
 class ComponentHandler {
 public:
@@ -38,9 +37,8 @@ public:
     BalancingAlgorithm& getBalancingAlgorithm() { return *m_balancingAlgorithm; }
     FallDetector& getFallDetector() { return *m_fallDetector; }
     BatteryService& getBatteryService() { return *m_batteryService; }
-    CommandProcessor& getCommandProcessor() { return *m_commandProcessor; } // <<<--- Already Added
-
-
+    CommandProcessor& getCommandProcessor() { return *m_commandProcessor; }
+    
 private:
     static constexpr const char* TAG = "ComponentHandler";
 
@@ -58,5 +56,5 @@ private:
     std::shared_ptr<BalancingAlgorithm> m_balancingAlgorithm;
     std::shared_ptr<FallDetector> m_fallDetector;
     std::shared_ptr<BatteryService> m_batteryService;
-    std::shared_ptr<CommandProcessor> m_commandProcessor; // <<<--- Already Added
+    std::shared_ptr<CommandProcessor> m_commandProcessor;
 };

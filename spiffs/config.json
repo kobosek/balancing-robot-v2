@@ -6,6 +6,10 @@
   "mainLoop": {
     "interval_ms": 5
   },
+  "control": {
+    "joystick_exponent": 1.5,
+    "max_target_pitch_offset_deg": 20.0
+  },
   "imu": {
     "i2c_port": 0,
     "sda_pin": 7,
@@ -62,25 +66,34 @@
     "kd": 0.0,
     "output_min": -720.0,
     "output_max": 720.0,
-    "iterm_min": -10.0,  
+    "iterm_min": -10.0,
     "iterm_max": 10.0
   },
   "pid_speed_left": {
-    "kp": 0.01,         
+    "kp": 0.01,
     "ki": 0.05,
     "kd": 0.0001,
     "output_min": -1.0,
     "output_max": 1.0,
-    "iterm_min": -10.0,  
+    "iterm_min": -10.0,
     "iterm_max": 10.0
   },
   "pid_speed_right": {
-    "kp": 0.01,       
+    "kp": 0.01,
     "ki": 0.05,
     "kd": 0.0001,
     "output_min": -1.0,
     "output_max": 1.0,
-    "iterm_min": -10.0, 
+    "iterm_min": -10.0,
     "iterm_max": 10.0
+  },
+  "pid_yaw_rate": {
+    "kp": 0.1,        
+    "ki": 0.01,       
+    "kd": 0.005,       
+    "output_min": -100.0, 
+    "output_max": 100.0,  
+    "iterm_min": -50.0,  
+    "iterm_max": 50.0   
   }
 }

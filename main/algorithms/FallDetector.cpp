@@ -1,4 +1,3 @@
-// main/algorithms/FallDetector.cpp
 #include "FallDetector.hpp"
 #include "FallDetectionEvent.hpp"
 #include "EventBus.hpp"

@@ -1,16 +1,14 @@
 #pragma once
 
-#include "ConfigData.hpp"               // Found via INCLUDE_DIRS
-#include "EventBus.hpp"                 // Found via INCLUDE_DIRS
-#include "PIDController.hpp"            // Relative path within module's include dir
+#include "ConfigData.hpp"
+#include "EventBus.hpp"
+#include "PIDController.hpp"
 #include "esp_log.h"
-#include <memory>                       // std::shared_ptr if needed later
+#include <memory>
 
-// Forward declare needed classes
 class ConfigurationService;
 class BaseEvent;
 
-// Define output struct
 struct MotorEffort {
     float left = 0.0f;
     float right = 0.0f;
@@ -20,17 +18,18 @@ class BalancingAlgorithm {
 public:
     BalancingAlgorithm(ConfigurationService& configService, EventBus& eventBus);
 
-    // Declarations only
     esp_err_t init();
-    // Input units are DEGREES and DPS
+    // <<< MODIFIED update signature >>>
     MotorEffort update(float dt, float currentPitch_deg, float currentPitchRate_dps,
+                      float currentYawRate_dps, // <<< ADDED Yaw Rate Input
                       float currentSpeedLeft_dps, float currentSpeedRight_dps,
-                      float targetLinVel_mps, float targetAngVel_dps); // Target angular in DPS
+                      float targetPitchOffset_deg, float targetAngVel_dps);
     void resetState();
 
-    // --- Added Getter ---
-    float getLastBalancingSpeedDPS() const { return m_last_balancing_speed_dps; } // In DPS
-    // --- End Added Getter ---
+    // --- Getters for Telemetry ---
+    float getLastSpeedSetpointLeftDPS() const { return m_last_speed_setpoint_left_dps; }
+    float getLastSpeedSetpointRightDPS() const { return m_last_speed_setpoint_right_dps; }
+    // --- End Getters ---
 
 private:
     static constexpr const char* TAG = "BalancingAlgo";
@@ -40,16 +39,21 @@ private:
     PIDController m_anglePid;
     PIDController m_speedPidLeft;
     PIDController m_speedPidRight;
+    PIDController m_yawRatePid; // <<< ADDED Yaw Rate PID
 
-    float m_angleSetpoint_rad = 0.0f; // Still keep internal goal as rad, convert in update
-    float m_max_target_speed = 10.0f; // This limit is now in RAD/S - needs config or conversion
     float m_max_control_effort = 1.0f;
     float m_wheel_radius_m = 0.0325f;
     float m_robot_wheelbase_m = 0.15f;
 
-    // --- Added Member ---
-    float m_last_balancing_speed_dps = 0.0f; // Store last output of angle PID
-    // --- End Added Member ---
+    // Store PID limits locally for clamping
+    float m_angle_pid_output_min = -720.0f;
+    float m_angle_pid_output_max = 720.0f;
+
+
+    // --- Members for Telemetry ---
+    float m_last_speed_setpoint_left_dps = 0.0f;
+    float m_last_speed_setpoint_right_dps = 0.0f;
+    // --- End Members ---
 
     void handleConfigUpdate(const BaseEvent& event);
 };

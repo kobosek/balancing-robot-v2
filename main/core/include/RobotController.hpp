@@ -1,5 +1,10 @@
-// main/core/include/RobotController.hpp
+// ================================================
+// File: main/core/include/RobotController.hpp
+// ================================================
 #pragma once
+
+#include <mutex>
+#include "esp_err.h"
 
 // Forward Declarations
 class OrientationEstimator;
@@ -10,11 +15,13 @@ class MotorService;
 class BatteryService;
 class StateManager;
 class WebServer;
-class CommandProcessor;     // <<<--- Already forward declared
+class CommandProcessor;
+class BaseEvent;
+class TargetMovementCommand;
+class EventBus;
 
 class RobotController {
 public:
-    // Constructor takes references to all required components
     RobotController(
         OrientationEstimator& estimator,
         EncoderService& encoderService,
@@ -24,16 +31,16 @@ public:
         FallDetector& fallDetector,
         WebServer& webServer,
         BatteryService& batteryService,
-        CommandProcessor& commandProcessor // <<<--- Already added previously
+        CommandProcessor& commandProcessor
     );
 
-    // The main method called by the control task loop
+    esp_err_t init(EventBus& bus);
     void runControlStep(float dt);
 
 private:
     static constexpr const char* TAG = "RobotController";
 
-    // Store references to the components
+    // References to components
     OrientationEstimator& m_estimator;
     EncoderService& m_encoderService;
     MotorService& m_motorService;
@@ -42,5 +49,12 @@ private:
     FallDetector& m_fallDetector;
     WebServer& m_webServer;
     BatteryService& m_batteryService;
-    CommandProcessor& m_commandProcessor; // <<<--- Already added previously
+    CommandProcessor& m_commandProcessor;
+
+    // Latest command values (thread-safe)
+    float m_latestTargetPitchOffset_deg = 0.0f;
+    float m_latestTargetAngVel_dps = 0.0f;
+    std::mutex m_target_values_mutex;
+
+    void handleTargetMovementCommand(const BaseEvent& event);
 };

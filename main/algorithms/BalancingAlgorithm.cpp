@@ -1,10 +1,9 @@
-// main/algorithms/BalancingAlgorithm.cpp
 #include "BalancingAlgorithm.hpp"
-#include "ConfigurationService.hpp" // Found via INCLUDE_DIRS
-#include "EventBus.hpp"             // Found via INCLUDE_DIRS
-#include "ConfigUpdatedEvent.hpp"   // Found via INCLUDE_DIRS
-#include "BaseEvent.hpp"            // Found via INCLUDE_DIRS
-#include "EventTypes.hpp"           // Found via INCLUDE_DIRS
+#include "ConfigurationService.hpp"
+#include "EventBus.hpp"
+#include "ConfigUpdatedEvent.hpp"
+#include "BaseEvent.hpp"
+#include "EventTypes.hpp"
 #include "esp_check.h"
 #include <cmath>
 #include <algorithm>
@@ -21,22 +20,22 @@ BalancingAlgorithm::BalancingAlgorithm(ConfigurationService& configService, Even
     m_anglePid("angle"),
     m_speedPidLeft("speed_left"),
     m_speedPidRight("speed_right"),
-    m_last_balancing_speed_dps(0.0f) // Initialize member
+    m_yawRatePid("yaw_rate"), // <<< Initialize Yaw Rate PID
+    m_last_speed_setpoint_left_dps(0.0f),
+    m_last_speed_setpoint_right_dps(0.0f)
 {
      ESP_LOGI(TAG, "Balancing Algorithm created.");
-     // Subscribe to config updates before loading initial config
      m_eventBus.subscribe(EventType::CONFIG_UPDATED, [this](const BaseEvent& ev){ this->handleConfigUpdate(ev); });
-     handleConfigUpdate(BaseEvent(EventType::CONFIG_UPDATED)); // Load constants initially
+     handleConfigUpdate(BaseEvent(EventType::CONFIG_UPDATED));
 }
 
 esp_err_t BalancingAlgorithm::init() {
     ESP_LOGI(TAG, "Initializing Balancing Algorithm...");
     esp_err_t ret;
-    // PID params are already loaded by handleConfigUpdate called in constructor
     ret = m_anglePid.init(m_configService.getAnglePidConfig()); ESP_RETURN_ON_ERROR(ret, TAG, "Failed init Angle PID");
     ret = m_speedPidLeft.init(m_configService.getSpeedPidLeftConfig()); ESP_RETURN_ON_ERROR(ret, TAG, "Failed init Speed Left PID");
     ret = m_speedPidRight.init(m_configService.getSpeedPidRightConfig()); ESP_RETURN_ON_ERROR(ret, TAG, "Failed init Speed Right PID");
-    // Subscription already done in constructor
+    ret = m_yawRatePid.init(m_configService.getYawRatePidConfig()); ESP_RETURN_ON_ERROR(ret, TAG, "Failed init Yaw Rate PID"); // <<< Initialize Yaw Rate PID
     resetState();
     ESP_LOGI(TAG, "Balancing Algorithm Initialized.");
     return ESP_OK;
@@ -44,59 +43,72 @@ esp_err_t BalancingAlgorithm::init() {
 
 
 void BalancingAlgorithm::resetState() {
-    //ESP_LOGI(TAG, "Resetting Balancing Algorithm State.");
     m_anglePid.reset();
     m_speedPidLeft.reset();
     m_speedPidRight.reset();
-    m_angleSetpoint_rad = 0.0f;
-    m_last_balancing_speed_dps = 0.0f; // Reset stored value
+    m_yawRatePid.reset(); // <<< Reset Yaw Rate PID
+    m_last_speed_setpoint_left_dps = 0.0f;
+    m_last_speed_setpoint_right_dps = 0.0f;
 }
 
+// <<< MODIFIED update signature and logic >>>
 MotorEffort BalancingAlgorithm::update(float dt, float currentPitch_deg, float currentPitchRate_dps,
+                                      float currentYawRate_dps, // <<< ADDED Yaw Rate Input
                                       float currentSpeedLeft_dps, float currentSpeedRight_dps,
-                                      float targetLinVel_mps, float targetAngVel_dps)
+                                      float targetPitchOffset_deg, float targetAngVel_dps)
 {
     MotorEffort effort = {0.0f, 0.0f};
     if (dt <= 0) { ESP_LOGW(TAG, "Invalid dt (%.4f)", dt); return effort; }
 
-    // --- Angle Control (Using Degrees) ---
-    float angleSetpoint_deg = m_angleSetpoint_rad * RAD_TO_DEG;
-    float desiredSpeed_dps = m_anglePid.compute(angleSetpoint_deg, currentPitch_deg, dt); // Already clamped to ±720 by PID
+    // --- Angle Control (Determines base speed for balance/tilt) ---
+    float baseSpeed_dps = m_anglePid.compute(targetPitchOffset_deg, currentPitch_deg, dt);
+    // baseSpeed_dps is clamped by angle PID limits (e.g., +/- 720)
 
-    // --- !!! REMOVED REDUNDANT CLAMP !!! ---
-    // float max_target_speed_dps = m_max_target_speed * RAD_TO_DEG;
-    // desiredSpeed_dps = std::max(-max_target_speed_dps, std::min(max_target_speed_dps, desiredSpeed_dps));
-    // --- !!! END REMOVAL !!! ---
-
-    // Store the (potentially ±720) balancing speed component
-    m_last_balancing_speed_dps = desiredSpeed_dps;
-
-    // --- Speed Control (Using Degrees/Sec) ---
-    float targetSpeedLin_dps = 0.0f;
-    if (m_wheel_radius_m > 1e-5) {
-        targetSpeedLin_dps = (targetLinVel_mps / m_wheel_radius_m) * RAD_TO_DEG; // m/s -> rad/s -> dps
+    // --- Commanded Turn Speed Difference ---
+    float commandedTurnDiff_dps = 0.0f;
+    if (m_wheel_radius_m > 1e-5 && m_robot_wheelbase_m > 1e-5) {
+        commandedTurnDiff_dps = (m_robot_wheelbase_m / (2.0f * m_wheel_radius_m)) * targetAngVel_dps;
     }
-    float baseSpeedSetpoint_dps = desiredSpeed_dps + targetSpeedLin_dps;
-    float speedDiff_dps = 0.0f;
-    if (m_wheel_radius_m > 1e-5 && m_robot_wheelbase_m > 1e-5) { // Add check for wheelbase
-        // Ensure wheelbase is positive before using it
-        speedDiff_dps = (m_robot_wheelbase_m / (2.0f * m_wheel_radius_m)) * targetAngVel_dps;
-    }
-    float speedSetpointLeft_dps = baseSpeedSetpoint_dps - speedDiff_dps;
-    float speedSetpointRight_dps = baseSpeedSetpoint_dps + speedDiff_dps;
 
-    // Compute effort using speed PIDs (output clamped ±1.0 by PID config)
+    // --- Yaw Rate Stabilization Correction ---
+    float yawRateError_dps = targetAngVel_dps - currentYawRate_dps;
+    // The yaw rate PID output is a *correction* to the speed difference.
+    // Its output range should be relatively small compared to the base speed.
+    // Let's assume output is e.g. +/- 100 dps correction.
+    float yawCorrectionDiff_dps = m_yawRatePid.compute(targetAngVel_dps, currentYawRate_dps, dt);
+    // The PID output needs to be applied differentially. A positive error (robot turning slower than commanded right turn, or drifting left)
+    // needs a correction causing a right turn (increase right, decrease left).
+    // A positive yawCorrectionDiff_dps should increase the right turn effect.
+
+    // --- Combine Components for Wheel Speed Setpoints ---
+    // Start with base balancing speed
+    // Add commanded turn difference
+    // Add yaw stabilization difference correction
+    float speedSetpointLeft_dps = baseSpeed_dps - commandedTurnDiff_dps - yawCorrectionDiff_dps; // Subtract yaw correction to turn right
+    float speedSetpointRight_dps = baseSpeed_dps + commandedTurnDiff_dps + yawCorrectionDiff_dps; // Add yaw correction to turn right
+
+    // --- Clamp Final Speed Setpoints ---
+    // Use angle PID limits as the absolute maximum wheel speed
+    speedSetpointLeft_dps = std::max(m_angle_pid_output_min, std::min(m_angle_pid_output_max, speedSetpointLeft_dps));
+    speedSetpointRight_dps = std::max(m_angle_pid_output_min, std::min(m_angle_pid_output_max, speedSetpointRight_dps));
+
+    // Store clamped setpoints for telemetry
+    m_last_speed_setpoint_left_dps = speedSetpointLeft_dps;
+    m_last_speed_setpoint_right_dps = speedSetpointRight_dps;
+
+    // --- Compute Motor Effort using Speed PIDs ---
     effort.left = m_speedPidLeft.compute(speedSetpointLeft_dps, currentSpeedLeft_dps, dt);
     effort.right = m_speedPidRight.compute(speedSetpointRight_dps, currentSpeedRight_dps, dt);
 
-    // Re-clamp effort just in case PID limits weren't exactly ±1.0 (though they are)
+    // Final clamp on effort
     effort.left = std::max(-m_max_control_effort, std::min(m_max_control_effort, effort.left));
     effort.right = std::max(-m_max_control_effort, std::min(m_max_control_effort, effort.right));
 
-    ESP_LOGV(TAG, "P:%.2f|BSpd:%.1f|LSpd:%.1f RSpd:%.1f|LSet:%.1f RSet:%.1f|LEff:%.2f REff:%.2f",
-             currentPitch_deg, desiredSpeed_dps, // Log potentially ±720 Balance Speed
-             currentSpeedLeft_dps, currentSpeedRight_dps,
+    // Update Log Message (added YawRate, YawErr, YawCorr)
+    ESP_LOGV(TAG, "P:%.1f|TgtP:%.1f|Yaw:%.1f|TgtAV:%.1f|YawE:%.1f|YawC:%.1f|CmdDiff:%.1f|LSet:%.1f RSet:%.1f|LCur:%.1f RCur:%.1f|LEff:%.2f REff:%.2f",
+             currentPitch_deg, targetPitchOffset_deg, currentYawRate_dps, targetAngVel_dps, yawRateError_dps, yawCorrectionDiff_dps, commandedTurnDiff_dps,
              speedSetpointLeft_dps, speedSetpointRight_dps,
+             currentSpeedLeft_dps, currentSpeedRight_dps,
              effort.left, effort.right);
 
     return effort;
@@ -104,11 +116,17 @@ MotorEffort BalancingAlgorithm::update(float dt, float currentPitch_deg, float c
 
 void BalancingAlgorithm::handleConfigUpdate(const BaseEvent& event) {
      ESP_LOGI(TAG, "Handling config update event.");
-     // Reload PID parameters (this loads the ±720 limits for angle PID)
-     m_anglePid.updateParams(m_configService.getAnglePidConfig());
+     PIDConfig angleConf = m_configService.getAnglePidConfig();
+     m_anglePid.updateParams(angleConf);
      m_speedPidLeft.updateParams(m_configService.getSpeedPidLeftConfig());
      m_speedPidRight.updateParams(m_configService.getSpeedPidRightConfig());
-     // Reload physical parameters
+     m_yawRatePid.updateParams(m_configService.getYawRatePidConfig()); // <<< Update Yaw Rate PID
+
+     m_angle_pid_output_min = angleConf.getOutputMin();
+     m_angle_pid_output_max = angleConf.getOutputMax();
+     ESP_LOGI(TAG, "Stored Angle PID limits: Min=%.1f, Max=%.1f", m_angle_pid_output_min, m_angle_pid_output_max);
+
      m_wheel_radius_m = m_configService.getConfigData().encoder.wheel_diameter_mm / 2000.0f;
-     ESP_LOGI(TAG, "Internal parameters updated from configuration. Wheel Radius: %.4f m", m_wheel_radius_m);
+     // m_robot_wheelbase_m = ... // Load from config if added
+     ESP_LOGI(TAG, "Internal params updated. Wheel Radius: %.4f m, Wheelbase: %.4f m", m_wheel_radius_m, m_robot_wheelbase_m);
 }

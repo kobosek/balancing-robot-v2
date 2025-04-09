@@ -1,3 +1,7 @@
+================================================
+File: spiffs/style.css
+================================================
+/* spiffs/style.css */
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     line-height: 1.6;
@@ -23,30 +27,35 @@ h1 {
     color: #343a40;
 }
 h2 {
-    font-size: 1.5rem;
-    margin-top: 1.5rem;
+    font-size: 1.4rem; /* Slightly smaller H2 */
+    margin-top: 1rem; /* Adjusted top margin */
+    margin-bottom: 0.8rem; /* Adjusted bottom margin */
     color: #343a40;
     padding-bottom: 5px;
     border-bottom: 1px solid #eee;
 }
 h3 {
-    font-size: 1.25rem;
-    margin-top: 1rem;
+    font-size: 1.1rem; /* Slightly smaller for graph titles */
+    margin-top: 0.5rem; /* Reduce top margin */
+    margin-bottom: 0.5rem; /* Add bottom margin */
     color: #495057;
     border-bottom: none;
+    text-align: center;
 }
 button {
-    padding: 10px 18px;
+    padding: 9px 16px; /* Slightly reduced padding */
     border: none;
     border-radius: 5px;
     cursor: pointer;
-    font-size: 0.95rem;
+    font-size: 0.9rem; /* Slightly smaller font */
     font-weight: 500;
     transition: background-color 0.2s ease, box-shadow 0.2s ease;
     box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     color: white;
     user-select: none;
     -webkit-user-select: none; /* Disable text selection on buttons */
+    margin-right: 8px; /* Default spacing for buttons */
+    margin-bottom: 8px; /* Default spacing for buttons */
 }
 button:hover {
     opacity: 0.9;
@@ -55,59 +64,134 @@ button:hover {
 button:active {
     box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
 }
-.config-section, .command-section, .status-section {
+button:disabled { /* Style for disabled buttons */
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+
+/* --- Top Row Layout --- */
+.top-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
     margin-bottom: 25px;
     padding-bottom: 15px;
     border-bottom: 1px solid #dee2e6;
+    align-items: flex-start; /* Align items to the top */
 }
-.config-section:last-child, .command-section:last-child, .status-section:last-child {
+.top-row-item {
     border-bottom: none;
+    padding: 15px;
+    margin: 0;
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 45%;
+    min-width: 280px;
 }
-.config-section button, .command-section button {
-    margin-right: 10px;
+.top-row-item h2 {
+    margin-top: 0;
     margin-bottom: 10px;
+    border-bottom: none;
+    padding-bottom: 0;
+    font-size: 1.2rem;
+    text-align: left;
+}
+
+/* Specific item styles */
+.top-row > .status-config-section {
+    /* Inherits .top-row-item flex properties */
+}
+.top-row > .command-section {
+    /* Inherits .top-row-item flex properties */
+    text-align: center;
+}
+.top-row > .command-section h2 {
+    text-align: center;
+}
+/* --- End Top Row --- */
+
+
+/* --- Config Section Styles --- */
+.status-config-section #openConfigBtn {
+    background-color: #0d6efd;
+    width: auto;
+    margin-right: 8px;
+    margin-bottom: 10px;
+    align-self: flex-start;
+}
+.status-config-section #openConfigBtn:hover:not(:disabled) { background-color: #0b5ed7; }
+
+.status-config-section #configMenu {
+    margin-top: 5px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+.status-config-section #configMenu button {
+    background-color: #6c757d;
+    margin: 0;
+    flex-grow: 1;
+}
+.status-config-section #configMenu button:hover:not(:disabled) { background-color: #5a6268; }
+
+
+/* --- Command Section Specific Styles --- */
+.command-section .button-group {
+     margin-bottom: 15px;
+     display: flex;
+     flex-wrap: wrap;
+     justify-content: center;
+     gap: 8px;
+}
+.command-section .button-group button {
+    margin: 0;
 }
 .command-section button.start { background-color: #28a745; }
-.command-section button.start:hover { background-color: #218838; }
+.command-section button.start:hover:not(:disabled) { background-color: #218838; }
 .command-section button.stop { background-color: #dc3545; }
-.command-section button.stop:hover { background-color: #c82333; }
+.command-section button.stop:hover:not(:disabled) { background-color: #c82333; }
 .command-section button.calibrate { background-color: #ffc107; color: #212529; }
-.command-section button.calibrate:hover { background-color: #e0a800; }
+.command-section button.calibrate:hover:not(:disabled) { background-color: #e0a800; }
 .command-section .toggle-button { background-color: #6c757d; }
-.command-section .toggle-button.enabled { background-color: #198754; } /* Green when enabled */
-.command-section .toggle-button:hover { opacity: 0.9; }
+.command-section .toggle-button.enabled { background-color: #198754; }
+.command-section .toggle-button:hover:not(:disabled) { opacity: 0.8; }
 
-.config-section button { background-color: #0d6efd; }
-.config-section button:hover { background-color: #0b5ed7; }
 
+/* --- Form Styles --- */
 .form-container {
-    margin-top: 15px;
+    margin-top: 10px;
     border: 1px solid #ced4da;
-    padding: 20px;
+    padding: 15px;
     border-radius: 6px;
-    background-color: #f8f9fa;
+    background-color: #ffffff;
+    /* Removed max-height and overflow-y */
 }
 .form-group {
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     display: flex;
     align-items: center;
-    flex-wrap: wrap; /* Allow wrapping on small screens */
+    flex-wrap: wrap;
 }
 label {
     display: inline-block;
-    width: 90px; /* Fixed width for alignment */
+    width: 80px;
     text-align: right;
-    margin-right: 15px;
-    font-size: 0.9rem;
+    margin-right: 10px;
+    font-size: 0.85rem;
     color: #495057;
     font-weight: 500;
 }
 input[type="number"] {
-    width: 110px; /* Adjust as needed */
-    padding: 8px 10px;
+    width: 90px;
+    padding: 6px 8px;
     border: 1px solid #ced4da;
     border-radius: 4px;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     box-sizing: border-box;
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -116,101 +200,156 @@ input[type="number"]:focus {
     outline: 0;
     box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
 }
+.config-save-btn {
+    background-color: #0d6efd;
+    margin-top: 10px;
+    margin-right: 0;
+    width: 100%;
+}
+.config-save-btn:hover:not(:disabled) { background-color: #0b5ed7; }
+
+
+/* --- MODIFIED: Graph Container --- */
 .graph-container {
-    margin-top: 30px;
+    /* MODIFIED: Increased bottom margin for more space */
+    margin-top: 20px;
+    margin-bottom: 30px; /* Increased from 20px */
+    /* END MODIFICATION */
     background: white;
-    padding: 20px;
+    padding: 15px;
     border-radius: 8px;
     border: 1px solid #dee2e6;
-    width: 100%; /* Take full width of parent */
-    box-sizing: border-box; /* Include padding/border in width */
-    height: 60vh; /* Viewport height based */
+    width: 100%;
+    box-sizing: border-box;
+    height: 35vh;
+    min-height: 220px;
     position: relative;
     box-shadow: 0 1px 5px rgba(0,0,0,0.05);
 }
+/* Ensure the last graph doesn't have extra margin at the bottom */
+.graph-container:last-of-type {
+    margin-bottom: 20px; /* Optional: revert last one if needed */
+}
+
 .graph-container canvas {
-    display: block; /* Remove extra space below canvas */
+    display: block;
     border: none;
     width: 100%;
     height: 100%;
     margin: 0;
+    background-color: #fff;
 }
 .legend {
     position: absolute;
-    top: 15px;
-    right: 20px;
+    top: 10px;
+    right: 15px;
     background: rgba(255, 255, 255, 0.9);
-    padding: 10px 15px;
+    padding: 8px 12px;
     border-radius: 6px;
     border: 1px solid #e9ecef;
     box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    font-size: 0.8rem;
+    font-size: 0.75rem;
     z-index: 10;
 }
 .legend-item {
-    margin-bottom: 4px;
+    margin-bottom: 3px;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
 }
 .legend-color {
-    width: 18px;
+    width: 15px;
     height: 3px;
     display: inline-block;
     border-radius: 2px;
 }
 .legend-value {
     font-weight: 600;
-    min-width: 50px; /* Ensure alignment */
+    min-width: 40px;
     text-align: right;
     color: #495057;
     font-family: 'Courier New', Courier, monospace;
 }
-.status-section {
-    padding: 15px;
-    background-color: #e9f7fd;
-    border-radius: 6px;
-    border: 1px solid #bce8f1;
-}
+
+/* --- Status Section Specific Styles --- */
 .status-item {
-    margin-bottom: 8px;
-    font-size: 14px;
+    margin-bottom: 6px;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    display: flex;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    padding-left: 5px;
 }
 .status-label {
     font-weight: 600;
-    min-width: 100px;
-    display: inline-block; /* Align labels */
+    display: inline-block;
     color: #31708f;
+    margin-right: 5px;
+    flex-shrink: 0;
 }
 .status-value {
     font-weight: bold;
-    padding-left: 5px;
+    padding-left: 0;
+    text-align: left;
+    flex-grow: 1;
+    display: inline;
 }
-.config-save-btn {
-    background-color: #0d6efd;
-    margin-top: 15px;
+.status-value > span {
+    display: inline;
 }
 
-/* Command Section Layout */
- .command-section {
-    padding-bottom: 180px; /* Space for joystick below */
-    text-align: center; /* Center buttons and joystick zone */
- }
- .command-section .button-group {
-     margin-bottom: 15px;
- }
+
+/* --- Joystick Zone Styling --- */
 #joystickZone {
-    position: relative; /* NippleJS needs this */
-    width: 160px; height: 160px;
+    position: relative;
+    width: 130px; height: 130px;
     background-color: #e9ecef;
     border: 2px solid #adb5bd;
     border-radius: 50%;
     box-shadow: inset 0 0 10px rgba(0,0,0,0.1);
     user-select: none;
-    -webkit-user-select: none; /* Prevent selection */
-    touch-action: none; /* Prevent browser touch actions (scrolling, zooming) */
-    margin: 20px auto; /* Center the zone horizontally */
+    -webkit-user-select: none;
+    touch-action: none;
+    margin: 15px auto 0;
+    flex-shrink: 0;
 }
-/* Style the joystick handle */
-.nipple .front { background-color: #0d6efd !important; opacity: 0.7 !important; }
-.nipple .back { background-color: #ced4da !important; opacity: 0.6 !important; }
+
+/* --- Temporarily COMMENT OUT custom nipple styles --- */
+/*
+.nipple .front {
+    opacity: 0.7 !important;
+}
+.nipple .back {
+    background-color: #ced4da !important;
+    opacity: 0.6 !important;
+}
+#joystickZone .nipple .front {
+     background-color: blue !important;
+}
+*/
+/* --- End Comment Out --- */
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .top-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .top-row-item {
+         flex-basis: auto;
+         min-width: 95%;
+         margin-bottom: 15px;
+    }
+    .top-row-item:last-child {
+        margin-bottom: 0;
+    }
+    #joystickZone {
+        width: 110px; height: 110px;
+        align-self: center; /* Re-center joystick when stacked */
+    }
+    h1 { font-size: 1.6rem; }
+    h2 { font-size: 1.1rem; }
+    button { padding: 8px 12px; font-size: 0.85rem; }
+    .status-item { font-size: 0.8rem; }
+}

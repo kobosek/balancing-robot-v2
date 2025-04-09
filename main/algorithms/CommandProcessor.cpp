@@ -1,4 +1,3 @@
-// main/algorithms/CommandProcessor.cpp
 #include "CommandProcessor.hpp"
 #include "EventTypes.hpp"
 #include "SystemStateChangedEvent.hpp"
@@ -6,28 +5,39 @@
 #include "SystemState.hpp"
 #include "EventBus.hpp"
 #include "BaseEvent.hpp"
-#include "JoystickInputEvent.hpp" // <<<--- Include correct input event
+#include "JoystickInputEvent.hpp" // Include correct input event
+#include "ConfigurationService.hpp"
+#include "ConfigData.hpp"
 #include "esp_log.h"
+#include "esp_check.h"
 #include <algorithm>
 #include <cmath>
-#include "esp_timer.h" // <<<--- Include for timer functions
+#include "esp_timer.h" // Include for timer functions
 
-CommandProcessor::CommandProcessor(EventBus& bus) :
+CommandProcessor::CommandProcessor(EventBus& bus, ConfigurationService& configService) :
     m_eventBus(bus),
+    m_configService(configService),
     m_current_state(SystemState::INIT),
-    m_target_linear_velocity(0.0f),
-    m_target_angular_velocity(0.0f)
-    // m_target_mutex default constructed
-    // m_last_input_time_us = 0
-    // m_input_timed_out = true
+    m_target_pitch_offset_deg(0.0f), // <<< RENAMED/REPURPOSED
+    m_target_angular_velocity_dps(0.0f),
+    m_last_input_time_us(0),
+    m_input_timed_out(true),
+    m_timeout_timer(nullptr)
 {
-    // TODO: Load max velocities from ConfigurationService if desired
+
+}
+
+CommandProcessor::~CommandProcessor() {
+    stopTimeoutTimer(); // Ensure timer is stopped and deleted
 }
 
 esp_err_t CommandProcessor::init() {
     ESP_LOGI(TAG, "Initializing Command Processor...");
 
-    // Subscribe to state changes to reset targets
+    // Load initial config values
+    loadConfigParameters();
+
+    // Subscribe to state changes
     m_eventBus.subscribe(EventType::SYSTEM_STATE_CHANGED, [this](const BaseEvent& ev){
         if(ev.type == EventType::SYSTEM_STATE_CHANGED) {
              this->handleSystemStateChange(static_cast<const SystemStateChangedEvent&>(ev));
@@ -42,71 +52,89 @@ esp_err_t CommandProcessor::init() {
     });
     ESP_LOGI(TAG, "Subscribed to JOYSTICK_INPUT_RECEIVED events.");
 
+    // Subscribe to config updates to reload parameters
+    m_eventBus.subscribe(EventType::CONFIG_UPDATED, [this](const BaseEvent& ev) {
+        ESP_LOGI(TAG, "Config update event received, reloading parameters.");
+        this->loadConfigParameters();
+    });
+    ESP_LOGI(TAG, "Subscribed to CONFIG_UPDATED events.");
+
+
     m_last_input_time_us = esp_timer_get_time(); // Initialize timestamp
     m_input_timed_out = true; // Start in timed-out state
+
+    // Create the timeout timer
+    const esp_timer_create_args_t timer_args = {
+            .callback = &CommandProcessor::timeout_timer_callback,
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK, // Can run in timer task
+            .name = "cp_timeout_timer",
+    };
+
+    esp_err_t ret = esp_timer_create(&timer_args, &m_timeout_timer);
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed to create timeout timer");
 
     ESP_LOGI(TAG, "Command Processor Initialized.");
     return ESP_OK;
 }
 
-// --- Thread-safe Getters ---
-float CommandProcessor::getTargetLinearVelocity() const {
-    std::lock_guard<std::mutex> lock(m_target_mutex);
-    // Check timeout before returning (needs non-const access)
-    const_cast<CommandProcessor*>(this)->checkInputTimeout();
-    return m_target_linear_velocity;
+void CommandProcessor::loadConfigParameters() {
+    ControlConfig controlConf = m_configService.getControlConfig();
+    m_joystick_exponent = controlConf.joystick_exponent;
+    m_max_target_pitch_offset_deg = controlConf.max_target_pitch_offset_deg; // <<< LOADED
+    // TODO: Load max angular velocity if it becomes configurable
+    ESP_LOGI(TAG, "Loaded Control Params: JoyExp=%.2f, MaxPitchOffset=%.2f deg", m_joystick_exponent, m_max_target_pitch_offset_deg);
 }
-
-float CommandProcessor::getTargetAngularVelocity() const {
-    std::lock_guard<std::mutex> lock(m_target_mutex);
-    // Check timeout before returning
-    const_cast<CommandProcessor*>(this)->checkInputTimeout();
-    return m_target_angular_velocity;
-}
-// --- End Getters ---
-
 
 void CommandProcessor::handleSystemStateChange(const SystemStateChangedEvent& event) {
-    ESP_LOGD(TAG, "CP: State changed from %d to %d", static_cast<int>(event.previousState), static_cast<int>(event.newState));
     SystemState previous_state = event.previousState;
     m_current_state = event.newState;
 
-    // --- Reset Logic ---
-    // If leaving BALANCING state
-    if (previous_state == SystemState::BALANCING && m_current_state != SystemState::BALANCING) {
-        std::lock_guard<std::mutex> lock(m_target_mutex);
-        // Only reset and publish if targets were non-zero
-        if (std::fabs(m_target_linear_velocity) > 1e-4f || std::fabs(m_target_angular_velocity) > 1e-4f) {
-             ESP_LOGI(TAG, "CP: Leaving BALANCING, resetting targets and publishing zero.");
-             m_target_linear_velocity = 0.0f;
-             m_target_angular_velocity = 0.0f;
-             m_input_timed_out = true; // Ensure timed out state
-             // Unlock mutex *before* publishing event if possible, or just publish here
-             TargetMovementCommand zeroCmd(0.0f, 0.0f);
-             m_eventBus.publish(zeroCmd);
-        } else {
-            // Ensure timeout flag is set even if targets were already zero
-             m_input_timed_out = true;
+    // --- Stop/Start Timer based on Balancing State ---
+    if (m_current_state == SystemState::BALANCING && previous_state != SystemState::BALANCING) {
+        ESP_LOGI(TAG, "CP: Entering BALANCING, resetting targets, starting timeout timer.");
+        {
+            std::lock_guard<std::mutex> lock(m_target_mutex);
+            m_target_pitch_offset_deg = 0.0f; // <<< RESET
+            m_target_angular_velocity_dps = 0.0f;
+            m_last_input_time_us = esp_timer_get_time(); // Reset timer on enter
+            m_input_timed_out = true; // Start timed out, requires first command
         }
-    }
-    // If entering BALANCING state
-    else if (previous_state != SystemState::BALANCING && m_current_state == SystemState::BALANCING) {
-         ESP_LOGI(TAG, "CP: Entering BALANCING, resetting targets to zero and timeout state.");
-         std::lock_guard<std::mutex> lock(m_target_mutex);
-         m_target_linear_velocity = 0.0f;
-         m_target_angular_velocity = 0.0f;
-         m_last_input_time_us = esp_timer_get_time(); // Reset timer
-         m_input_timed_out = true; // Start timed out, requires first command
-         // Publish zero command to ensure algorithm starts from zero target
-         TargetMovementCommand zeroCmd(0.0f, 0.0f);
-         m_eventBus.publish(zeroCmd);
+        // Publish zero command to ensure algorithm starts from zero target
+        publishTargetCommand(0.0f, 0.0f); // Pitch Offset 0, Angular Vel 0
+        startTimeoutTimer(); // Start the periodic check
+
+    } else if (m_current_state != SystemState::BALANCING && previous_state == SystemState::BALANCING) {
+        ESP_LOGI(TAG, "CP: Leaving BALANCING, stopping timeout timer, resetting targets.");
+        stopTimeoutTimer(); // Stop the periodic check
+        bool had_velocity = false;
+        {
+            std::lock_guard<std::mutex> lock(m_target_mutex);
+            // Only reset and publish if targets were non-zero
+            if (std::fabs(m_target_pitch_offset_deg) > 1e-4f || std::fabs(m_target_angular_velocity_dps) > 1e-4f) { // <<< CHECK PITCH OFFSET
+                 m_target_pitch_offset_deg = 0.0f; // <<< RESET PITCH OFFSET
+                 m_target_angular_velocity_dps = 0.0f;
+                 had_velocity = true;
+            }
+            m_input_timed_out = true; // Ensure timed out state when not balancing
+        }
+         // Publish zero command if we stopped moving
+        if (had_velocity) {
+            publishTargetCommand(0.0f, 0.0f); // Pitch Offset 0, Angular Vel 0
+        }
     }
 }
 
-
 void CommandProcessor::handleJoystickInput(const JoystickInputEvent& event) {
-    // Update timestamp regardless of state
-    m_last_input_time_us = esp_timer_get_time();
+    int64_t current_time = esp_timer_get_time();
+    bool was_timed_out = false;
+
+    { // Lock scope for updating timestamp and timeout flag
+        std::lock_guard<std::mutex> lock(m_target_mutex);
+        m_last_input_time_us = current_time;
+        was_timed_out = m_input_timed_out; // Check if we *were* timed out
+        m_input_timed_out = false; // Input is now active
+    }
 
     if (m_current_state != SystemState::BALANCING) {
         // ESP_LOGV(TAG, "Ignoring joystick input, not in BALANCING state.");
@@ -117,64 +145,104 @@ void CommandProcessor::handleJoystickInput(const JoystickInputEvent& event) {
     float effective_x = (std::fabs(event.x) < JOYSTICK_DEADZONE) ? 0.0f : event.x;
     float effective_y = (std::fabs(event.y) < JOYSTICK_DEADZONE) ? 0.0f : event.y;
 
-    // --- Map joystick axes to robot velocities ---
-    // Y-axis controls linear velocity (forward/backward)
-    float desiredLinVel = m_max_linear_velocity * effective_y;
-    // X-axis controls angular velocity (turning)
-    // Negative X might mean turn right, depending on coordinate system/preference
-    float desiredAngVelDps = m_max_angular_velocity_dps * (-effective_x);
+    // --- Map joystick axes to robot control parameters ---
+    // Y-axis controls target pitch angle offset (forward/backward tilt) <<< MODIFIED
+    float mapped_y = std::copysign(std::pow(std::fabs(effective_y), m_joystick_exponent), effective_y);
+    // Negative Y typically means forward on joystick -> positive pitch offset
+    float desiredPitchOffset_deg = m_max_target_pitch_offset_deg * (-mapped_y);
 
-    // --- Check if targets changed OR if input timed out ---
+    // X-axis controls angular velocity (turning)
+    float mapped_x = std::copysign(std::pow(std::fabs(effective_x), m_joystick_exponent), effective_x);
+    float desiredAngVelDps = m_max_angular_velocity_dps * (-mapped_x); // Negative X might mean turn right
+
+    // --- Check if targets changed OR if input was previously timed out ---
     bool needs_publish = false;
     {
         std::lock_guard<std::mutex> lock(m_target_mutex);
-        if (m_input_timed_out || // Always publish if recovering from timeout
-            std::fabs(desiredLinVel - m_target_linear_velocity) > 1e-4f ||
-            std::fabs(desiredAngVelDps - m_target_angular_velocity) > 1e-4f)
+        if (was_timed_out || // Always publish if recovering from timeout
+            std::fabs(desiredPitchOffset_deg - m_target_pitch_offset_deg) > 1e-4f || // <<< CHECK PITCH OFFSET
+            std::fabs(desiredAngVelDps - m_target_angular_velocity_dps) > 1e-4f)
         {
-            m_target_linear_velocity = desiredLinVel;
-            m_target_angular_velocity = desiredAngVelDps;
-            m_input_timed_out = false; // Input is now active
+            m_target_pitch_offset_deg = desiredPitchOffset_deg; // <<< STORE PITCH OFFSET
+            m_target_angular_velocity_dps = desiredAngVelDps;
             needs_publish = true;
         }
     } // Mutex released
 
     if (needs_publish) {
-        publishTargetCommand(desiredLinVel, desiredAngVelDps);
+        publishTargetCommand(desiredPitchOffset_deg, desiredAngVelDps); // <<< PASS PITCH OFFSET
     }
 }
 
-// Check for input timeout - called periodically or before getting targets
-void CommandProcessor::checkInputTimeout() {
-    // No timeout check needed if not balancing or already timed out
-    if (m_current_state != SystemState::BALANCING || m_input_timed_out) {
-        return;
+void CommandProcessor::periodicTimeoutCheck() {
+    if (m_current_state != SystemState::BALANCING) {
+        return; // Should have been stopped by state change, but double-check
     }
 
-    if ((esp_timer_get_time() - m_last_input_time_us) > INPUT_TIMEOUT_US) {
-        ESP_LOGW(TAG, "CP: Joystick input timeout! Setting targets to zero.");
-        bool had_velocity = false;
-        {
-            std::lock_guard<std::mutex> lock(m_target_mutex);
+    bool publish_zero = false;
+    {
+        std::lock_guard<std::mutex> lock(m_target_mutex);
+        // Check if already timed out to avoid repeated logs/publishes
+        if (!m_input_timed_out && (esp_timer_get_time() - m_last_input_time_us) > INPUT_TIMEOUT_US) {
+            ESP_LOGW(TAG, "CP: Joystick input timeout detected by periodic check! Setting targets to zero.");
             // Check if targets were actually non-zero before resetting
-            if (std::fabs(m_target_linear_velocity) > 1e-4f || std::fabs(m_target_angular_velocity) > 1e-4f) {
-                m_target_linear_velocity = 0.0f;
-                m_target_angular_velocity = 0.0f;
-                had_velocity = true;
+            if (std::fabs(m_target_pitch_offset_deg) > 1e-4f || std::fabs(m_target_angular_velocity_dps) > 1e-4f) { // <<< CHECK PITCH OFFSET
+                m_target_pitch_offset_deg = 0.0f; // <<< RESET PITCH OFFSET
+                m_target_angular_velocity_dps = 0.0f;
+                publish_zero = true; // Need to publish the zero command
             }
             m_input_timed_out = true; // Mark as timed out
-        } // Mutex released
-
-        // Publish zero command only if we actually stopped moving
-        if (had_velocity) {
-            publishTargetCommand(0.0f, 0.0f);
         }
+    } // Mutex released
+
+    // Publish zero command outside the lock if needed
+    if (publish_zero) {
+        publishTargetCommand(0.0f, 0.0f); // Pitch Offset 0, Angular Vel 0
     }
 }
 
-// Helper to publish the final target command
-void CommandProcessor::publishTargetCommand(float linVel, float angVelDps) {
-    TargetMovementCommand cmd(linVel, angVelDps);
+// Static timer callback remains the same
+void CommandProcessor::timeout_timer_callback(void* arg) {
+    CommandProcessor* instance = static_cast<CommandProcessor*>(arg);
+    if (instance) {
+        instance->periodicTimeoutCheck();
+    }
+}
+
+// Timer start/stop helpers remain the same
+esp_err_t CommandProcessor::startTimeoutTimer() {
+    if (!m_timeout_timer) {
+        ESP_LOGE(TAG, "Timeout timer handle is null!");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (esp_timer_is_active(m_timeout_timer)) {
+        ESP_LOGD(TAG, "Timeout timer already active.");
+        return ESP_OK;
+    }
+    esp_err_t ret = esp_timer_start_periodic(m_timeout_timer, TIMEOUT_CHECK_INTERVAL_US);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Started periodic timeout timer (%llu us interval).", TIMEOUT_CHECK_INTERVAL_US);
+    } else {
+        ESP_LOGE(TAG, "Failed to start timeout timer: %s", esp_err_to_name(ret));
+    }
+    return ret;
+}
+
+esp_err_t CommandProcessor::stopTimeoutTimer() {
+    if (!m_timeout_timer) { return ESP_OK; }
+    if (!esp_timer_is_active(m_timeout_timer)) { return ESP_OK; }
+    esp_err_t ret = esp_timer_stop(m_timeout_timer);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Stopped periodic timeout timer.");
+    } else {
+        ESP_LOGE(TAG, "Failed to stop timeout timer: %s", esp_err_to_name(ret));
+    }
+    return ret;
+}
+
+// Helper to publish the final target command <<< MODIFIED SIGNATURE >>>
+void CommandProcessor::publishTargetCommand(float pitchOffsetDeg, float angVelDps) {
+    TargetMovementCommand cmd(pitchOffsetDeg, angVelDps);
     m_eventBus.publish(cmd);
-    ESP_LOGD(TAG, "CP: Published Target CMD: Lin=%.3f m/s, Ang=%.2f dps", linVel, angVelDps);
+    ESP_LOGD(TAG, "CP: Published Target CMD: PitchOffset=%.2f deg, AngVel=%.2f dps", pitchOffsetDeg, angVelDps);
 }

@@ -1,11 +1,9 @@
-// js/api.js
 import { API_CONFIG_URL, API_COMMAND_URL, API_STATE_URL, API_DATA_URL } from './constants.js';
 import { updateConfigCache, invalidateConfigCache, appState, updateCurrentSystemState } from './state.js';
 import { updateStatusSectionUI } from './ui.js'; // For state updates
 
 // --- Config API ---
 export async function fetchConfigApi() {
-    if (appState.configDataCache) return appState.configDataCache; // Return cached
     console.log("Fetching config from server...");
     try {
         const response = await fetch(API_CONFIG_URL, { cache: 'no-cache' });
@@ -70,9 +68,8 @@ export async function fetchStateApi() {
         if (!response.ok) throw new Error(`HTTP error ${response.status}`);
         const data = await response.json();
         if (data && typeof data === 'object') {
-            if (updateCurrentSystemState(data)) { // Use state function to update
-                updateStatusSectionUI(); // Update UI only if state changed
-            }
+            updateCurrentSystemState(data); // Update the state in appState
+            updateStatusSectionUI();
         } else {
             throw new Error("Invalid state data format");
         }

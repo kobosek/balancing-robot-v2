@@ -1,4 +1,3 @@
-// main/main.cpp
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_timer.h"
@@ -14,7 +13,7 @@
 #include "JsonConfigParser.hpp"
 #include "ConfigurationService.hpp"
 #include "StateManager.hpp"
-#include "IMUService.hpp" // <<< ADDED Include
+#include "IMUService.hpp" // Included
 #include "SystemState.hpp"
 #include "ConfigData.hpp"
 
@@ -79,10 +78,7 @@ extern "C" void app_main(void)
     static ConfigurationService configService(storageService, configParser, eventBus); ESP_ERROR_CHECK_WITHOUT_ABORT(configService.init()); ESP_LOGI(TAG, "ConfigService Init.");
 
     // ComponentHandler creates and initializes all internal components
-    static ComponentHandler componentHandler(configService, eventBus); // Removed stateManager
-
-    // StateManager needs IMUService, create it after ComponentHandler
-    // ComponentHandler::init needs StateManager, call it after StateManager is created
+    static ComponentHandler componentHandler(configService, eventBus);
 
     // Create StateManager AFTER ComponentHandler, passing IMUService
     static StateManager stateManager(eventBus, componentHandler.getIMUService()); ESP_LOGI(TAG, "StateManager Created.");
@@ -106,8 +102,6 @@ extern "C" void app_main(void)
 
     // --- Create RobotController Facade ---
     // Pass components obtained from the handler
-    // --- Create RobotController Facade ---
-    // Pass components obtained from the handler
     static RobotController robotController(
         componentHandler.getOrientationEstimator(),
         componentHandler.getEncoderService(),
@@ -117,11 +111,18 @@ extern "C" void app_main(void)
         componentHandler.getFallDetector(),
         componentHandler.getWebServer(),
         componentHandler.getBatteryService(),
-        componentHandler.getCommandProcessor() // <<<--- Pass CommandProcessor
-        // IMUService is not directly needed by RobotController, only via OrientationEstimator
+        componentHandler.getCommandProcessor()
     );
     ESP_LOGI(TAG, "RobotController Facade Created.");
-    // --- END Facade Creation ---
+
+    // <<< ADDED: Initialize RobotController subscriptions >>>
+    if (robotController.init(eventBus) != ESP_OK) {
+        ESP_LOGE(TAG, "RobotController Subscription Init Failed. Halting.");
+        stateManager.setState(SystemState::FATAL_ERROR);
+        return;
+    }
+    ESP_LOGI(TAG, "RobotController Initialized (Subscriptions Active).");
+    // <<< END ADDED >>>
 
 
     // --- Setup and Start Control Task ---
