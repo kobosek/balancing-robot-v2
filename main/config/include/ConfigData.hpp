@@ -37,11 +37,11 @@ struct MPU6050Config {
     gpio_num_t sda_pin = GPIO_NUM_7;
     gpio_num_t scl_pin = GPIO_NUM_8;
     uint8_t device_address = 0x68;
-    uint32_t i2c_freq_hz = 400000;
     gpio_num_t int_pin = GPIO_NUM_9;
+    uint32_t i2c_freq_hz = 400000;
     bool interrupt_active_high = true;
-    int accel_range = 8;
-    int gyro_range = 8; // Ensure this is appropriate (e.g., 500 deg/s = 8)
+    int accel_range = 1;        // 2 = ±8g (not 8)
+    int gyro_range = 1;         // 1 = ±500°/s (not 8)
     int dlpf_config = 3;
     int sample_rate_divisor = 0;
     int calibration_samples = 1000;

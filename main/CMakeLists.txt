@@ -1,19 +1,22 @@
 # main/CMakeLists.txt
 
-idf_component_register(SRCS  "core/ComponentHandler.cpp"
+idf_component_register(SRCS "tasks/ControlTask.cpp"
+                            "tasks/BatteryTask.cpp"
+                            "tasks/IMUTasks.cpp"
+                            "core/ComponentHandler.cpp"
                             "config/SPIFFSStorageService.cpp"
                             "config/JsonConfigParser.cpp"
                             "config/ConfigurationService.cpp"
                             "state/StateManager.cpp"
                             "core/EventBus.cpp"
+                            "core/Application.cpp"
                             "services/WiFiManager.cpp"
-                            # --- Web Handlers ---
                             "web/WebServer.cpp"
-                            "web/StaticFileHandler.cpp" # Added
-                            "web/TelemetryHandler.cpp"  # Added
-                            "web/ConfigApiHandler.cpp"  # Added
-                            "web/CommandApiHandler.cpp" # Added
-                            "web/StateApiHandler.cpp"   # Added
+                            "web/StaticFileHandler.cpp" 
+                            "web/TelemetryHandler.cpp" 
+                            "web/ConfigApiHandler.cpp"  
+                            "web/CommandApiHandler.cpp" 
+                            "web/StateApiHandler.cpp"   
                             # --- End Web Handlers ---
                             "algorithms/PIDController.cpp"
                             "drivers/mpu6050.cpp"
@@ -29,6 +32,7 @@ idf_component_register(SRCS  "core/ComponentHandler.cpp"
                             "core/RobotController.cpp" # Facade
                             "main.cpp"
                        INCLUDE_DIRS "."
+                                    "tasks/include"
                                     "algorithms/include"
                                     "config/include"
                                     "core/include"

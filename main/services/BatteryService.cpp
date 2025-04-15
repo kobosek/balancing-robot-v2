@@ -13,10 +13,8 @@
 #include "esp_adc/adc_oneshot.h"        // Keep specific ADC includes
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
-#include "freertos/FreeRTOS.h"          // Moved from header
-#include "freertos/task.h"              // Moved from header
 #include <mutex>                        // Moved from header
-
+#include "esp_rom_sys.h"                // For esp_rom_delay_us
 
 BatteryService::BatteryService(const BatteryConfig& config, EventBus& bus) :
     m_config(config),
@@ -24,7 +22,6 @@ BatteryService::BatteryService(const BatteryConfig& config, EventBus& bus) :
     m_adc_channel(ADC_CHANNEL_0), // Initialize channel
     m_adc_cali_handle(nullptr),
     m_adc_cali_enable(false),
-    m_monitor_task_handle(nullptr),
     m_oneshot_adc_handle(nullptr) // Initialize new handle
 {
     m_latest_status.percentage = -1;
@@ -33,8 +30,6 @@ BatteryService::BatteryService(const BatteryConfig& config, EventBus& bus) :
 }
 
 BatteryService::~BatteryService() {
-    stop(); // Ensure task/timer is stopped first
-
     // --- Correct ADC Calibration Deinitialization ---
     if (m_adc_cali_enable && m_adc_cali_handle) {
         ESP_LOGI(TAG, "Deleting ADC calibration scheme handle.");
@@ -173,128 +168,118 @@ bool BatteryService::adc_calibration_init(adc_channel_t channel) {
     return m_adc_cali_enable;
 }
 
-
-void BatteryService::start() {
-     if (m_monitor_task_handle != nullptr) { ESP_LOGW(TAG, "Monitor task already started."); return; }
-     ESP_LOGI(TAG, "Starting battery monitoring task...");
-     // Create task with sufficient stack size
-     xTaskCreate(monitorTaskWrapper, "BattMonTask", 3072, this, 5, &m_monitor_task_handle);
-     if (m_monitor_task_handle == nullptr) { ESP_LOGE(TAG, "Failed to create battery monitor task!"); }
-}
-
-void BatteryService::stop() {
-     if (m_monitor_task_handle == nullptr) { ESP_LOGD(TAG, "Monitor task not running."); return; }
-     ESP_LOGI(TAG, "Stopping battery monitoring task...");
-     vTaskDelete(m_monitor_task_handle);
-     m_monitor_task_handle = nullptr;
-}
-
 BatteryStatus BatteryService::getLatestStatus() const {
      std::lock_guard<std::mutex> lock(m_status_mutex);
      return m_latest_status;
 }
 
-
-void BatteryService::monitorTaskWrapper(void* arg) {
-    BatteryService* instance = static_cast<BatteryService*>(arg);
-    if (instance) instance->monitorTask(); else { ESP_LOGE("BattServWrap", "Task wrapper null instance!"); vTaskDelete(NULL); }
-}
-
-void BatteryService::monitorTask() {
-    ESP_LOGI(TAG, "Battery Monitor Task Started.");
-    while(1) {
-        updateBatteryStatus();
-        // Use the configured interval
-        TickType_t delay_ticks = pdMS_TO_TICKS(READ_INTERVAL_MS);
-        if (delay_ticks == 0) delay_ticks = 1; // Minimum 1 tick delay
-        vTaskDelay(delay_ticks);
-    }
-}
-
 void BatteryService::updateBatteryStatus() {
     if (!m_oneshot_adc_handle || m_adc_channel == ADC_CHANNEL_0) {
-        ESP_LOGE(TAG, "ADC handle (%p) or channel (%d) not initialized!", m_oneshot_adc_handle, (int)m_adc_channel);
+        ESP_LOGW(TAG, "ADC not initialized properly, cannot read battery voltage.");
         return;
     }
 
-    int adc_raw_sum = 0;
-    int valid_samples = 0;
-    int read_raw = 0;
-
+    // Read raw ADC value with oversampling
+    int raw_sum = 0;
     for (int i = 0; i < OVERSAMPLING; i++) {
-        esp_err_t read_ret = adc_oneshot_read(m_oneshot_adc_handle, m_adc_channel, &read_raw);
-        if (read_ret == ESP_OK) {
-            adc_raw_sum += read_raw;
-            valid_samples++;
-        } else {
-             ESP_LOGE(TAG, "ADC oneshot read failed on chan %d (err %d)", (int)m_adc_channel, read_ret);
-             vTaskDelay(pdMS_TO_TICKS(1)); // Small delay before next sample attempt
+        int raw_value;
+        esp_err_t ret = adc_oneshot_read(m_oneshot_adc_handle, m_adc_channel, &raw_value);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "ADC read failed (%s)! Skipping sample %d.", esp_err_to_name(ret), i);
+            continue;
+        }
+        raw_sum += raw_value;
+        // Small delay between samples
+        if (i < OVERSAMPLING - 1) { // Don't delay after the last sample
+            esp_rom_delay_us(10); // very short microsecond delay
         }
     }
 
-    if (valid_samples < OVERSAMPLING / 2) { // Require at least half the samples to be valid
-        ESP_LOGE(TAG, "Insufficient valid ADC samples obtained (%d/%d).", valid_samples, OVERSAMPLING);
-        // Optionally update status to indicate error?
-        // {
-        //     std::lock_guard<std::mutex> lock(m_status_mutex);
-        //     m_latest_status.voltage = -1.0f; // Error indicator
-        //     m_latest_status.percentage = -1;
-        // }
-        return;
-    }
+    // Calculate average
+    int adc_raw = raw_sum / OVERSAMPLING;
+    ESP_LOGD(TAG, "Raw ADC value: %d (average of %d samples)", adc_raw, OVERSAMPLING);
 
-    int adc_reading_avg = adc_raw_sum / valid_samples;
-
-    // Convert ADC reading to voltage in mV
-    int voltage_mv = 0;
-    if (m_adc_cali_enable && m_adc_cali_handle != nullptr) {
-        esp_err_t cali_ret = adc_cali_raw_to_voltage(m_adc_cali_handle, adc_reading_avg, &voltage_mv);
-         if (cali_ret != ESP_OK) {
-             ESP_LOGW(TAG, "ADC calibration failed (%s), voltage inaccurate.", esp_err_to_name(cali_ret));
-             voltage_mv = -1; // Indicate failure
-         }
-    } else {
-         ESP_LOGW(TAG, "ADC calibration not enabled/valid, voltage reading inaccurate.");
-         voltage_mv = -1; // Indicate calibration unavailable
-    }
-
-    float actual_voltage = 0.0f;
-    int percentage = 0;
-    bool is_low = false;
-
-    if (voltage_mv >= 0) { // Proceed only if voltage calculation was possible
-        float measured_voltage = static_cast<float>(voltage_mv) / 1000.0f;
-        actual_voltage = measured_voltage * m_config.voltage_divider_ratio;
-
-        float voltage_range = m_config.voltage_max - m_config.voltage_min;
-        if (voltage_range < 0.1f) { // Avoid division by zero/small range
-            ESP_LOGW(TAG, "Battery voltage range (max-min) is too small or invalid (%.2f). Percentage calculation unreliable.", voltage_range);
-            percentage = (actual_voltage >= m_config.voltage_max) ? 100 : 0;
+    // Convert to voltage
+    float voltage = 0.0f;
+    if (m_adc_cali_enable && m_adc_cali_handle) {
+        int volt_mv;
+        esp_err_t ret = adc_cali_raw_to_voltage(m_adc_cali_handle, adc_raw, &volt_mv);
+        if (ret == ESP_OK) {
+            voltage = volt_mv / 1000.0f; // Convert mV to V
         } else {
-            percentage = static_cast<int>(((actual_voltage - m_config.voltage_min) / voltage_range) * 100.0f);
+            ESP_LOGW(TAG, "ADC calibration conversion failed (%s)!", esp_err_to_name(ret));
+            // Fall back to manual conversion if calibration fails
+            voltage = (adc_raw * 0.0008f); // Default multiplier if no calibration
         }
-        percentage = std::max(0, std::min(100, percentage));
-        is_low = actual_voltage <= (m_config.voltage_min + 0.1f); // Threshold slightly above min
     } else {
-         ESP_LOGW(TAG, "Could not determine calibrated voltage.");
-         actual_voltage = -1.0f; // Error indicator
-         percentage = -1;      // Error indicator
-         is_low = false;       // Assume not low if unknown
+        // Manual conversion using approximate multiplier
+        voltage = (adc_raw * 0.0008f); // Default multiplier if no calibration
     }
 
-    ESP_LOGI(TAG, "Battery Update: ADC Avg Raw=%d (%d samples), Calibrated mV=%d, Actual V=%.2f, Percent=%d%%",
-             adc_reading_avg, valid_samples, voltage_mv, actual_voltage, percentage);
+    // Apply resistor divider correction from config
+    if (m_config.voltage_divider_ratio > 1.0f) {
+        voltage *= m_config.voltage_divider_ratio;
+    }
 
-    BatteryStatus newStatus = {.voltage = actual_voltage, .percentage = percentage, .isLow = is_low};
+    // No offset correction in the current BatteryConfig
+
+    ESP_LOGD(TAG, "Battery voltage: %.2fV (unclamped)", voltage);
+
+    // Sanity check - clamp voltage to reasonable range
+    if (voltage < 0.1f) {
+        ESP_LOGW(TAG, "Invalid voltage reading (%.2fV), clamping to min", voltage);
+        voltage = 0.1f;
+    } else if (voltage > 20.0f) { // Assume no battery > 20V
+        ESP_LOGW(TAG, "Unreasonable voltage reading (%.2fV), clamping to max", voltage);
+        voltage = 20.0f;
+    }
+
+    // Calculate percentage based on min/max from config
+    float percentage = 0.0f;
+    if (voltage <= m_config.voltage_min) {
+        percentage = 0.0f;
+    } else if (voltage >= m_config.voltage_max) {
+        percentage = 100.0f;
+    } else {
+        percentage = ((voltage - m_config.voltage_min) / 
+                     (m_config.voltage_max - m_config.voltage_min)) * 100.0f;
+    }
+    
+    // Round to integer
+    int rounded_percentage = static_cast<int>(percentage + 0.5f);
+    
+    // Check if battery is critically low (10% safety margin above min)
+    bool is_low = voltage <= (m_config.voltage_min + (m_config.voltage_max - m_config.voltage_min) * 0.1f);
+    
+    // Create battery status
+    BatteryStatus new_status;
+    new_status.voltage = voltage;
+    new_status.percentage = rounded_percentage;
+    new_status.isLow = is_low;
+    
+    // Check if status has changed significantly
+    bool status_changed = false;
     {
         std::lock_guard<std::mutex> lock(m_status_mutex);
-        // Only publish if status changed significantly? Optional.
-        // if (std::fabs(newStatus.voltage - m_latest_status.voltage) > 0.05 || newStatus.percentage != m_latest_status.percentage) {
-           m_latest_status = newStatus;
-        // } else { return; } // Skip publish if no change
+        
+        if (m_latest_status.percentage != rounded_percentage || 
+            std::abs(m_latest_status.voltage - voltage) > 0.05f ||
+            m_latest_status.isLow != is_low) {
+            
+            status_changed = true;
+            m_latest_status = new_status;
+        }
     }
-
-    // Publish the updated status
-    BatteryStatusUpdatedEvent event(newStatus);
-    m_eventBus.publish(event);
+    
+    // Publish event if status changed
+    if (status_changed) {
+        ESP_LOGI(TAG, "Battery status updated: %.2fV, %d%%, %s", 
+                voltage, rounded_percentage, is_low ? "LOW" : "OK");
+        
+        BatteryStatusUpdatedEvent event(new_status);
+        m_eventBus.publish(event);
+    } else {
+        ESP_LOGD(TAG, "Battery status unchanged: %.2fV, %d%%, %s", 
+                voltage, rounded_percentage, is_low ? "LOW" : "OK");
+    }
 }

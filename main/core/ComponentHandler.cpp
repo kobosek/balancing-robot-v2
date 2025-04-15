@@ -18,53 +18,71 @@
 #include "esp_log.h"
 #include "esp_check.h"
 
-ComponentHandler::ComponentHandler(ConfigurationService& config, EventBus& bus) : // Removed StateManager
+ComponentHandler::ComponentHandler(ConfigurationService& config, EventBus& bus) :
     m_configService(config),
     m_eventBus(bus)
 {}
 
-
-esp_err_t ComponentHandler::init(StateManager& stateMgr) { // Added StateManager parameter
-    ESP_LOGI(TAG, "Initializing Components via ComponentHandler");
+esp_err_t ComponentHandler::initComponents() {
+    ESP_LOGI(TAG, "Initializing Components that don't depend on StateManager");
     esp_err_t ret = ESP_OK;
 
+    // Create WiFiManager
     m_wifiManager = std::make_shared<WiFiManager>();
     ret = m_wifiManager->init(m_configService);
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize WiFiManager");
 
-    m_webServer = std::make_shared<WebServer>(m_configService, stateMgr, m_eventBus); // Use passed-in stateMgr
-    ret = m_webServer->init();
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize WebServer");
-
+    // Create OrientationEstimator and IMUService
     m_orientationEstimator = std::make_shared<OrientationEstimator>(m_configService.getConfigData().imu);
     m_orientationEstimator->reset();
+    
     m_imuService = std::make_shared<IMUService>(m_configService.getConfigData().imu, m_eventBus, *m_orientationEstimator);
     ret = m_imuService->init();
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize IMUService");
+    
+    // Create EncoderService
     m_encoderService = std::make_shared<EncoderService>(m_configService.getConfigData().encoder);
     ret = m_encoderService->init();
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize EncoderService");
+    
+    // Create BatteryService
     m_batteryService = std::make_shared<BatteryService>(m_configService.getConfigData().battery, m_eventBus);
     ret = m_batteryService->init();
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize BatteryService");
-    m_batteryService->start();
 
+    // Create MotorService
     m_motorService = std::make_shared<MotorService>(m_configService.getConfigData().motor, m_eventBus);
     ret = m_motorService->init();
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize MotorService");
 
+    // Create CommandProcessor
     m_commandProcessor = std::make_shared<CommandProcessor>(m_eventBus, m_configService);
     ret = m_commandProcessor->init(); // Init loads config, sets up timer etc.
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize CommandProcessor");
-    // <<< END MODIFICATION >>>
 
+    // Create BalancingAlgorithm
     m_balancingAlgorithm = std::make_shared<BalancingAlgorithm>(m_configService, m_eventBus);
     ret = m_balancingAlgorithm->init();
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize BalancingAlgorithm");
 
+    // Create FallDetector
     m_fallDetector = std::make_shared<FallDetector>(m_eventBus);
     m_fallDetector->reset();
 
-    ESP_LOGI(TAG, "ComponentHandler initialization complete");
+    ESP_LOGI(TAG, "Base components initialization complete");
+    return ESP_OK;
+}
+
+esp_err_t ComponentHandler::registerStateManager(StateManager& stateMgr) {
+    ESP_LOGI(TAG, "Registering StateManager with components that need it");
+    
+    // Create WebServer (needs StateManager)
+    m_webServer = std::make_shared<WebServer>(m_configService, stateMgr, m_eventBus);
+    esp_err_t ret = m_webServer->init();
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize WebServer");
+    
+    // Any other components that need StateManager would be initialized or updated here
+    
+    ESP_LOGI(TAG, "StateManager registration complete");
     return ESP_OK;
 }

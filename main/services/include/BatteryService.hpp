@@ -22,17 +22,21 @@ public:
     ~BatteryService();
 
     esp_err_t init();
-    void start();
-    void stop();
+    
+    // Methods for task management
+    void updateBatteryStatus(); // Now public for BatteryMonitorTask
 
     BatteryStatus getLatestStatus() const;
+    
+    // Get the configured monitoring interval
+    static constexpr TickType_t getMonitoringInterval() { return READ_INTERVAL_MS; }
 
 private:
     static constexpr const char* TAG = "BatteryService";
     static constexpr adc_bitwidth_t ADC_WIDTH = ADC_BITWIDTH_12;
     static constexpr adc_atten_t ADC_ATTEN = ADC_ATTEN_DB_12;
     static constexpr int OVERSAMPLING = 64;
-    static constexpr TickType_t READ_INTERVAL_MS = 5000; // TickType_t is now defined
+    static constexpr TickType_t READ_INTERVAL_MS = 5000;
 
     const BatteryConfig m_config;
     EventBus& m_eventBus;
@@ -40,15 +44,11 @@ private:
     adc_channel_t m_adc_channel;
     adc_cali_handle_t m_adc_cali_handle;
     bool m_adc_cali_enable;
-    TaskHandle_t m_monitor_task_handle; // TaskHandle_t is now defined
     adc_oneshot_unit_handle_t m_oneshot_adc_handle;
 
     mutable std::mutex m_status_mutex;
     BatteryStatus m_latest_status;
 
-    static void monitorTaskWrapper(void* arg);
-    void monitorTask();
     bool adc_calibration_init(adc_channel_t channel);
-    void updateBatteryStatus();
     esp_err_t map_gpio_to_channel();
 };

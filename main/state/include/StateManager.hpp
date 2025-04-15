@@ -9,53 +9,53 @@
 #include "esp_timer.h"
 
 // Forward declarations
-class IMUService; // <<< ADDED
 class BaseEvent;
 class FallDetectionEvent;
 class StartBalancingCommand;
 class StopCommand;
 class BatteryStatusUpdatedEvent;
 class OrientationDataEvent;
-class CalibrateCommandEvent; // <<< ADDED
-class CalibrationCompleteEvent; // <<< ADDED
-class EnableRecoveryCommandEvent; // <<< ADDED
-class DisableRecoveryCommandEvent; // <<< ADDED
-class EnableFallDetectCommandEvent; // <<< ADDED
-class DisableFallDetectCommandEvent; // <<< ADDED
-class IMU_CommunicationErrorEvent; // <<< ADDED
+class CalibrateCommandEvent; 
+class CalibrationCompleteEvent; 
+class EnableRecoveryCommandEvent; 
+class DisableRecoveryCommandEvent; 
+class EnableFallDetectCommandEvent; 
+class DisableFallDetectCommandEvent; 
+class IMU_CommunicationErrorEvent; 
+class ImuRecoverySucceededEvent; 
+class ImuRecoveryFailedEvent; 
 
 class StateManager {
 public:
-    StateManager(EventBus& eventBus, IMUService& imuService); // <<< MODIFIED
+    StateManager(EventBus& eventBus); 
     ~StateManager() = default;
 
     SystemState getCurrentState() const;
     void setState(SystemState newState);
-    esp_err_t init(); // Subscribe to events
+    esp_err_t init(); 
 
     // Method for enabling/disabling auto recovery
     void setAutoRecovery(bool enabled);
     bool isAutoRecoveryEnabled() const;
-    void enableFallDetection(bool enabled); // <<< ADDED
-    bool isFallDetectionEnabled() const;    // <<< ADDED
+    void enableFallDetection(bool enabled); 
+    bool isFallDetectionEnabled() const;    
 
 private:
     static constexpr const char* TAG = "StateManager";
-    static constexpr float RECOVERY_ANGLE_THRESHOLD_RAD = 0.087f; // Approx 5 degrees
-    static constexpr uint64_t RECOVERY_HOLD_TIME_US = 2000000; // 2 seconds <<< UPDATED
+    static constexpr float RECOVERY_ANGLE_THRESHOLD_RAD = 0.087f; 
+    static constexpr uint64_t RECOVERY_HOLD_TIME_US = 2000000; 
     // IMU Recovery constants
     static const uint8_t MAX_IMU_RECOVERY_ATTEMPTS = 3;
-    static const uint32_t IMU_RECOVERY_DELAY_MS = 1000; // Delay between recovery attempts
+    static const uint32_t IMU_RECOVERY_DELAY_MS = 1000; 
 
     EventBus& m_eventBus;
-    IMUService& m_imuService; // <<< ADDED
     SystemState m_currentState;
 
     // State for recovery logic
     bool m_withinRecoveryAngle = false;
     int64_t m_recoveryAngleStartTimeUs = 0;
-    bool m_autoRecoveryEnabled = true; // <<< ADDED - Default to enabled
-    bool m_fallDetectionEnabled = true; // <<< ADDED (Default true)
+    bool m_autoRecoveryEnabled = true; 
+    bool m_fallDetectionEnabled = true; 
     // State for IMU recovery logic
     SystemState m_preImuRecoveryState = SystemState::IDLE;
     uint8_t m_imu_recovery_attempts = 0;
@@ -66,17 +66,19 @@ private:
     void handleStop(const StopCommand& event);
     void handleBatteryUpdate(const BatteryStatusUpdatedEvent& event);
     void handleOrientationUpdate(const OrientationDataEvent& event);
-    void handleCalibrateCommand(const CalibrateCommandEvent& event); // <<< ADDED
-    void handleCalibrationComplete(const CalibrationCompleteEvent& event); // <<< ADDED
-    void handleEnableRecovery(const EnableRecoveryCommandEvent& event); // <<< ADDED
-    void handleDisableRecovery(const DisableRecoveryCommandEvent& event); // <<< ADDED
-    void handleEnableFallDetect(const EnableFallDetectCommandEvent& event);  // <<< ADDED
-    void handleDisableFallDetect(const DisableFallDetectCommandEvent& event); // <<< ADDED
-    void handleImuCommunicationError(const IMU_CommunicationErrorEvent& event); // <<< ADDED
+    void handleCalibrateCommand(const CalibrateCommandEvent& event); 
+    void handleCalibrationComplete(const CalibrationCompleteEvent& event); 
+    void handleEnableRecovery(const EnableRecoveryCommandEvent& event); 
+    void handleDisableRecovery(const DisableRecoveryCommandEvent& event); 
+    void handleEnableFallDetect(const EnableFallDetectCommandEvent& event);  
+    void handleDisableFallDetect(const DisableFallDetectCommandEvent& event); 
+    void handleImuCommunicationError(const IMU_CommunicationErrorEvent& event); 
+    void handleImuRecoverySucceeded(const ImuRecoverySucceededEvent& event); 
+    void handleImuRecoveryFailed(const ImuRecoveryFailedEvent& event); 
 
     // Recovery helpers
-    void attemptImuRecovery();
-    void handleRecoveryFailure(); // <<<--- ADDED HELPER DECLARATION
+    void requestImuRecovery(); 
+    void handleRecoveryFailure(); 
 
     // Helper for logging state names
     std::string stateToString(SystemState state) const;

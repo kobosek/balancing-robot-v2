@@ -25,6 +25,7 @@ enum class EventType {
 
     // Internal Requests / Notifications
     START_CALIBRATION_REQUEST,
+    CALIBRATION_STARTED,              // Added to signal calibration has started
     CALIBRATION_COMPLETE,
     TARGET_MOVEMENT_CMD_SET,            // CommandProcessor -> BalancingAlgorithm (Final Target Velocities)
 
@@ -33,6 +34,12 @@ enum class EventType {
     FALL_DETECTED,
     LOW_BATTERY_WARNING,
     IMU_COMMUNICATION_ERROR, // Added for IMU recovery
+    
+    // IMU Recovery Events
+    ATTEMPT_IMU_RECOVERY_COMMAND,    // StateManager -> IMUService (Request recovery)
+    IMU_RECOVERY_SUCCEEDED,          // IMUService -> StateManager (Recovery succeeded)
+    IMU_RECOVERY_FAILED,             // IMUService -> StateManager (Recovery failed)
+    
     ERROR_REPORTED
 };
 

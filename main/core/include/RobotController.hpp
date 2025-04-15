@@ -56,5 +56,8 @@ private:
     float m_latestTargetAngVel_dps = 0.0f;
     std::mutex m_target_values_mutex;
 
+    // Event bus reference
+    EventBus* m_eventBus = nullptr;
+
     void handleTargetMovementCommand(const BaseEvent& event);
 };

@@ -15,11 +15,11 @@
 #include "EventBus.hpp"
 #include "EventTypes.hpp"
 #include "TargetMovementCommand.hpp"
+#include "OrientationDataEvent.hpp"
 
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <cmath>
-
 
 RobotController::RobotController(
     OrientationEstimator& estimator,
@@ -43,13 +43,13 @@ RobotController::RobotController(
     m_commandProcessor(commandProcessor),
     m_latestTargetPitchOffset_deg(0.0f),
     m_latestTargetAngVel_dps(0.0f)
-    // m_target_values_mutex default constructed
 {
     ESP_LOGI(TAG, "RobotController constructed.");
 }
 
 esp_err_t RobotController::init(EventBus& bus) {
     ESP_LOGI(TAG, "Initializing RobotController subscriptions...");
+    m_eventBus = &bus; // Store reference to event bus
     bus.subscribe(EventType::TARGET_MOVEMENT_CMD_SET,
         [this](const BaseEvent& ev) {
             this->handleTargetMovementCommand(ev);
@@ -71,7 +71,6 @@ void RobotController::handleTargetMovementCommand(const BaseEvent& event) {
     }
 }
 
-
 void RobotController::runControlStep(float dt) {
     int64_t startTimeMicros = esp_timer_get_time();
 
@@ -88,6 +87,12 @@ void RobotController::runControlStep(float dt) {
     float pitch_deg = m_estimator.getPitchDeg();
     float pitch_rate_dps = 0.0f; // Placeholder
     float yaw_rate_dps = m_estimator.getYawRateDPS(); // <<< GET YAW RATE
+    
+    // Publish orientation data event for auto recovery and other systems
+    if (m_eventBus) {
+        OrientationDataEvent orientation_event(pitch_deg * OrientationEstimator::DEG_TO_RAD, pitch_rate_dps * OrientationEstimator::DEG_TO_RAD);
+        m_eventBus->publish(orientation_event);
+    }
 
     // 2. Check for Fall & Update State
     if (currentState == SystemState::BALANCING && m_stateManager.isFallDetectionEnabled()) {

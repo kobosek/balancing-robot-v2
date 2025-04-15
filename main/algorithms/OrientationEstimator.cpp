@@ -23,6 +23,14 @@ void OrientationEstimator::processFifoBatch(const uint8_t* fifoBuffer, uint16_t 
                                             float accelScale_lsb_g, float gyroScale_lsb_dps,
                                             float gyroOffsetY_dps, float gyroOffsetZ_dps)
 {
+    // FIFO structure offsets (when GYRO_ACCEL is enabled)
+    static constexpr int ACCEL_X_OFFSET = 0;
+    static constexpr int ACCEL_Y_OFFSET = 2;
+    static constexpr int ACCEL_Z_OFFSET = 4;
+    static constexpr int GYRO_X_OFFSET = 6;
+    static constexpr int GYRO_Y_OFFSET = 8;
+    static constexpr int GYRO_Z_OFFSET = 10;
+    
     const int bytes_per_sample = 12; // 6 accel + 6 gyro
     uint16_t num_samples = fifoCount / bytes_per_sample;
 
@@ -50,19 +58,21 @@ void OrientationEstimator::processFifoBatch(const uint8_t* fifoBuffer, uint16_t 
         int offset = i * bytes_per_sample;
 
         // --- Parse Raw Data (Big Endian) ---
-        int16_t ax_raw = (fifoBuffer[offset + 0] << 8) | fifoBuffer[offset + 1];
-        int16_t ay_raw = (fifoBuffer[offset + 2] << 8) | fifoBuffer[offset + 3];
-        int16_t az_raw = (fifoBuffer[offset + 4] << 8) | fifoBuffer[offset + 5];
-        int16_t gy_raw = (fifoBuffer[offset + 8] << 8) | fifoBuffer[offset + 9]; // Pitch rate raw
-        int16_t gz_raw = (fifoBuffer[offset + 10] << 8) | fifoBuffer[offset + 11]; // Yaw rate raw <<< PARSE GZ
+        int16_t ax_raw = (fifoBuffer[offset + ACCEL_X_OFFSET] << 8) | fifoBuffer[offset + ACCEL_X_OFFSET + 1];
+        int16_t ay_raw = (fifoBuffer[offset + ACCEL_Y_OFFSET] << 8) | fifoBuffer[offset + ACCEL_Y_OFFSET + 1];
+        int16_t az_raw = (fifoBuffer[offset + ACCEL_Z_OFFSET] << 8) | fifoBuffer[offset + ACCEL_Z_OFFSET + 1];
+        int16_t gx_raw = (fifoBuffer[offset + GYRO_X_OFFSET] << 8) | fifoBuffer[offset + GYRO_X_OFFSET + 1]; // Roll rate raw
+        int16_t gy_raw = (fifoBuffer[offset + GYRO_Y_OFFSET] << 8) | fifoBuffer[offset + GYRO_Y_OFFSET + 1]; // Pitch rate raw
+        int16_t gz_raw = (fifoBuffer[offset + GYRO_Z_OFFSET] << 8) | fifoBuffer[offset + GYRO_Z_OFFSET + 1]; // Yaw rate raw
 
         // --- Convert to Physical Units (g's and dps) ---
         float ax_g = static_cast<float>(ax_raw) / accelScale_lsb_g;
         float ay_g = static_cast<float>(ay_raw) / accelScale_lsb_g;
         float az_g = static_cast<float>(az_raw) / accelScale_lsb_g;
         // Gyro in Degrees Per Second (dps), applying offsets
+        float gx_dps = static_cast<float>(gx_raw) / gyroScale_lsb_dps; // No offset for X currently
         float gy_dps = (static_cast<float>(gy_raw) / gyroScale_lsb_dps) - gyroOffsetY_dps; // Apply Y offset
-        float gz_dps = (static_cast<float>(gz_raw) / gyroScale_lsb_dps) - gyroOffsetZ_dps; // Apply Z offset <<< APPLY GZ OFFSET
+        float gz_dps = (static_cast<float>(gz_raw) / gyroScale_lsb_dps) - gyroOffsetZ_dps; // Apply Z offset
 
         // --- Complementary Filter for Pitch ---
         float accel_pitch_deg = current_pitch_deg; // Default if calculation fails
