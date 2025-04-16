@@ -4,7 +4,6 @@
 #include "EventBus.hpp"
 #include "PIDController.hpp"
 #include "esp_log.h"
-#include <memory>
 
 class ConfigurationService;
 class BaseEvent;
@@ -19,12 +18,13 @@ public:
     BalancingAlgorithm(ConfigurationService& configService, EventBus& eventBus);
 
     esp_err_t init();
-    // <<< MODIFIED update signature >>>
     MotorEffort update(float dt, float currentPitch_deg, float currentPitchRate_dps,
-                      float currentYawRate_dps, // <<< ADDED Yaw Rate Input
+                      float currentYawRate_dps, //
                       float currentSpeedLeft_dps, float currentSpeedRight_dps,
                       float targetPitchOffset_deg, float targetAngVel_dps);
     void resetState();
+
+    void subscribeToEvents(EventBus& bus);
 
     // --- Getters for Telemetry ---
     float getLastSpeedSetpointLeftDPS() const { return m_last_speed_setpoint_left_dps; }
@@ -39,7 +39,7 @@ private:
     PIDController m_anglePid;
     PIDController m_speedPidLeft;
     PIDController m_speedPidRight;
-    PIDController m_yawRatePid; // <<< ADDED Yaw Rate PID
+    PIDController m_yawRatePid; 
 
     float m_max_control_effort = 1.0f;
     float m_wheel_radius_m = 0.0325f;

@@ -8,13 +8,13 @@
 #include "BatteryStatusUpdatedEvent.hpp"
 #include "OrientationDataEvent.hpp"
 #include "CalibrateCommandEvent.hpp"
-#include "StartCalibrationRequestEvent.hpp" 
+#include "StartCalibrationRequestEvent.hpp"
 #include "CalibrationCompleteEvent.hpp"
 #include "EnableRecoveryCommandEvent.hpp"
 #include "DisableRecoveryCommandEvent.hpp"
-#include "EnableFallDetectCommandEvent.hpp" 
-#include "DisableFallDetectCommandEvent.hpp" 
-#include "IMU_CommunicationErrorEvent.hpp" 
+#include "EnableFallDetectCommandEvent.hpp"
+#include "DisableFallDetectCommandEvent.hpp"
+#include "IMU_CommunicationErrorEvent.hpp"
 #include "ImuRecoveryEvents.hpp"
 
 // Other includes
@@ -38,37 +38,17 @@ StateManager::StateManager(EventBus& eventBus) : // Removed IMUService dependenc
     m_currentState(SystemState::INIT),
     m_withinRecoveryAngle(false),
     m_recoveryAngleStartTimeUs(0),
-    m_autoRecoveryEnabled(true), 
-    m_fallDetectionEnabled(true), 
-    m_preImuRecoveryState(SystemState::IDLE), 
-    m_imu_recovery_attempts(0) 
+    m_autoRecoveryEnabled(true),
+    m_fallDetectionEnabled(true),
+    m_preImuRecoveryState(SystemState::IDLE),
+    m_imu_recovery_attempts(0)
 {}
 
 esp_err_t StateManager::init() {
-    ESP_LOGI(TAG, "Initializing StateManager and subscribing to events...");
-    // Existing subscriptions...
-    m_eventBus.subscribe(EventType::FALL_DETECTED, [this](const BaseEvent& ev){ this->handleFallDetected(static_cast<const FallDetectionEvent&>(ev)); });
-    m_eventBus.subscribe(EventType::START_COMMAND_RECEIVED, [this](const BaseEvent& ev){ this->handleStartBalancing(static_cast<const StartBalancingCommand&>(ev)); });
-    m_eventBus.subscribe(EventType::STOP_COMMAND_RECEIVED, [this](const BaseEvent& ev){ this->handleStop(static_cast<const StopCommand&>(ev)); });
-    m_eventBus.subscribe(EventType::BATTERY_STATUS_UPDATED, [this](const BaseEvent& ev){ this->handleBatteryUpdate(static_cast<const BatteryStatusUpdatedEvent&>(ev)); });
-    m_eventBus.subscribe(EventType::ORIENTATION_DATA_READY, [this](const BaseEvent& ev){ this->handleOrientationUpdate(static_cast<const OrientationDataEvent&>(ev)); }); // Keep this!
-    m_eventBus.subscribe(EventType::CALIBRATE_COMMAND_RECEIVED, [this](const BaseEvent& ev){ this->handleCalibrateCommand(static_cast<const CalibrateCommandEvent&>(ev)); });
-    m_eventBus.subscribe(EventType::CALIBRATION_COMPLETE, [this](const BaseEvent& ev){ this->handleCalibrationComplete(static_cast<const CalibrationCompleteEvent&>(ev)); });
-    m_eventBus.subscribe(EventType::ENABLE_RECOVERY_COMMAND_RECEIVED, [this](const BaseEvent& ev){ this->handleEnableRecovery(static_cast<const EnableRecoveryCommandEvent&>(ev)); });
-    m_eventBus.subscribe(EventType::DISABLE_RECOVERY_COMMAND_RECEIVED, [this](const BaseEvent& ev){ this->handleDisableRecovery(static_cast<const DisableRecoveryCommandEvent&>(ev)); });
-
-    // Subscriptions for fall detection enable/disable
-    m_eventBus.subscribe(EventType::ENABLE_FALL_DETECT_COMMAND_RECEIVED, [this](const BaseEvent& ev){ this->handleEnableFallDetect(static_cast<const EnableFallDetectCommandEvent&>(ev)); });
-    m_eventBus.subscribe(EventType::DISABLE_FALL_DETECT_COMMAND_RECEIVED, [this](const BaseEvent& ev){ this->handleDisableFallDetect(static_cast<const DisableFallDetectCommandEvent&>(ev)); });
-
-    // Subscribe to IMU communication errors
-    m_eventBus.subscribe(EventType::IMU_COMMUNICATION_ERROR, [this](const BaseEvent& ev){ this->handleImuCommunicationError(static_cast<const IMU_CommunicationErrorEvent&>(ev)); });
-    
-    // Subscribe to IMU recovery events
-    m_eventBus.subscribe(EventType::IMU_RECOVERY_SUCCEEDED, [this](const BaseEvent& ev){ this->handleImuRecoverySucceeded(static_cast<const ImuRecoverySucceededEvent&>(ev)); });
-    m_eventBus.subscribe(EventType::IMU_RECOVERY_FAILED, [this](const BaseEvent& ev){ this->handleImuRecoveryFailed(static_cast<const ImuRecoveryFailedEvent&>(ev)); });
-
-    ESP_LOGI(TAG, "StateManager Initialized and subscribed.");
+    ESP_LOGI(TAG, "Initializing StateManager...");
+    // Init method might be empty now, or used for other setup if needed.
+    // Subscriptions are handled in subscribeToEvents.
+    ESP_LOGI(TAG, "StateManager Initialized.");
     return ESP_OK;
 }
 
@@ -103,11 +83,11 @@ std::string StateManager::stateToString(SystemState state) const {
      switch(state) {
           case SystemState::INIT: return "INIT";
           case SystemState::IDLE: return "IDLE";
-          case SystemState::CALIBRATING_IMU: return "CALIBRATING_IMU"; 
+          case SystemState::CALIBRATING_IMU: return "CALIBRATING_IMU";
           case SystemState::BALANCING: return "BALANCING";
           case SystemState::FALLEN: return "FALLEN";
-          case SystemState::IMU_RECOVERY: return "IMU_RECOVERY"; 
-          case SystemState::FATAL_ERROR: return "FATAL_ERROR"; 
+          case SystemState::IMU_RECOVERY: return "IMU_RECOVERY";
+          case SystemState::FATAL_ERROR: return "FATAL_ERROR";
           default: return "UNKNOWN";
      }
 }
@@ -148,11 +128,41 @@ void StateManager::setState(SystemState newState) {
     }
 }
 
+// <<< ADDED: Event subscription logic >>>
+void StateManager::subscribeToEvents(EventBus& bus) {
+    ESP_LOGI(TAG, "Subscribing StateManager to events...");
+
+    // Essential state transitions & commands
+    bus.subscribe(EventType::FALL_DETECTED, [this](const BaseEvent& ev){ this->handleFallDetected(static_cast<const FallDetectionEvent&>(ev)); });
+    bus.subscribe(EventType::START_COMMAND_RECEIVED, [this](const BaseEvent& ev){ this->handleStartBalancing(static_cast<const StartBalancingCommand&>(ev)); });
+    bus.subscribe(EventType::STOP_COMMAND_RECEIVED, [this](const BaseEvent& ev){ this->handleStop(static_cast<const StopCommand&>(ev)); });
+    bus.subscribe(EventType::BATTERY_STATUS_UPDATED, [this](const BaseEvent& ev){ this->handleBatteryUpdate(static_cast<const BatteryStatusUpdatedEvent&>(ev)); });
+
+    // Auto-recovery related
+    bus.subscribe(EventType::ORIENTATION_DATA_READY, [this](const BaseEvent& ev){ this->handleOrientationUpdate(static_cast<const OrientationDataEvent&>(ev)); });
+    bus.subscribe(EventType::ENABLE_RECOVERY_COMMAND_RECEIVED, [this](const BaseEvent& ev){ this->handleEnableRecovery(static_cast<const EnableRecoveryCommandEvent&>(ev)); });
+    bus.subscribe(EventType::DISABLE_RECOVERY_COMMAND_RECEIVED, [this](const BaseEvent& ev){ this->handleDisableRecovery(static_cast<const DisableRecoveryCommandEvent&>(ev)); });
+
+    // Fall detection enable/disable
+    bus.subscribe(EventType::ENABLE_FALL_DETECT_COMMAND_RECEIVED, [this](const BaseEvent& ev){ this->handleEnableFallDetect(static_cast<const EnableFallDetectCommandEvent&>(ev)); });
+    bus.subscribe(EventType::DISABLE_FALL_DETECT_COMMAND_RECEIVED, [this](const BaseEvent& ev){ this->handleDisableFallDetect(static_cast<const DisableFallDetectCommandEvent&>(ev)); });
+
+    // Calibration related
+    bus.subscribe(EventType::CALIBRATE_COMMAND_RECEIVED, [this](const BaseEvent& ev){ this->handleCalibrateCommand(static_cast<const CalibrateCommandEvent&>(ev)); });
+    bus.subscribe(EventType::CALIBRATION_COMPLETE, [this](const BaseEvent& ev){ this->handleCalibrationComplete(static_cast<const CalibrationCompleteEvent&>(ev)); });
+
+    // IMU health/recovery related
+    bus.subscribe(EventType::IMU_COMMUNICATION_ERROR, [this](const BaseEvent& ev){ this->handleImuCommunicationError(static_cast<const IMU_CommunicationErrorEvent&>(ev)); });
+    bus.subscribe(EventType::IMU_RECOVERY_SUCCEEDED, [this](const BaseEvent& ev){ this->handleImuRecoverySucceeded(static_cast<const ImuRecoverySucceededEvent&>(ev)); });
+    bus.subscribe(EventType::IMU_RECOVERY_FAILED, [this](const BaseEvent& ev){ this->handleImuRecoveryFailed(static_cast<const ImuRecoveryFailedEvent&>(ev)); });
+    ESP_LOGI(TAG, "StateManager Subscriptions Complete.");
+}
+
 // --- Event Handlers ---
 
 void StateManager::handleFallDetected(const FallDetectionEvent& event) {
     ESP_LOGW(TAG, "Fall Detected Event Received!");
-    if (!m_fallDetectionEnabled) { 
+    if (!m_fallDetectionEnabled) {
          ESP_LOGI(TAG, "Fall detection transition is disabled, ignoring fall event.");
          return;
     }
@@ -284,13 +294,13 @@ void StateManager::handleCalibrationComplete(const CalibrationCompleteEvent& eve
 void StateManager::handleImuCommunicationError(const IMU_CommunicationErrorEvent& event) {
     ESP_LOGE(TAG, "IMU Communication Error detected! Code: %s (%d). Entering IMU Recovery.",
              esp_err_to_name(event.errorCode), event.errorCode);
-    
+
     // Store current state before entering recovery
     m_preImuRecoveryState = m_currentState;
-    
+
     // Set state to IMU_RECOVERY
     setState(SystemState::IMU_RECOVERY);
-    
+
     // Request IMU recovery via event bus
     requestImuRecovery();
 }
@@ -299,11 +309,11 @@ void StateManager::handleImuCommunicationError(const IMU_CommunicationErrorEvent
 void StateManager::handleImuRecoverySucceeded(const ImuRecoverySucceededEvent& event) {
     // Determine appropriate state to return to
     SystemState returnState;
-    
+
     // Never return to FATAL_ERROR state after successful recovery
     if (m_preImuRecoveryState == SystemState::FATAL_ERROR) {
         returnState = SystemState::IDLE;
-    } 
+    }
     // Special handling for BALANCING state - make sure we can safely return to it
     else if (m_preImuRecoveryState == SystemState::BALANCING) {
         // Check if we're within safe angles to resume balancing
@@ -315,35 +325,35 @@ void StateManager::handleImuRecoverySucceeded(const ImuRecoverySucceededEvent& e
     else {
         returnState = m_preImuRecoveryState;
     }
-    
-    ESP_LOGI(TAG, "IMU recovery succeeded! Previous state was: %s, returning to: %s", 
+
+    ESP_LOGI(TAG, "IMU recovery succeeded! Previous state was: %s, returning to: %s",
              stateToString(m_preImuRecoveryState).c_str(),
              stateToString(returnState).c_str());
-    
+
     // Reset recovery attempts counter
     m_imu_recovery_attempts = 0;
-    
+
     // Return to appropriate state
     setState(returnState);
 }
 
 // New handler for IMU recovery failure
 void StateManager::handleImuRecoveryFailed(const ImuRecoveryFailedEvent& event) {
-    ESP_LOGE(TAG, "IMU recovery failed with error: %s (%d)", 
+    ESP_LOGE(TAG, "IMU recovery failed with error: %s (%d)",
              esp_err_to_name(event.errorCode), event.errorCode);
-    
+
     // Handle recovery failure (retry or go to FATAL_ERROR)
     handleRecoveryFailure();
 }
 
 // Request IMU recovery via event bus instead of direct method call
 void StateManager::requestImuRecovery() {
-    ESP_LOGI(TAG, "Requesting IMU recovery (attempt %d of %d)", 
+    ESP_LOGI(TAG, "Requesting IMU recovery (attempt %d of %d)",
              m_imu_recovery_attempts + 1, MAX_IMU_RECOVERY_ATTEMPTS);
-    
+
     // Increment attempt counter
     m_imu_recovery_attempts++;
-    
+
     // Publish recovery command event
     AttemptImuRecoveryCommand cmd;
     m_eventBus.publish(cmd);
@@ -352,16 +362,16 @@ void StateManager::requestImuRecovery() {
 void StateManager::handleRecoveryFailure() {
     // Check if we've reached the maximum number of attempts
     if (m_imu_recovery_attempts >= MAX_IMU_RECOVERY_ATTEMPTS) {
-        ESP_LOGE(TAG, "Maximum IMU recovery attempts (%d) reached. Setting FATAL_ERROR state.", 
+        ESP_LOGE(TAG, "Maximum IMU recovery attempts (%d) reached. Setting FATAL_ERROR state.",
                  MAX_IMU_RECOVERY_ATTEMPTS);
         setState(SystemState::FATAL_ERROR);
         return;
     }
-    
+
     // Otherwise, wait and try again
-    ESP_LOGW(TAG, "IMU recovery attempt %d failed. Will retry after delay...", 
+    ESP_LOGW(TAG, "IMU recovery attempt %d failed. Will retry after delay...",
              m_imu_recovery_attempts);
-    
+
     // In a real implementation, you might want to use a timer or task to delay
     // For simplicity, we'll request recovery again immediately
     requestImuRecovery();

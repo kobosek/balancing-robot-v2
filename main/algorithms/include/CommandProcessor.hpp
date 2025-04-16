@@ -18,6 +18,8 @@ public:
     ~CommandProcessor();
 
     esp_err_t init(); // Subscribe to events, load config, etc.
+    
+    void subscribeToEvents(EventBus& bus);
 
 
 private:

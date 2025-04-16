@@ -8,6 +8,7 @@
 #include "esp_check.h"
 #include "driver/ledc.h"
 #include <cmath>
+#include <mutex> // <<< ADDED: Needed if accessing state concurrently
 #include <algorithm>
 #include "esp_log.h"                    // Moved from header
 #include <memory>                        // Moved from header
@@ -53,20 +54,23 @@ esp_err_t MotorService::init() {
     ret = m_hw_driver_right->init();
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize Right HW Driver");
 
-    m_eventBus.subscribe(EventType::SYSTEM_STATE_CHANGED,
-        [this](const BaseEvent& ev){
-            const auto& stateEvent = static_cast<const SystemStateChangedEvent&>(ev);
-            this->handleSystemStateChange(stateEvent);
-        }
-    );
-    ESP_LOGI(TAG, "Subscribed to SYSTEM_STATE_CHANGED events.");
-
     m_enabled = false;
     ret = setMotorEffort(0.0f, 0.0f);
     if(ret != ESP_OK) { ESP_LOGE(TAG, "Failed to set initial motor effort to zero during init!"); }
 
     ESP_LOGI(TAG, "MotorService Initialized Successfully.");
     return ESP_OK;
+}
+
+// <<< ADDED: Event subscription logic >>>
+void MotorService::subscribeToEvents(EventBus& bus) {
+    bus.subscribe(EventType::SYSTEM_STATE_CHANGED,
+        [this](const BaseEvent& ev){
+            // This lambda captures 'this' and calls the member handler
+            this->handleSystemStateChange(ev);
+        }
+    );
+    ESP_LOGI(TAG, "Subscribed to SYSTEM_STATE_CHANGED events.");
 }
 
 esp_err_t MotorService::configureLEDCTimer() {
@@ -88,7 +92,7 @@ esp_err_t MotorService::configureLEDCTimer() {
         .timer_num        = m_config.timer_num,
         .freq_hz          = m_config.pwm_frequency_hz,
         .clk_cfg          = LEDC_AUTO_CLK};
-        
+
     esp_err_t ret = ledc_timer_config(&ledc_timer);
 
     if (ret == ESP_ERR_INVALID_STATE) {

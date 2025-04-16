@@ -1,6 +1,3 @@
-// ================================================
-// File: main/core/include/RobotController.hpp
-// ================================================
 #pragma once
 
 #include <mutex>
@@ -36,6 +33,9 @@ public:
 
     esp_err_t init(EventBus& bus);
     void runControlStep(float dt);
+
+    // <<< ADDED: Method for event subscriptions >>>
+    void subscribeToEvents(EventBus& bus);
 
 private:
     static constexpr const char* TAG = "RobotController";

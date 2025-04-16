@@ -10,7 +10,7 @@
 #include "SystemState.hpp"
 #include "WebServer.hpp"
 #include "TelemetryDataPoint.hpp"
-#include "BatteryStatusUpdatedEvent.hpp"
+#include "BatteryStatusUpdatedEvent.hpp" // <<< Already Included
 #include "CommandProcessor.hpp"
 #include "EventBus.hpp"
 #include "EventTypes.hpp"
@@ -48,16 +48,21 @@ RobotController::RobotController(
 }
 
 esp_err_t RobotController::init(EventBus& bus) {
-    ESP_LOGI(TAG, "Initializing RobotController subscriptions...");
-    m_eventBus = &bus; // Store reference to event bus
-    bus.subscribe(EventType::TARGET_MOVEMENT_CMD_SET,
-        [this](const BaseEvent& ev) {
-            this->handleTargetMovementCommand(ev);
-        }
-    );
-    ESP_LOGI(TAG, "Subscribed to TARGET_MOVEMENT_CMD_SET events.");
+    ESP_LOGI(TAG, "Initializing RobotController...");
+    m_eventBus = &bus; // Still store the reference
+    // <<< REMOVED: Subscription moved >>>
+    ESP_LOGI(TAG, "RobotController initialized.");
     return ESP_OK;
 }
+
+// <<< ADDED: Event subscription logic >>>
+void RobotController::subscribeToEvents(EventBus& bus) {
+    bus.subscribe(EventType::TARGET_MOVEMENT_CMD_SET, [this](const BaseEvent& ev) {
+        this->handleTargetMovementCommand(ev);
+    });
+    ESP_LOGI(TAG, "Subscribed to TARGET_MOVEMENT_CMD_SET events.");
+}
+
 
 void RobotController::handleTargetMovementCommand(const BaseEvent& event) {
     if (event.type == EventType::TARGET_MOVEMENT_CMD_SET) {
@@ -87,7 +92,7 @@ void RobotController::runControlStep(float dt) {
     float pitch_deg = m_estimator.getPitchDeg();
     float pitch_rate_dps = 0.0f; // Placeholder
     float yaw_rate_dps = m_estimator.getYawRateDPS(); // <<< GET YAW RATE
-    
+
     // Publish orientation data event for auto recovery and other systems
     if (m_eventBus) {
         OrientationDataEvent orientation_event(pitch_deg * OrientationEstimator::DEG_TO_RAD, pitch_rate_dps * OrientationEstimator::DEG_TO_RAD);

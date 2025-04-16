@@ -25,8 +25,9 @@ BalancingAlgorithm::BalancingAlgorithm(ConfigurationService& configService, Even
     m_last_speed_setpoint_right_dps(0.0f)
 {
      ESP_LOGI(TAG, "Balancing Algorithm created.");
-     m_eventBus.subscribe(EventType::CONFIG_UPDATED, [this](const BaseEvent& ev){ this->handleConfigUpdate(ev); });
-     handleConfigUpdate(BaseEvent(EventType::CONFIG_UPDATED));
+     // <<< REMOVED: Subscription moved from constructor >>>
+     // m_eventBus.subscribe(EventType::CONFIG_UPDATED, [this](const BaseEvent& ev){ this->handleConfigUpdate(ev); });
+     handleConfigUpdate(BaseEvent(EventType::CONFIG_UPDATED)); // Load initial config values
 }
 
 esp_err_t BalancingAlgorithm::init() {
@@ -41,6 +42,11 @@ esp_err_t BalancingAlgorithm::init() {
     return ESP_OK;
 }
 
+void BalancingAlgorithm::subscribeToEvents(EventBus& bus) {
+    bus.subscribe(EventType::CONFIG_UPDATED, [this](const BaseEvent& ev){ this->handleConfigUpdate(ev); });
+    ESP_LOGI(TAG, "Subscribed to CONFIG_UPDATED events.");
+}
+
 
 void BalancingAlgorithm::resetState() {
     m_anglePid.reset();
@@ -51,7 +57,6 @@ void BalancingAlgorithm::resetState() {
     m_last_speed_setpoint_right_dps = 0.0f;
 }
 
-// <<< MODIFIED update signature and logic >>>
 MotorEffort BalancingAlgorithm::update(float dt, float currentPitch_deg, float currentPitchRate_dps,
                                       float currentYawRate_dps, // <<< ADDED Yaw Rate Input
                                       float currentSpeedLeft_dps, float currentSpeedRight_dps,
@@ -115,7 +120,7 @@ MotorEffort BalancingAlgorithm::update(float dt, float currentPitch_deg, float c
 }
 
 void BalancingAlgorithm::handleConfigUpdate(const BaseEvent& event) {
-     ESP_LOGI(TAG, "Handling config update event.");
+     ESP_LOGD(TAG, "Handling config update event."); // Use DEBUG level
      PIDConfig angleConf = m_configService.getAnglePidConfig();
      m_anglePid.updateParams(angleConf);
      m_speedPidLeft.updateParams(m_configService.getSpeedPidLeftConfig());
@@ -124,9 +129,9 @@ void BalancingAlgorithm::handleConfigUpdate(const BaseEvent& event) {
 
      m_angle_pid_output_min = angleConf.getOutputMin();
      m_angle_pid_output_max = angleConf.getOutputMax();
-     ESP_LOGI(TAG, "Stored Angle PID limits: Min=%.1f, Max=%.1f", m_angle_pid_output_min, m_angle_pid_output_max);
+     ESP_LOGD(TAG, "Stored Angle PID limits: Min=%.1f, Max=%.1f", m_angle_pid_output_min, m_angle_pid_output_max);
 
      m_wheel_radius_m = m_configService.getConfigData().encoder.wheel_diameter_mm / 2000.0f;
      // m_robot_wheelbase_m = ... // Load from config if added
-     ESP_LOGI(TAG, "Internal params updated. Wheel Radius: %.4f m, Wheelbase: %.4f m", m_wheel_radius_m, m_robot_wheelbase_m);
+     ESP_LOGD(TAG, "Internal params updated. Wheel Radius: %.4f m, Wheelbase: %.4f m", m_wheel_radius_m, m_robot_wheelbase_m);
 }

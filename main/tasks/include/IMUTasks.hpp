@@ -5,12 +5,12 @@
 
 // Forward declarations
 class IMUService;
+class IMUHealthMonitor; // Need the new monitor class
 
+// Task to process FIFO data via IMUService
 class IMUFifoTask : public Task {
 public:
-
     explicit IMUFifoTask(IMUService& imuService);
-
     ~IMUFifoTask() override = default;
 
 protected:
@@ -20,14 +20,15 @@ private:
     IMUService& m_imuService;
 };
 
-class IMUWatchdogTask : public Task {
+// Task to periodically check IMU health via IMUHealthMonitor
+class IMUHealthMonitorTask : public Task { // Renamed from IMUWatchdogTask
 public:
-    explicit IMUWatchdogTask(IMUService& imuService);
-    ~IMUWatchdogTask() override = default;
+    explicit IMUHealthMonitorTask(IMUHealthMonitor& healthMonitor);
+    ~IMUHealthMonitorTask() override = default;
 
 protected:
     void run() override;
 
 private:
-    IMUService& m_imuService;
+    IMUHealthMonitor& m_healthMonitor;
 };

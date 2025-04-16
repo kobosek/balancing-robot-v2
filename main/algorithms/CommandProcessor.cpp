@@ -14,6 +14,8 @@
 #include <cmath>
 #include "esp_timer.h" // Include for timer functions
 
+static const char* TAG = "CommandProc"; // Moved TAG definition here
+
 CommandProcessor::CommandProcessor(EventBus& bus, ConfigurationService& configService) :
     m_eventBus(bus),
     m_configService(configService),
@@ -37,28 +39,7 @@ esp_err_t CommandProcessor::init() {
     // Load initial config values
     loadConfigParameters();
 
-    // Subscribe to state changes
-    m_eventBus.subscribe(EventType::SYSTEM_STATE_CHANGED, [this](const BaseEvent& ev){
-        if(ev.type == EventType::SYSTEM_STATE_CHANGED) {
-             this->handleSystemStateChange(static_cast<const SystemStateChangedEvent&>(ev));
-        }
-    });
-
-    // Subscribe to raw joystick input
-    m_eventBus.subscribe(EventType::JOYSTICK_INPUT_RECEIVED, [this](const BaseEvent& ev){
-        if(ev.type == EventType::JOYSTICK_INPUT_RECEIVED) {
-            this->handleJoystickInput(static_cast<const JoystickInputEvent&>(ev));
-        }
-    });
-    ESP_LOGI(TAG, "Subscribed to JOYSTICK_INPUT_RECEIVED events.");
-
-    // Subscribe to config updates to reload parameters
-    m_eventBus.subscribe(EventType::CONFIG_UPDATED, [this](const BaseEvent& ev) {
-        ESP_LOGI(TAG, "Config update event received, reloading parameters.");
-        this->loadConfigParameters();
-    });
-    ESP_LOGI(TAG, "Subscribed to CONFIG_UPDATED events.");
-
+    // <<< REMOVED: Subscriptions moved >>>
 
     m_last_input_time_us = esp_timer_get_time(); // Initialize timestamp
     m_input_timed_out = true; // Start in timed-out state
@@ -77,6 +58,30 @@ esp_err_t CommandProcessor::init() {
     ESP_LOGI(TAG, "Command Processor Initialized.");
     return ESP_OK;
 }
+
+void CommandProcessor::subscribeToEvents(EventBus& bus) {
+    // Subscribe to state changes
+    bus.subscribe(EventType::SYSTEM_STATE_CHANGED, [this](const BaseEvent& ev){
+        if(ev.type == EventType::SYSTEM_STATE_CHANGED) {
+             this->handleSystemStateChange(static_cast<const SystemStateChangedEvent&>(ev));
+        }
+    });
+    ESP_LOGI(TAG, "Subscribed to SYSTEM_STATE_CHANGED events.");
+    // Subscribe to raw joystick input
+    bus.subscribe(EventType::JOYSTICK_INPUT_RECEIVED, [this](const BaseEvent& ev){
+        if(ev.type == EventType::JOYSTICK_INPUT_RECEIVED) {
+            this->handleJoystickInput(static_cast<const JoystickInputEvent&>(ev));
+        }
+    });
+    ESP_LOGI(TAG, "Subscribed to JOYSTICK_INPUT_RECEIVED events.");
+    // Subscribe to config updates to reload parameters
+    bus.subscribe(EventType::CONFIG_UPDATED, [this](const BaseEvent& ev) {
+        ESP_LOGD(TAG, "Config update event received, reloading parameters.");
+        this->loadConfigParameters();
+    });
+    ESP_LOGI(TAG, "Subscribed to CONFIG_UPDATED events.");
+}
+
 
 void CommandProcessor::loadConfigParameters() {
     ControlConfig controlConf = m_configService.getControlConfig();

@@ -1,97 +1,78 @@
 #pragma once
 
-#include "mpu6050.hpp"
-#include "ConfigData.hpp"
-#include "EventBus.hpp"
-#include "OrientationEstimator.hpp"
+#include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include <atomic>
-#include <vector> 
+#include <memory> // For unique_ptr if owned components
 
 // Forward declarations
+class MPU6050Driver;
+class OrientationEstimator;
+class ConfigService; // Keep ConfigService for overall config
+class EventBus;
 class BaseEvent;
-class StartCalibrationRequestEvent;
-class CalibrationCompleteEvent;
-class AttemptImuRecoveryCommand;
+class IMUCalibrationService; // Use Interface
+class IMUHealthMonitor; // <<< Already Forward Declared
+class IMUHealthMonitor;      // Use Interface
+struct MPU6050Config;
+class IMU_CommunicationErrorEvent; // For subscription
+class AttemptImuRecoveryCommand; // For subscription
+
 
 class IMUService {
 public:
-    IMUService(const MPU6050Config& config, EventBus& bus, OrientationEstimator& estimator);
+    // Constructor takes dependencies
+    IMUService(MPU6050Driver& driver,
+               IMUCalibrationService& calibrationService,
+               IMUHealthMonitor& healthMonitor,
+               OrientationEstimator& estimator, // Pass estimator by reference
+               const MPU6050Config& config, // Still need config details
+               EventBus& bus);
     ~IMUService();
 
     esp_err_t init();
-    esp_err_t triggerCalibration();
 
-    // Recovery Methods
-    esp_err_t resetSensor();
-    esp_err_t reinitializeSensor();
-    esp_err_t verifyCommunication();
-    
-    // Attempt recovery process (called via event)
-    void attemptRecovery();
-    
-    // Methods exposed for task classes
-    void processFifoData();
-    void checkImuHealth();
-    void petWatchdog();
+    // Core data processing function (called by task)
+    void processDataPipeline();
+
+    void subscribeToEvents(EventBus& bus);
 
 private:
     static constexpr const char* TAG = "IMUService";
 
-    // Data validation
-    struct IMUData {
-        struct {
-            float x, y, z;
-        } gyro, accel;
-    };
-    bool isDataConsistent(const IMUData& data);
-    void handleStartCalibrationRequest(const BaseEvent& event);
-    void handleAttemptRecoveryCommand(const AttemptImuRecoveryCommand& event);
-
-    static void IRAM_ATTR isrHandler(void* arg);
-    void handleInterrupt();
-
-    esp_err_t performCalibration();
-
-    const MPU6050Config m_config;
-    EventBus& m_eventBus;
+    // References to components (passed in constructor)
+    MPU6050Driver& m_driver;
+    IMUCalibrationService& m_calibrationService;
+    IMUHealthMonitor& m_healthMonitor;
     OrientationEstimator& m_estimator;
-    MPU6050 m_sensor;
+    const MPU6050Config& m_config; // Keep reference to config
+    EventBus& m_eventBus;
 
-    SemaphoreHandle_t m_calibration_mutex;
-    volatile bool m_is_calibrating; // Should be accessed carefully across tasks/ISRs
+    // Stored scaling factors (calculated in init)
+    float m_accel_lsb_per_g;
+    float m_gyro_lsb_per_dps;
+    float m_sample_period_s;
 
-    // Store offsets directly in DPS (Degrees Per Second)
-    float m_gyro_offset_dps[3]; // Index 0:X, 1:Y, 2:Z
+    // FIFO processing state
+    static constexpr size_t FIFO_PACKET_SIZE = 12;
+    static constexpr size_t MAX_FIFO_BUFFER_SIZE = 1024; // Max HW FIFO size
+    uint8_t m_fifo_buffer[MAX_FIFO_BUFFER_SIZE];
 
-    std::atomic<uint8_t> m_isr_data_counter; // Counter for FIFO samples read by ISR
+    std::atomic<uint8_t> m_isr_data_counter; // ISR still increments this
 
-    std::atomic<int64_t> m_last_successful_read_timestamp_us{0};
-    std::atomic<int64_t> m_last_proactive_check_time_us{0};
-    bool m_watchdog_enabled;
-    std::atomic<bool> m_watchdog_reset_flag{false}; // Flag to indicate watchdog triggered a reset
-    std::atomic<uint8_t> m_consecutive_i2c_failures{0};
-    std::atomic<uint8_t> m_no_data_counter{0}; // Counter for 'responsive but no data' occurrences
-    std::atomic<int64_t> m_last_disconnect_time_us{0}; // Timestamp of last complete sensor disconnection
-    std::atomic<bool> m_sensor_disconnected{false}; // Flag indicating sensor is completely disconnected
+    // Recovery state
+    std::atomic<bool> m_recovery_in_progress{false};
+    static const uint8_t MAX_IMU_RECOVERY_ATTEMPTS = 3;
+    uint8_t m_imu_recovery_attempts = 0;
 
-    IMUData m_last_data;
-    int m_unchanged_data_count;
-    std::vector<float> m_calib_gx_samples;
-    std::vector<float> m_calib_gy_samples;
-    std::vector<float> m_calib_gz_samples;
+    // --- Private Methods ---
+    static void IRAM_ATTR isrHandler(void* arg);
+    esp_err_t configureSensorHardware();
+    esp_err_t attemptRecovery();
+    void calculateScalingFactors();
 
-    // Helper methods for converting config values to MPU6050 driver enums
-    MPU6050AccelConfig mapAccelConfig(int config_value) const;
-    MPU6050GyroConfig mapGyroConfig(int config_value) const;
-
-    static constexpr uint8_t I2C_FAILURE_THRESHOLD = 5; // Consecutive I2C errors before reporting
-    static constexpr uint8_t NO_DATA_FAILURE_THRESHOLD = 5; // Consecutive 'responsive but no data' checks before triggering error
-    static constexpr int64_t IMU_DATA_TIMEOUT_US = 500000; // 500ms timeout
-    static constexpr int64_t PROACTIVE_CHECK_INTERVAL_US = 10 * 1000 * 1000; // 10 seconds
-    static constexpr int STUCK_DATA_THRESHOLD = 20;
-    static constexpr float MAX_GYRO_RATE_DPS = 2000.0f;
-    static constexpr float MAX_ACCEL_G = 16.0f;
-
+    // Event Handlers (called via lambda subscription)
+    void handleImuCommunicationError(const IMU_CommunicationErrorEvent& event);
+    // void handleAttemptRecoveryCommand(const AttemptImuRecoveryCommand& event); // Can be handled by comm error
 };

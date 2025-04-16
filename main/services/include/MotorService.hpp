@@ -9,9 +9,8 @@
 #include <memory>
 #include <algorithm>                    // Not needed in header
 #include <cmath>                        // Not needed in header
-
-// Forward declare event class
-class BaseEvent;                        // Defined in events/
+ // Forward declare event class
+class BaseEvent; // <<< Already defined
 
 class MotorService {
 public:
@@ -21,6 +20,9 @@ public:
     // Declarations only
     esp_err_t init();
     esp_err_t setMotorEffort(float leftEffort, float rightEffort);
+
+    // <<< ADDED: Method for event subscriptions >>>
+    void subscribeToEvents(EventBus& bus);
 
 private:
     static constexpr const char* TAG = "MotorService";
