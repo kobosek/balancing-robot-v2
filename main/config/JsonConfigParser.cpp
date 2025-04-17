@@ -1,13 +1,82 @@
-// ================================================
-// File: main/config/JsonConfigParser.cpp
-// ================================================
 #include "JsonConfigParser.hpp"
 #include "cJSON.h"
 #include "esp_log.h"
 #include <string>
 #include <vector>
 #include <memory>
-#include "ConfigData.hpp"
+// #include "ConfigData.hpp" // Included via header
+
+// --- Fully implement helper functions ---
+
+cJSON* JsonConfigParser::serializeBehavior(const SystemBehaviorConfig& b) const {
+    cJSON *obj = cJSON_CreateObject(); if (!obj) return nullptr;
+    cJSON_AddNumberToObject(obj, "joystick_deadzone", b.joystick_deadzone);
+    cJSON_AddNumberToObject(obj, "joystick_timeout_ms", b.joystick_timeout_ms);
+    cJSON_AddNumberToObject(obj, "joystick_check_interval_ms", b.joystick_check_interval_ms);
+    cJSON_AddNumberToObject(obj, "max_target_angular_velocity_dps", b.max_target_angular_velocity_dps);
+    cJSON_AddNumberToObject(obj, "fall_pitch_threshold_deg", b.fall_pitch_threshold_deg);
+    cJSON_AddNumberToObject(obj, "fall_threshold_duration_ms", b.fall_threshold_duration_ms);
+    cJSON_AddNumberToObject(obj, "recovery_pitch_threshold_deg", b.recovery_pitch_threshold_deg);
+    cJSON_AddNumberToObject(obj, "recovery_hold_duration_ms", b.recovery_hold_duration_ms);
+    cJSON_AddNumberToObject(obj, "imu_recovery_max_attempts", b.imu_recovery_max_attempts);
+    cJSON_AddNumberToObject(obj, "imu_recovery_delay_ms", b.imu_recovery_delay_ms);
+    cJSON_AddNumberToObject(obj, "battery_oversampling_count", b.battery_oversampling_count);
+    cJSON_AddNumberToObject(obj, "battery_read_interval_ms", b.battery_read_interval_ms);
+    cJSON_AddNumberToObject(obj, "imu_health_i2c_fail_threshold", b.imu_health_i2c_fail_threshold);
+    cJSON_AddNumberToObject(obj, "imu_health_no_data_threshold", b.imu_health_no_data_threshold);
+    cJSON_AddNumberToObject(obj, "imu_health_data_timeout_ms", b.imu_health_data_timeout_ms);
+    cJSON_AddNumberToObject(obj, "imu_health_proactive_check_ms", b.imu_health_proactive_check_ms);
+    return obj;
+}
+
+bool JsonConfigParser::deserializeBehavior(cJSON* obj, SystemBehaviorConfig& b) const {
+    if (!obj) return false;
+    GET_JSON_NUMBER_DOUBLE(obj, "joystick_deadzone", b.joystick_deadzone);
+    GET_JSON_NUMBER_INT(obj, "joystick_timeout_ms", b.joystick_timeout_ms);
+    GET_JSON_NUMBER_INT(obj, "joystick_check_interval_ms", b.joystick_check_interval_ms);
+    GET_JSON_NUMBER_DOUBLE(obj, "max_target_angular_velocity_dps", b.max_target_angular_velocity_dps);
+    GET_JSON_NUMBER_DOUBLE(obj, "fall_pitch_threshold_deg", b.fall_pitch_threshold_deg);
+    GET_JSON_NUMBER_INT(obj, "fall_threshold_duration_ms", b.fall_threshold_duration_ms);
+    GET_JSON_NUMBER_DOUBLE(obj, "recovery_pitch_threshold_deg", b.recovery_pitch_threshold_deg);
+    GET_JSON_NUMBER_INT(obj, "recovery_hold_duration_ms", b.recovery_hold_duration_ms);
+    GET_JSON_NUMBER_INT(obj, "imu_recovery_max_attempts", b.imu_recovery_max_attempts);
+    GET_JSON_NUMBER_INT(obj, "imu_recovery_delay_ms", b.imu_recovery_delay_ms);
+    GET_JSON_NUMBER_INT(obj, "battery_oversampling_count", b.battery_oversampling_count);
+    GET_JSON_NUMBER_INT(obj, "battery_read_interval_ms", b.battery_read_interval_ms);
+    GET_JSON_NUMBER_INT(obj, "imu_health_i2c_fail_threshold", b.imu_health_i2c_fail_threshold);
+    GET_JSON_NUMBER_INT(obj, "imu_health_no_data_threshold", b.imu_health_no_data_threshold);
+    GET_JSON_NUMBER_INT(obj, "imu_health_data_timeout_ms", b.imu_health_data_timeout_ms);
+    GET_JSON_NUMBER_INT(obj, "imu_health_proactive_check_ms", b.imu_health_proactive_check_ms);
+    return true; // Basic deserialization done, validation happens elsewhere
+}
+
+cJSON* JsonConfigParser::serializeDimensions(const RobotDimensionsConfig& d) const {
+    cJSON *obj = cJSON_CreateObject(); if (!obj) return nullptr;
+    cJSON_AddNumberToObject(obj, "wheelbase_m", d.wheelbase_m);
+    return obj;
+}
+
+bool JsonConfigParser::deserializeDimensions(cJSON* obj, RobotDimensionsConfig& d) const {
+    if (!obj) return false;
+    GET_JSON_NUMBER_DOUBLE(obj, "wheelbase_m", d.wheelbase_m);
+    return true;
+}
+
+cJSON* JsonConfigParser::serializeWeb(const WebServerConfig& w) const {
+    cJSON *obj = cJSON_CreateObject(); if (!obj) return nullptr;
+    cJSON_AddNumberToObject(obj, "telemetry_buffer_size", w.telemetry_buffer_size);
+    cJSON_AddNumberToObject(obj, "max_config_post_size", w.max_config_post_size);
+    return obj;
+}
+
+bool JsonConfigParser::deserializeWeb(cJSON* obj, WebServerConfig& w) const {
+    if (!obj) return false;
+    GET_JSON_NUMBER_INT(obj, "telemetry_buffer_size", w.telemetry_buffer_size);
+    GET_JSON_NUMBER_INT(obj, "max_config_post_size", w.max_config_post_size);
+    return true;
+}
+
+// --- Main Serialize/Deserialize Functions (Updated) ---
 
 esp_err_t JsonConfigParser::serialize(const ConfigData& config, std::string& output) const {
     ESP_LOGD(TAG, "Serializing ConfigData to JSON");
@@ -36,6 +105,9 @@ esp_err_t JsonConfigParser::serialize(const ConfigData& config, std::string& out
             } \
             section = nullptr; /* Ownership transferred, reset pointer */ \
         } while(0)
+
+    // --- Config Version ---
+    cJSON_AddNumberToObject(root, "config_version", config.config_version);
 
     // --- WiFi ---
     section = cJSON_CreateObject();
@@ -71,6 +143,9 @@ esp_err_t JsonConfigParser::serialize(const ConfigData& config, std::string& out
     cJSON_AddNumberToObject(section, "calibration_samples", config.imu.calibration_samples);
     cJSON_AddNumberToObject(section, "comp_filter_alpha", config.imu.comp_filter_alpha);
     cJSON_AddNumberToObject(section, "fifo_read_threshold", config.imu.fifo_read_threshold);
+    cJSON_AddNumberToObject(section, "gyro_offset_x", config.imu.gyro_offset_x); // Add offsets
+    cJSON_AddNumberToObject(section, "gyro_offset_y", config.imu.gyro_offset_y);
+    cJSON_AddNumberToObject(section, "gyro_offset_z", config.imu.gyro_offset_z);
     if (!cJSON_AddItemToObject(root, "imu", section)) { ESP_LOGE(TAG, "Failed add imu obj"); cJSON_Delete(section); return ESP_FAIL; }
     section = nullptr;
 
@@ -114,20 +189,23 @@ esp_err_t JsonConfigParser::serialize(const ConfigData& config, std::string& out
     cJSON_AddNumberToObject(section, "voltage_divider_ratio", config.battery.voltage_divider_ratio);
     cJSON_AddNumberToObject(section, "voltage_max", config.battery.voltage_max);
     cJSON_AddNumberToObject(section, "voltage_min", config.battery.voltage_min);
+    cJSON_AddNumberToObject(section, "adc_bitwidth", config.battery.adc_bitwidth);
+    cJSON_AddNumberToObject(section, "adc_atten", config.battery.adc_atten);
     if (!cJSON_AddItemToObject(root, "battery", section)) { ESP_LOGE(TAG, "Failed add battery obj"); cJSON_Delete(section); return ESP_FAIL; }
     section = nullptr;
 
-    // --- PID Angle ---
-    ADD_SECTION("pid_angle", serializePid(config.anglePid));
+    // --- System Behavior ---
+    ADD_SECTION("behavior", serializeBehavior(config.behavior));
+    // --- Robot Dimensions ---
+    ADD_SECTION("dimensions", serializeDimensions(config.dimensions));
+    // --- Web Server ---
+    ADD_SECTION("web", serializeWeb(config.web));
 
-    // --- PID Speed Left ---
-    ADD_SECTION("pid_speed_left", serializePid(config.speedPidLeft));
-
-    // --- PID Speed Right ---
-    ADD_SECTION("pid_speed_right", serializePid(config.speedPidRight));
-
-    // --- PID Yaw Rate ---
-    ADD_SECTION("pid_yaw_rate", serializePid(config.yawRatePid));
+    // --- PIDs ---
+    ADD_SECTION("pid_angle", serializePid(config.pid_angle));
+    ADD_SECTION("pid_speed_left", serializePid(config.pid_speed_left));
+    ADD_SECTION("pid_speed_right", serializePid(config.pid_speed_right));
+    ADD_SECTION("pid_yaw_rate", serializePid(config.pid_yaw_rate));
 
     // Clean up the macro definition
     #undef ADD_SECTION
@@ -146,8 +224,6 @@ esp_err_t JsonConfigParser::serialize(const ConfigData& config, std::string& out
 }
 
 
-// --- Deserialization ---
-// (No changes were needed here as it already used structured checks)
 esp_err_t JsonConfigParser::deserialize(const std::string& input, ConfigData& configOutput) const {
     ESP_LOGD(TAG, "Deserializing JSON to ConfigData");
     auto cjson_deleter = [](cJSON* ptr){ if(ptr) cJSON_Delete(ptr); };
@@ -163,37 +239,17 @@ esp_err_t JsonConfigParser::deserialize(const std::string& input, ConfigData& co
     ConfigData tempConfig; // Start with defaults
     bool pid_success = true;
     bool control_success = true;
+    bool behavior_success = true;
+    bool dimensions_success = true;
+    bool web_success = true;
 
-    // Macro to simplify optional item parsing
-    #define GET_JSON_STRING(obj, key, target) \
-        do { \
-            cJSON* item = cJSON_GetObjectItem(obj, key); \
-            if (item && cJSON_IsString(item)) target = item->valuestring; \
-        } while(0)
-    #define GET_JSON_NUMBER_INT(obj, key, target) \
-        do { \
-            cJSON* item = cJSON_GetObjectItem(obj, key); \
-            if (item && cJSON_IsNumber(item)) target = item->valueint; \
-            else ESP_LOGW(TAG, "Missing/invalid number '%s'", key); \
-        } while(0)
-     #define GET_JSON_NUMBER_INT_CAST(obj, key, target, type) \
-        do { \
-            cJSON* item = cJSON_GetObjectItem(obj, key); \
-            if (item && cJSON_IsNumber(item)) target = (type)item->valueint; \
-            else ESP_LOGW(TAG, "Missing/invalid number '%s'", key); \
-        } while(0)
-    #define GET_JSON_NUMBER_DOUBLE(obj, key, target) \
-        do { \
-            cJSON* item = cJSON_GetObjectItem(obj, key); \
-            if (item && cJSON_IsNumber(item)) target = item->valuedouble; \
-            else ESP_LOGW(TAG, "Missing/invalid number '%s'", key); \
-        } while(0)
-     #define GET_JSON_BOOL(obj, key, target) \
-        do { \
-            cJSON* item = cJSON_GetObjectItem(obj, key); \
-            if (item && cJSON_IsBool(item)) target = cJSON_IsTrue(item); \
-            else ESP_LOGW(TAG, "Missing/invalid bool '%s'", key); \
-        } while(0)
+    // --- Config Version ---
+    cJSON *version_item = cJSON_GetObjectItem(root, "config_version");
+    if (version_item && cJSON_IsNumber(version_item)) {
+        tempConfig.config_version = version_item->valueint;
+    } else {
+        ESP_LOGW(TAG, "'config_version' missing or invalid. Using default %d.", tempConfig.config_version);
+    }
 
     // --- WiFi ---
     cJSON *wifi_section = cJSON_GetObjectItem(root, "wifi");
@@ -212,7 +268,7 @@ esp_err_t JsonConfigParser::deserialize(const std::string& input, ConfigData& co
     cJSON *control_section = cJSON_GetObjectItem(root, "control");
     if (control_section) {
         if (!deserializeControl(control_section, tempConfig.control)) control_success = false;
-    } else { ESP_LOGW(TAG, "'control' section missing."); control_success = false; } // Fail if missing
+    } else { ESP_LOGW(TAG, "'control' section missing."); control_success = false; }
 
     // --- IMU ---
     cJSON *imu_section = cJSON_GetObjectItem(root, "imu");
@@ -231,6 +287,9 @@ esp_err_t JsonConfigParser::deserialize(const std::string& input, ConfigData& co
         GET_JSON_NUMBER_INT(imu_section, "calibration_samples", tempConfig.imu.calibration_samples);
         GET_JSON_NUMBER_DOUBLE(imu_section, "comp_filter_alpha", tempConfig.imu.comp_filter_alpha);
         GET_JSON_NUMBER_INT(imu_section, "fifo_read_threshold", tempConfig.imu.fifo_read_threshold);
+        GET_JSON_NUMBER_DOUBLE(imu_section, "gyro_offset_x", tempConfig.imu.gyro_offset_x);
+        GET_JSON_NUMBER_DOUBLE(imu_section, "gyro_offset_y", tempConfig.imu.gyro_offset_y);
+        GET_JSON_NUMBER_DOUBLE(imu_section, "gyro_offset_z", tempConfig.imu.gyro_offset_z);
     } else { ESP_LOGW(TAG, "'imu' section missing."); }
 
     // --- Encoder ---
@@ -274,21 +333,39 @@ esp_err_t JsonConfigParser::deserialize(const std::string& input, ConfigData& co
         GET_JSON_NUMBER_DOUBLE(battery_section, "voltage_divider_ratio", tempConfig.battery.voltage_divider_ratio);
         GET_JSON_NUMBER_DOUBLE(battery_section, "voltage_max", tempConfig.battery.voltage_max);
         GET_JSON_NUMBER_DOUBLE(battery_section, "voltage_min", tempConfig.battery.voltage_min);
+        GET_JSON_NUMBER_INT_CAST(battery_section, "adc_bitwidth", tempConfig.battery.adc_bitwidth, adc_bitwidth_t);
+        GET_JSON_NUMBER_INT_CAST(battery_section, "adc_atten", tempConfig.battery.adc_atten, adc_atten_t);
     } else { ESP_LOGW(TAG, "'battery' section missing."); }
+
+    // --- System Behavior ---
+    cJSON *behavior_section = cJSON_GetObjectItem(root, "behavior");
+    if (behavior_section) {
+        if (!deserializeBehavior(behavior_section, tempConfig.behavior)) behavior_success = false;
+    } else { ESP_LOGW(TAG, "'behavior' section missing."); behavior_success = false; }
+    // --- Robot Dimensions ---
+    cJSON *dimensions_section = cJSON_GetObjectItem(root, "dimensions");
+    if (dimensions_section) {
+        if (!deserializeDimensions(dimensions_section, tempConfig.dimensions)) dimensions_success = false;
+    } else { ESP_LOGW(TAG, "'dimensions' section missing."); dimensions_success = false; }
+    // --- Web Server ---
+    cJSON *web_section = cJSON_GetObjectItem(root, "web");
+    if (web_section) {
+        if (!deserializeWeb(web_section, tempConfig.web)) web_success = false;
+    } else { ESP_LOGW(TAG, "'web' section missing."); web_success = false; }
 
     // --- PIDs ---
     cJSON *pid_section;
     pid_section = cJSON_GetObjectItem(root, "pid_angle");
-    if (pid_section && !deserializePid(pid_section, tempConfig.anglePid)) pid_success = false; else if (!pid_section) { ESP_LOGW(TAG, "'pid_angle' missing."); pid_success = false; }
+    if (pid_section && !deserializePid(pid_section, tempConfig.pid_angle)) pid_success = false; else if (!pid_section) { ESP_LOGW(TAG, "'pid_angle' missing."); pid_success = false; }
 
     pid_section = cJSON_GetObjectItem(root, "pid_speed_left");
-    if (pid_section && !deserializePid(pid_section, tempConfig.speedPidLeft)) pid_success = false; else if (!pid_section) { ESP_LOGW(TAG, "'pid_speed_left' missing."); pid_success = false; }
+    if (pid_section && !deserializePid(pid_section, tempConfig.pid_speed_left)) pid_success = false; else if (!pid_section) { ESP_LOGW(TAG, "'pid_speed_left' missing."); pid_success = false; }
 
     pid_section = cJSON_GetObjectItem(root, "pid_speed_right");
-    if (pid_section && !deserializePid(pid_section, tempConfig.speedPidRight)) pid_success = false; else if (!pid_section) { ESP_LOGW(TAG, "'pid_speed_right' missing."); pid_success = false; }
+    if (pid_section && !deserializePid(pid_section, tempConfig.pid_speed_right)) pid_success = false; else if (!pid_section) { ESP_LOGW(TAG, "'pid_speed_right' missing."); pid_success = false; }
 
     pid_section = cJSON_GetObjectItem(root, "pid_yaw_rate");
-    if (pid_section && !deserializePid(pid_section, tempConfig.yawRatePid)) pid_success = false; else if (!pid_section) { ESP_LOGW(TAG, "'pid_yaw_rate' missing."); pid_success = false; }
+    if (pid_section && !deserializePid(pid_section, tempConfig.pid_yaw_rate)) pid_success = false; else if (!pid_section) { ESP_LOGW(TAG, "'pid_yaw_rate' missing."); pid_success = false; }
 
     // Cleanup macros
     #undef GET_JSON_STRING
@@ -298,12 +375,12 @@ esp_err_t JsonConfigParser::deserialize(const std::string& input, ConfigData& co
     #undef GET_JSON_BOOL
 
     // Only update the output reference if all critical sections were parsed ok
-    if (pid_success && control_success) {
+    if (pid_success && control_success && behavior_success && dimensions_success && web_success) {
         configOutput = tempConfig;
         ESP_LOGD(TAG, "Deserialization successful.");
         return ESP_OK;
     } else {
-        ESP_LOGE(TAG, "Deserialization failed due to errors parsing critical PID or Control sections.");
+        ESP_LOGE(TAG, "Deserialization failed due to errors parsing critical/required sections.");
         return ESP_FAIL;
     }
 }
@@ -356,18 +433,10 @@ bool JsonConfigParser::deserializeControl(cJSON* control_obj, ControlConfig& con
     item = cJSON_GetObjectItem(control_obj, "joystick_exponent");
     if (item && cJSON_IsNumber(item)) {
         controlConfigOutput.joystick_exponent = item->valuedouble;
-        if (controlConfigOutput.joystick_exponent <= 0) {
-            ESP_LOGW(TAG, "Invalid joystick_exponent (%.3f). Using default.", controlConfigOutput.joystick_exponent);
-            controlConfigOutput.joystick_exponent = 1.0f; ok = false;
-        }
     } else { ok = false; ESP_LOGW(TAG, "Missing/invalid 'joystick_exponent'"); }
     item = cJSON_GetObjectItem(control_obj, "max_target_pitch_offset_deg");
     if (item && cJSON_IsNumber(item)) {
         controlConfigOutput.max_target_pitch_offset_deg = item->valuedouble;
-        if (controlConfigOutput.max_target_pitch_offset_deg < 0 || controlConfigOutput.max_target_pitch_offset_deg > 20) {
-             ESP_LOGW(TAG, "Invalid max_target_pitch_offset_deg (%.3f). Using default.", controlConfigOutput.max_target_pitch_offset_deg);
-             controlConfigOutput.max_target_pitch_offset_deg = 5.0f; ok = false;
-        }
     } else { ok = false; ESP_LOGW(TAG, "Missing/invalid 'max_target_pitch_offset_deg'"); }
     if (!ok) { ESP_LOGW(TAG, "Error(s) parsing Control config."); }
     return ok;

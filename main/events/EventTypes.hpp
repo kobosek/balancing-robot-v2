@@ -1,4 +1,3 @@
-// main/events/EventTypes.hpp
 #pragma once
 
 enum class EventType {
@@ -20,26 +19,28 @@ enum class EventType {
     DISABLE_RECOVERY_COMMAND_RECEIVED,
     ENABLE_FALL_DETECT_COMMAND_RECEIVED,
     DISABLE_FALL_DETECT_COMMAND_RECEIVED,
-    // MOVEMENT_COMMAND_RECEIVED, // Removed or repurposed if needed elsewhere
-    JOYSTICK_INPUT_RECEIVED,          // <<<--- ADDED FOR RAW JOYSTICK DATA
+    JOYSTICK_INPUT_RECEIVED,
 
     // Internal Requests / Notifications
     START_CALIBRATION_REQUEST,
-    CALIBRATION_STARTED,              // Added to signal calibration has started
+    CALIBRATION_STARTED,
     CALIBRATION_COMPLETE,
-    TARGET_MOVEMENT_CMD_SET,            // CommandProcessor -> BalancingAlgorithm (Final Target Velocities)
+    TARGET_MOVEMENT_CMD_SET,
 
     // Diagnostic/Status Events
     TELEMETRY_SNAPSHOT_READY, // Likely unused now
     FALL_DETECTED,
     LOW_BATTERY_WARNING,
-    IMU_COMMUNICATION_ERROR, // Added for IMU recovery
-    
+    IMU_COMMUNICATION_ERROR,
+
     // IMU Recovery Events
-    ATTEMPT_IMU_RECOVERY_COMMAND,    // StateManager -> IMUService (Request recovery)
-    IMU_RECOVERY_SUCCEEDED,          // IMUService -> StateManager (Recovery succeeded)
-    IMU_RECOVERY_FAILED,             // IMUService -> StateManager (Recovery failed)
-    
+    ATTEMPT_IMU_RECOVERY_COMMAND,
+    IMU_RECOVERY_SUCCEEDED,
+    IMU_RECOVERY_FAILED,
+
+    // IMU Calibration Events
+    GYRO_OFFSETS_UPDATED,            // IMUCalibrationService -> ConfigurationService (Save offsets)
+
     ERROR_REPORTED
 };
 

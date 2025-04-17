@@ -1,53 +1,57 @@
-// main/web/include/WebServer.hpp
 #pragma once
 
-// --- ADDED: Include the necessary ESP HTTP Server header ---
 #include "esp_http_server.h"
-// --- END ADDED ---
-
 #include "esp_err.h"
 #include "esp_log.h"
 #include <string>
-#include <memory> // For unique_ptr
-#include "TelemetryDataPoint.hpp" // Include the separate definition
+#include <memory>
+#include "TelemetryDataPoint.hpp"
+#include "ConfigData.hpp" // Include full definition
 
 // Forward declare dependencies needed by constructor/members
-class ConfigurationService;
+class ConfigurationService; // Still needed for ConfigApiHandler
 class StateManager;
 class EventBus;
+class BaseEvent; // ADD
 
 // Forward declare handler classes
 class StaticFileHandler;
 class TelemetryHandler;
 class ConfigApiHandler;
-class CommandApiHandler; // For start/stop etc.
+class CommandApiHandler;
 class StateApiHandler;
 
 class WebServer {
 public:
-    // Constructor takes high-level dependencies needed by handlers
-    WebServer(ConfigurationService& configService, StateManager& stateManager, EventBus& eventBus);
-    ~WebServer(); // Need custom destructor to delete handlers
+    // Constructor takes high-level dependencies + WebServerConfig
+    WebServer(ConfigurationService& configService, // Keep config service for handler that needs it
+              StateManager& stateManager,
+              EventBus& eventBus,
+              const WebServerConfig& initialWebConfig);
+    ~WebServer();
 
     esp_err_t init();
 
     // Expose method to add telemetry data (delegates to TelemetryHandler)
     void addTelemetrySnapshot(const TelemetryDataPoint& data);
 
+    // Subscribe to events (e.g., config updates for handlers)
+    void subscribeToEvents(EventBus& bus);
+
 private:
     static constexpr const char* TAG = "WebServer";
     httpd_handle_t server = nullptr;
 
-    // Store references to dependencies needed by WS handler
-    ConfigurationService& m_configService; // Needed by some handlers
-    StateManager& m_stateManager;         // Needed by some handlers
-    EventBus& m_eventBus;                 // Needed for WS handler
+    // Store references to dependencies needed by WS handler or specific handlers
+    ConfigurationService& m_configService; // Keep for ConfigApiHandler
+    StateManager& m_stateManager;
+    EventBus& m_eventBus;
 
     // Own instances of the handlers
     std::unique_ptr<StaticFileHandler> m_staticFileHandler;
     std::unique_ptr<TelemetryHandler> m_telemetryHandler;
     std::unique_ptr<ConfigApiHandler> m_configApiHandler;
-    std::unique_ptr<CommandApiHandler> m_commandApiHandler; // Keeps start/stop/etc
+    std::unique_ptr<CommandApiHandler> m_commandApiHandler;
     std::unique_ptr<StateApiHandler> m_stateApiHandler;
 
     // Static callback functions (HTTP)
@@ -60,6 +64,5 @@ private:
 
     // WebSocket Handling
     static esp_err_t websocket_handler(httpd_req_t *req);
-    // Declaration now uses types defined in esp_http_server.h
     esp_err_t handleWebSocketFrame(httpd_req_t *req, httpd_ws_frame_t *ws_pkt);
 };

@@ -9,7 +9,7 @@ export async function updateTelemetryData() {
 
     updateTelemetryJsonCache(rawResponse);
 
-    if (!rawResponse.data || !Array.isArray(rawResponse.data) || !rawResponse.hasOwnProperty('interval_ms')) {
+    if (!rawResponse.data || !Array.isArray(rawResponse.data)) {
         console.warn("Invalid telemetry response structure:", rawResponse);
         return;
     }

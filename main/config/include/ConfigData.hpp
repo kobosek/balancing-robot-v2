@@ -4,7 +4,9 @@
 #include "driver/gpio.h" // For gpio_num_t
 #include "driver/ledc.h" // For ledc_channel_t etc.
 #include "driver/i2c_master.h" // For i2c_port_t
-
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
 struct PIDConfig {
     float pid_kp = 0.0f;
     float pid_ki = 0.0f;
@@ -33,20 +35,32 @@ struct ControlConfig {
 };
 
 struct MPU6050Config {
+    // --- I2C Communication (Restart/Recovery Required on Change) ---
     i2c_port_t i2c_port = I2C_NUM_0;
     gpio_num_t sda_pin = GPIO_NUM_7;
     gpio_num_t scl_pin = GPIO_NUM_8;
     uint8_t device_address = 0x68;
-    gpio_num_t int_pin = GPIO_NUM_9;
     uint32_t i2c_freq_hz = 400000;
+
+    // --- Interrupt Pin (Restart/Recovery Required on Change) ---
+    gpio_num_t int_pin = GPIO_NUM_9;
     bool interrupt_active_high = true;
-    int accel_range = 1;        // 2 = ±8g (not 8)
-    int gyro_range = 1;         // 1 = ±500°/s (not 8)
-    int dlpf_config = 3;
-    int sample_rate_divisor = 0;
-    int calibration_samples = 1000;
-    float comp_filter_alpha = 0.98f;
-    int fifo_read_threshold = 10;
+
+    // --- Hardware Sensor Settings (Restart/Recovery Required on Change) ---
+    int accel_range = 1; // 0: +/-2g, 1: +/-4g, 2: +/-8g, 3: +/-16g
+    int gyro_range = 1;  // 0: +/-250dps, 1: +/-500dps, 2: +/-1000dps, 3: +/-2000dps
+    int dlpf_config = 3; // Digital Low Pass Filter setting (0-6)
+    int sample_rate_divisor = 0; // Divides Gyro Output Rate (1kHz or 8kHz based on DLPF)
+
+    // --- Calibration & Filtering (Partially Live Updatable) ---
+    int calibration_samples = 1000; // Used during explicit calibration command
+    float comp_filter_alpha = 0.98f; // Complementary filter alpha (Live Update: Yes)
+    int fifo_read_threshold = 10; // Target samples per FIFO read (Live Update: Affects IMUFifoTask behavior if logic uses it, currently impacts processing limit)
+
+    // --- Persistent Offsets (Live Update: Yes, via Calibration/Config Save) ---
+    float gyro_offset_x = 0.0f; // Software offset applied after reading
+    float gyro_offset_y = 0.0f;
+    float gyro_offset_z = 0.0f;
 };
 
 struct EncoderConfig {
@@ -84,11 +98,46 @@ struct BatteryConfig {
     float voltage_divider_ratio = 2.0;
     float voltage_max = 4.2f;
     float voltage_min = 3.3f;
+    // Moved from BatteryService constants
+    adc_bitwidth_t adc_bitwidth = ADC_BITWIDTH_12;
+    adc_atten_t adc_atten = ADC_ATTEN_DB_12;
 };
 
+// --- System Behavior Config ---
+struct SystemBehaviorConfig {
+    float joystick_deadzone = 0.10f;
+    int joystick_timeout_ms = 500;
+    int joystick_check_interval_ms = 100;
+    float max_target_angular_velocity_dps = 60.0f;
+    float fall_pitch_threshold_deg = 45.0f;
+    int fall_threshold_duration_ms = 500;
+    float recovery_pitch_threshold_deg = 5.0f;
+    int recovery_hold_duration_ms = 2000;
+    int imu_recovery_max_attempts = 3;
+    int imu_recovery_delay_ms = 1000; // Note: Delay isn't explicitly used in StateManager currently
+    int battery_oversampling_count = 64;
+    int battery_read_interval_ms = 5000;
+    int imu_health_i2c_fail_threshold = 5;
+    int imu_health_no_data_threshold = 5;
+    int imu_health_data_timeout_ms = 500;
+    int imu_health_proactive_check_ms = 10000;
+};
+
+// --- Robot Dimensions Config ---
+struct RobotDimensionsConfig {
+    float wheelbase_m = 0.15f;
+    // wheel_diameter_mm is already in EncoderConfig
+};
+
+// --- Web Server Config ---
+struct WebServerConfig {
+    int telemetry_buffer_size = 100;
+    int max_config_post_size = 4096;
+};
 
 // --- Main ConfigData Struct ---
 struct ConfigData {
+    int config_version = 1; // For future schema upgrades
     WiFiConfig wifi;
     MainLoopConfig mainLoop;
     ControlConfig control;
@@ -96,8 +145,11 @@ struct ConfigData {
     EncoderConfig encoder;
     MotorConfig motor;
     BatteryConfig battery;
-    PIDConfig anglePid;
-    PIDConfig speedPidLeft;
-    PIDConfig speedPidRight;
-    PIDConfig yawRatePid; // <<< ADDED Yaw Rate PID Config
+    PIDConfig pid_angle;
+    PIDConfig pid_speed_left;
+    PIDConfig pid_speed_right;
+    PIDConfig pid_yaw_rate;
+    SystemBehaviorConfig behavior;
+    RobotDimensionsConfig dimensions;
+    WebServerConfig web;
 };

@@ -4,18 +4,28 @@
 
 static const char* TASK_TAG = "BattMonTask";
 
-BatteryMonitorTask::BatteryMonitorTask(BatteryService& batteryService)
-    : Task(TASK_TAG), m_batteryService(batteryService) {
+// Constructor takes service and interval
+BatteryMonitorTask::BatteryMonitorTask(BatteryService& batteryService, int intervalMs)
+    : Task(TASK_TAG),
+      m_batteryService(batteryService),
+      m_intervalTicks(pdMS_TO_TICKS(intervalMs > 0 ? intervalMs : 5000)) // Use provided interval, default 5s
+{
+    if (m_intervalTicks == 0) { // Ensure ticks is not zero
+        ESP_LOGW(TASK_TAG, "Calculated interval ticks is 0, using 1 tick instead.");
+        m_intervalTicks = 1;
+    }
 }
 
 void BatteryMonitorTask::run() {
-    ESP_LOGI(TASK_TAG, "Battery Monitor Task Started on Core %d", xPortGetCoreID());
-    
+    ESP_LOGI(TASK_TAG, "Battery Monitor Task Started on Core %d, Interval Ticks: %lu",
+             xPortGetCoreID(), m_intervalTicks);
+
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+
     while (true) {
         m_batteryService.updateBatteryStatus();
-        
-        // Use the configured interval from BatteryService
-        constexpr TickType_t delay_ticks = pdMS_TO_TICKS(5000); // 5 seconds, matching BatteryService.hpp READ_INTERVAL_MS
-        vTaskDelay(delay_ticks);
+
+        // Delay until next execution time
+        vTaskDelayUntil(&xLastWakeTime, m_intervalTicks);
     }
 }

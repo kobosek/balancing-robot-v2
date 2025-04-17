@@ -1,4 +1,5 @@
 {
+  "config_version": 1,
   "wifi": {
     "ssid": "StajniaAugiasza",
     "password": "Lubieplacki4321"
@@ -8,7 +9,7 @@
   },
   "control": {
     "joystick_exponent": 1.5,
-    "max_target_pitch_offset_deg": 20.0
+    "max_target_pitch_offset_deg": 5.0
   },
   "imu": {
     "i2c_port": 0,
@@ -22,9 +23,12 @@
     "gyro_range": 1,
     "dlpf_config": 3,
     "sample_rate_divisor": 0,
-    "calibration_samples": 100,
+    "calibration_samples": 1000,
     "comp_filter_alpha": 0.98,
-    "fifo_read_threshold": 10
+    "fifo_read_threshold": 10,
+    "gyro_offset_x": 0.0,
+    "gyro_offset_y": 0.0,
+    "gyro_offset_z": 0.0
   },
   "encoder": {
     "left_pin_a": 11,
@@ -58,7 +62,9 @@
     "adc_pin": 2,
     "voltage_divider_ratio": 2.0,
     "voltage_max": 4.2,
-    "voltage_min": 3.3
+    "voltage_min": 3.3,
+    "adc_bitwidth": 12,
+    "adc_atten": 3
   },
   "pid_angle": {
     "kp": 15.0,
@@ -88,12 +94,37 @@
     "iterm_max": 10.0
   },
   "pid_yaw_rate": {
-    "kp": 0.1,        
-    "ki": 0.01,       
-    "kd": 0.005,       
-    "output_min": -100.0, 
-    "output_max": 100.0,  
-    "iterm_min": -50.0,  
-    "iterm_max": 50.0   
+    "kp": 0.1,
+    "ki": 0.01,
+    "kd": 0.005,
+    "output_min": -100.0,
+    "output_max": 100.0,
+    "iterm_min": -50.0,
+    "iterm_max": 50.0
+  },
+  "behavior": {
+    "joystick_deadzone": 0.10,
+    "joystick_timeout_ms": 500,
+    "joystick_check_interval_ms": 100,
+    "max_target_angular_velocity_dps": 60.0,
+    "fall_pitch_threshold_deg": 45.0,
+    "fall_threshold_duration_ms": 500,
+    "recovery_pitch_threshold_deg": 5.0,
+    "recovery_hold_duration_ms": 2000,
+    "imu_recovery_max_attempts": 3,
+    "imu_recovery_delay_ms": 1000,
+    "battery_oversampling_count": 64,
+    "battery_read_interval_ms": 5000,
+    "imu_health_i2c_fail_threshold": 5,
+    "imu_health_no_data_threshold": 5,
+    "imu_health_data_timeout_ms": 500,
+    "imu_health_proactive_check_ms": 10000
+  },
+  "dimensions": {
+    "wheelbase_m": 0.15
+  },
+  "web": {
+    "telemetry_buffer_size": 100,
+    "max_config_post_size": 4096
   }
 }

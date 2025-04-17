@@ -1,32 +1,39 @@
-// main/BatteryService.cpp
-#include "BatteryService.hpp"           // Relative path within module's include dir
-#include "EventTypes.hpp"               // Found via INCLUDE_DIRS
-#include "BatteryStatusUpdatedEvent.hpp"// Found via INCLUDE_DIRS (needed for publish)
-#include "EventBus.hpp"                 // Found via INCLUDE_DIRS (needed for publish)
-#include "ConfigData.hpp"               // Found via INCLUDE_DIRS (needed for BatteryConfig)
+#include "BatteryService.hpp"
+#include "ConfigData.hpp"
+#include "EventTypes.hpp"
+#include "BatteryStatusUpdatedEvent.hpp"
+#include "EventBus.hpp"
+#include "ConfigUpdatedEvent.hpp" // Include event with payload
+#include "BaseEvent.hpp"
 #include <numeric>
 #include <vector>
 #include <algorithm>
 #include "esp_check.h"
 #include "driver/gpio.h"
-#include "soc/soc_caps.h"               // For ADC calibration scheme checks
-#include "esp_adc/adc_oneshot.h"        // Keep specific ADC includes
+#include "soc/soc_caps.h"
+#include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
-#include <mutex>                        // Moved from header
-#include "esp_rom_sys.h"                // For esp_rom_delay_us
+#include <mutex>
+#include "esp_rom_sys.h"
 
-BatteryService::BatteryService(const BatteryConfig& config, EventBus& bus) :
-    m_config(config),
+
+// Constructor takes initial config structs and EventBus reference
+BatteryService::BatteryService(const BatteryConfig& initialConfig, const SystemBehaviorConfig& initialBehavior, EventBus& bus) :
+    m_config(initialConfig), // Store initial config copy
+    m_behaviorConfig(initialBehavior), // Store initial behavior config copy
     m_eventBus(bus),
-    m_adc_channel(ADC_CHANNEL_0), // Initialize channel
+    m_adc_channel(ADC_CHANNEL_0),
     m_adc_cali_handle(nullptr),
     m_adc_cali_enable(false),
-    m_oneshot_adc_handle(nullptr) // Initialize new handle
+    m_oneshot_adc_handle(nullptr),
+    m_oversampling_count(64) // Initialize with default, will be overridden by applyConfig
 {
     m_latest_status.percentage = -1;
-    m_latest_status.voltage = -1.0f; // Indicate invalid initial voltage
+    m_latest_status.voltage = -1.0f;
     m_latest_status.isLow = false;
+    applyConfig(initialConfig, initialBehavior); // Apply initial values
+    ESP_LOGI(TAG, "BatteryService constructed.");
 }
 
 BatteryService::~BatteryService() {
@@ -58,12 +65,12 @@ BatteryService::~BatteryService() {
 
 // Helper to map GPIO and check if it's valid for ADC1
 esp_err_t BatteryService::map_gpio_to_channel() {
-     // adc_oneshot_io_to_channel returns the channel via output param
      adc_unit_t unit_id = ADC_UNIT_1;
+     // Use the adc_pin from the member config struct
      esp_err_t ret = adc_oneshot_io_to_channel(m_config.adc_pin, &unit_id, &m_adc_channel);
      if (ret != ESP_OK) {
           ESP_LOGE(TAG, "GPIO %d is not a valid ADC1 pin (%s)", (int)m_config.adc_pin, esp_err_to_name(ret));
-          m_adc_channel = ADC_CHANNEL_0; // Ensure channel is marked invalid
+          m_adc_channel = (adc_channel_t)-1; // Mark channel as invalid
      } else {
           ESP_LOGI(TAG, "Mapped GPIO %d to ADC1 Channel %d", (int)m_config.adc_pin, (int)m_adc_channel);
      }
@@ -75,9 +82,17 @@ esp_err_t BatteryService::init() {
     ESP_LOGI(TAG, "Initializing BatteryService...");
     esp_err_t ret;
 
+    // Config parameters already applied in constructor
+    // loadConfigParameters();
+
     // 1. Map GPIO to Channel
     ret = map_gpio_to_channel();
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to map GPIO to ADC channel");
+    // Check if mapping was successful before proceeding
+    if (m_adc_channel < 0) {
+        ESP_LOGE(TAG, "Invalid ADC channel mapped, cannot proceed with ADC init.");
+        return ESP_FAIL;
+    }
 
     // 2. Init ADC Unit
     adc_oneshot_unit_init_cfg_t init_config1 = {
@@ -91,10 +106,10 @@ esp_err_t BatteryService::init() {
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to init ADC1 oneshot unit");
 
 
-    // 3. Configure ADC Channel
+    // 3. Configure ADC Channel (using values from m_config)
     adc_oneshot_chan_cfg_t channel_config = {
-        .atten = ADC_ATTEN,    // Use static const member (adc_atten_t)
-        .bitwidth = ADC_WIDTH, // Use static const member (adc_bitwidth_t)
+        .atten = m_config.adc_atten,
+        .bitwidth = m_config.adc_bitwidth,
     };
     ret = adc_oneshot_config_channel(m_oneshot_adc_handle, m_adc_channel, &channel_config); // Use mapped channel
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to config ADC channel %d for GPIO %d", (int)m_adc_channel, (int)m_config.adc_pin);
@@ -106,7 +121,8 @@ esp_err_t BatteryService::init() {
         ESP_LOGW(TAG, "ADC calibration skipped or failed. Voltage readings may be inaccurate.");
     }
 
-    ESP_LOGI(TAG, "BatteryService Initialized (ADC GPIO: %d -> Channel: %d).", (int)m_config.adc_pin, (int)m_adc_channel);
+    ESP_LOGI(TAG, "BatteryService Initialized (ADC GPIO: %d -> Channel: %d, Oversampling: %d).",
+             (int)m_config.adc_pin, (int)m_adc_channel, m_oversampling_count);
     return ESP_OK;
 }
 
@@ -115,7 +131,7 @@ bool BatteryService::adc_calibration_init(adc_channel_t channel) {
     esp_err_t ret = ESP_FAIL;
     m_adc_cali_enable = false;
 
-    if (channel == ADC_CHANNEL_0) {
+    if (channel < 0) { // Check if channel is valid
         ESP_LOGE(TAG, "Cannot initialize calibration, invalid ADC channel.");
         return false;
     }
@@ -123,35 +139,22 @@ bool BatteryService::adc_calibration_init(adc_channel_t channel) {
     ESP_LOGI(TAG, "Attempting ADC calibration for channel %d...", (int)channel);
 
     // Check which calibration scheme is supported and attempt creation
-    // Note: ESP32-S3 generally supports Curve Fitting (V1)
-#if SOC_ADC_CALIBRATION_V1_SUPPORTED // Preferred for ESP32-S3, ESP32-C3 etc.
+    #if SOC_ADC_CALIBRATION_V1_SUPPORTED
     ESP_LOGI(TAG, "Using ADC_CALI_SCHEME_CURVE_FITTING");
     adc_cali_curve_fitting_config_t cali_config = {
         .unit_id = ADC_UNIT_1,
-        .chan = channel, // Pass mapped channel
-        .atten = ADC_ATTEN,
-        .bitwidth = ADC_WIDTH,
+        .chan = channel,
+        .atten = m_config.adc_atten,        // Use config value
+        .bitwidth = m_config.adc_bitwidth,  // Use config value
     };
     ret = adc_cali_create_scheme_curve_fitting(&cali_config, &m_adc_cali_handle);
     if (ret == ESP_OK) {
         m_adc_cali_enable = true;
     }
-#else
-    // Fallback or specific check for other chips if needed
+    #else
     ESP_LOGW(TAG,"Curve Fitting V1 not supported by SOC_ADC_CALIBRATION. Check target.");
     ret = ESP_ERR_NOT_SUPPORTED;
-    // #elif SOC_ADC_CALIBRATION_V2_SUPPORTED // Example for Line Fitting on older chips
-    // ESP_LOGI(TAG, "Using ADC_CALI_SCHEME_LINE_FITTING");
-    //  adc_cali_line_fitting_config_t cali_config = {
-    //     .unit_id = ADC_UNIT_1,
-    //     .atten = ADC_ATTEN,
-    //     .bitwidth = ADC_WIDTH,
-    // };
-    // ret = adc_cali_create_scheme_line_fitting(&cali_config, &m_adc_cali_handle);
-    //  if (ret == ESP_OK) {
-    //     m_adc_cali_enable = true;
-    // }
-#endif
+    #endif
 
     // Handle results
     if (ret == ESP_OK && m_adc_cali_enable) {
@@ -168,36 +171,70 @@ bool BatteryService::adc_calibration_init(adc_channel_t channel) {
     return m_adc_cali_enable;
 }
 
+// Apply config values from structs
+void BatteryService::applyConfig(const BatteryConfig& batConf, const SystemBehaviorConfig& behaviorConf) {
+    // Update local config struct copies
+    m_config = batConf;
+    m_behaviorConfig = behaviorConf;
+
+    // Update relevant parameters
+    m_oversampling_count = std::max(1, m_behaviorConfig.battery_oversampling_count); // Ensure at least 1 sample
+    // Note: Read interval is now passed to the task constructor, not used directly here
+
+    ESP_LOGI(TAG, "Applied BatteryService params: Oversampling=%d, Vmin=%.2f, Vmax=%.2f, Ratio=%.2f",
+             m_oversampling_count, m_config.voltage_min, m_config.voltage_max, m_config.voltage_divider_ratio);
+
+    // Re-configure ADC channel if attenuation or bitwidth changed?
+    // This requires more complex handling (deleting old calibration, re-init channel, re-init calib)
+    // For now, assume these don't change frequently or require a restart.
+    // If needed: check if m_oneshot_adc_handle exists, compare new config values, and call relevant ADC/Cali functions.
+}
+
+// Handle config update event
+void BatteryService::handleConfigUpdate(const BaseEvent& event) {
+    if (event.type != EventType::CONFIG_UPDATED) return;
+    ESP_LOGD(TAG, "Config update received, reloading BatteryService parameters.");
+    const auto& configEvent = static_cast<const ConfigUpdatedEvent&>(event);
+    applyConfig(configEvent.configData.battery, configEvent.configData.behavior);
+}
+
 BatteryStatus BatteryService::getLatestStatus() const {
      std::lock_guard<std::mutex> lock(m_status_mutex);
      return m_latest_status;
 }
 
 void BatteryService::updateBatteryStatus() {
-    if (!m_oneshot_adc_handle || m_adc_channel == ADC_CHANNEL_0) {
+    // Use the member variable for oversampling count
+    if (!m_oneshot_adc_handle || m_adc_channel < 0) {
         ESP_LOGW(TAG, "ADC not initialized properly, cannot read battery voltage.");
         return;
     }
 
-    // Read raw ADC value with oversampling
     int raw_sum = 0;
-    for (int i = 0; i < OVERSAMPLING; i++) {
+    int successful_samples = 0;
+    for (int i = 0; i < m_oversampling_count; i++) {
         int raw_value;
         esp_err_t ret = adc_oneshot_read(m_oneshot_adc_handle, m_adc_channel, &raw_value);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "ADC read failed (%s)! Skipping sample %d.", esp_err_to_name(ret), i);
-            continue;
+            continue; // Skip this sample
         }
         raw_sum += raw_value;
-        // Small delay between samples
-        if (i < OVERSAMPLING - 1) { // Don't delay after the last sample
-            esp_rom_delay_us(10); // very short microsecond delay
+        successful_samples++;
+        // Optionally add small delay between samples if ADC needs it
+        if (i < m_oversampling_count - 1) {
+             esp_rom_delay_us(10); // very short microsecond delay
         }
     }
 
-    // Calculate average
-    int adc_raw = raw_sum / OVERSAMPLING;
-    ESP_LOGD(TAG, "Raw ADC value: %d (average of %d samples)", adc_raw, OVERSAMPLING);
+    if (successful_samples == 0) {
+        ESP_LOGE(TAG, "No successful ADC samples obtained after %d attempts.", m_oversampling_count);
+        return; // Cannot calculate voltage
+    }
+
+    // Calculate average using successful samples
+    int adc_raw = raw_sum / successful_samples;
+    ESP_LOGD(TAG, "Raw ADC value: %d (average of %d samples)", adc_raw, successful_samples);
 
     // Convert to voltage
     float voltage = 0.0f;
@@ -207,13 +244,15 @@ void BatteryService::updateBatteryStatus() {
         if (ret == ESP_OK) {
             voltage = volt_mv / 1000.0f; // Convert mV to V
         } else {
-            ESP_LOGW(TAG, "ADC calibration conversion failed (%s)!", esp_err_to_name(ret));
-            // Fall back to manual conversion if calibration fails
-            voltage = (adc_raw * 0.0008f); // Default multiplier if no calibration
+            ESP_LOGW(TAG, "ADC calibration conversion failed (%s)! Falling back.", esp_err_to_name(ret));
+            // Fall back to a very rough estimate if needed, though calibration should ideally work
+             voltage = adc_raw * (3.3f / 4095.0f); // Example fallback without divider
         }
     } else {
-        // Manual conversion using approximate multiplier
-        voltage = (adc_raw * 0.0008f); // Default multiplier if no calibration
+        // Manual conversion if calibration disabled (less accurate)
+        // This depends heavily on ADC linearity and Vref. Use calibration if possible.
+        voltage = adc_raw * (3.3f / 4095.0f); // Example fallback without divider
+        ESP_LOGV(TAG, "ADC calibration disabled or failed, using raw estimate.");
     }
 
     // Apply resistor divider correction from config
@@ -221,16 +260,14 @@ void BatteryService::updateBatteryStatus() {
         voltage *= m_config.voltage_divider_ratio;
     }
 
-    // No offset correction in the current BatteryConfig
-
     ESP_LOGD(TAG, "Battery voltage: %.2fV (unclamped)", voltage);
 
     // Sanity check - clamp voltage to reasonable range
     if (voltage < 0.1f) {
-        ESP_LOGW(TAG, "Invalid voltage reading (%.2fV), clamping to min", voltage);
+        ESP_LOGW(TAG, "Invalid voltage reading (%.2fV), clamping to 0.1V", voltage);
         voltage = 0.1f;
-    } else if (voltage > 20.0f) { // Assume no battery > 20V
-        ESP_LOGW(TAG, "Unreasonable voltage reading (%.2fV), clamping to max", voltage);
+    } else if (voltage > 20.0f) { // Assume no battery > 20V for this robot
+        ESP_LOGW(TAG, "Unreasonable voltage reading (%.2fV), clamping to 20.0V", voltage);
         voltage = 20.0f;
     }
 
@@ -241,45 +278,59 @@ void BatteryService::updateBatteryStatus() {
     } else if (voltage >= m_config.voltage_max) {
         percentage = 100.0f;
     } else {
-        percentage = ((voltage - m_config.voltage_min) / 
-                     (m_config.voltage_max - m_config.voltage_min)) * 100.0f;
+        // Ensure denominator is not zero
+        float range = m_config.voltage_max - m_config.voltage_min;
+        if (range > 0.01f) { // Avoid division by zero or tiny ranges
+             percentage = ((voltage - m_config.voltage_min) / range) * 100.0f;
+        } else {
+            percentage = (voltage >= m_config.voltage_max) ? 100.0f : 0.0f;
+        }
     }
-    
-    // Round to integer
-    int rounded_percentage = static_cast<int>(percentage + 0.5f);
-    
-    // Check if battery is critically low (10% safety margin above min)
+
+    // Clamp percentage just in case
+    percentage = std::max(0.0f, std::min(100.0f, percentage));
+    int rounded_percentage = static_cast<int>(percentage + 0.5f); // Round to nearest integer
+
+    // Check if battery is critically low (using 10% margin above min voltage)
     bool is_low = voltage <= (m_config.voltage_min + (m_config.voltage_max - m_config.voltage_min) * 0.1f);
-    
-    // Create battery status
+
+    // Create battery status struct
     BatteryStatus new_status;
     new_status.voltage = voltage;
     new_status.percentage = rounded_percentage;
     new_status.isLow = is_low;
-    
-    // Check if status has changed significantly
+
+    // Check if status has changed significantly before publishing
     bool status_changed = false;
     {
         std::lock_guard<std::mutex> lock(m_status_mutex);
-        
-        if (m_latest_status.percentage != rounded_percentage || 
-            std::abs(m_latest_status.voltage - voltage) > 0.05f ||
+        // Compare with more tolerance for voltage to avoid spamming events
+        if (m_latest_status.percentage != rounded_percentage ||
+            std::abs(m_latest_status.voltage - voltage) > 0.05f || // 50mV change threshold
             m_latest_status.isLow != is_low) {
-            
+
             status_changed = true;
-            m_latest_status = new_status;
+            m_latest_status = new_status; // Update the stored status
         }
     }
-    
+
     // Publish event if status changed
     if (status_changed) {
-        ESP_LOGI(TAG, "Battery status updated: %.2fV, %d%%, %s", 
+        ESP_LOGI(TAG, "Battery status updated: %.2fV, %d%%, %s",
                 voltage, rounded_percentage, is_low ? "LOW" : "OK");
-        
+
         BatteryStatusUpdatedEvent event(new_status);
         m_eventBus.publish(event);
     } else {
-        ESP_LOGD(TAG, "Battery status unchanged: %.2fV, %d%%, %s", 
+        ESP_LOGD(TAG, "Battery status unchanged: %.2fV, %d%%, %s",
                 voltage, rounded_percentage, is_low ? "LOW" : "OK");
     }
+}
+
+// Subscribe to events
+void BatteryService::subscribeToEvents(EventBus& bus) {
+    bus.subscribe(EventType::CONFIG_UPDATED, [this](const BaseEvent& ev){
+        this->handleConfigUpdate(ev);
+    });
+    ESP_LOGI(TAG, "Subscribed to CONFIG_UPDATED events.");
 }

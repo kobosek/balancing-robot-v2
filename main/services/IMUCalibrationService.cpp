@@ -7,6 +7,7 @@
 #include "CalibrationCompleteEvent.hpp"
 #include "BaseEvent.hpp" // <<< ADDED Include needed
 #include "StartCalibrationRequestEvent.hpp" // For subscription
+#include "GyroOffsetsUpdatedEvent.hpp" // For publishing offset updates
 #include "esp_check.h"
 #include "freertos/task.h" // For vTaskDelay
 #include <numeric> // For std::accumulate, std::inner_product
@@ -20,7 +21,7 @@ IMUCalibrationService::IMUCalibrationService(MPU6050Driver& driver, const MPU605
     m_eventBus(bus),
     m_mutex(nullptr),
     m_is_calibrating_flag(false),
-    m_gyro_offset_dps{0.0f, 0.0f, 0.0f},
+    m_gyro_offset_dps{0.0f, 0.0f, 0.0f}, // Initialize offsets
     m_gyro_lsb_per_dps(1.0f) // Default, will be calculated
 {
     // Reserve space based on config
@@ -37,17 +38,15 @@ IMUCalibrationService::~IMUCalibrationService() {
 }
 
 float IMUCalibrationService::calculateGyroScaleFactor() const {
-     // Get the appropriate scale factor based on the configured range
-    MPU6050GyroConfig range_enum = static_cast<MPU6050GyroConfig>(m_config.gyro_range);
     float scale = 1.0f; // Default
-    switch(range_enum) {
-        case MPU6050GyroConfig::RANGE_250_DEG:  scale = 131.0f; break;
-        case MPU6050GyroConfig::RANGE_500_DEG:  scale = 65.5f;  break;
-        case MPU6050GyroConfig::RANGE_1000_DEG: scale = 32.8f;  break;
-        case MPU6050GyroConfig::RANGE_2000_DEG: scale = 16.4f;  break;
-        default: ESP_LOGW(TAG, "Unknown gyro range enum %d in config, using default scale!", (int)range_enum); scale = 65.5f; break;
+    switch(m_config.gyro_range) {
+        case 0: scale = 131.0f; break;
+        case 1: scale = 65.5f;  break;
+        case 2: scale = 32.8f;  break;
+        case 3: scale = 16.4f;  break;
+        default: ESP_LOGW(TAG, "Unknown gyro range %d in config, using default scale!", m_config.gyro_range); scale = 65.5f; break;
     }
-    ESP_LOGD(TAG, "Gyro scale factor calculated: %.1f LSB/DPS for range %d", scale, (int)range_enum);
+    ESP_LOGD(TAG, "Gyro scale factor calculated: %.1f LSB/DPS for range %d", scale, m_config.gyro_range);
     return scale;
 }
 
@@ -59,24 +58,11 @@ esp_err_t IMUCalibrationService::init() {
 
     // Calculate scale factor based on initial config
     m_gyro_lsb_per_dps = calculateGyroScaleFactor();
-
-    // <<< REMOVED: Subscription moved >>>
-
-    // Perform an initial calibration
-    ESP_LOGI(TAG, "Performing initial gyro calibration...");
-    esp_err_t calib_ret = calibrate();
-    if (calib_ret != ESP_OK) {
-        ESP_LOGE(TAG, "Initial gyro calibration failed (%s). Offsets may be zero or inaccurate.", esp_err_to_name(calib_ret));
-        // Continue initialization even if calibration fails initially
-    } else {
-        ESP_LOGI(TAG, "Initial gyro calibration successful.");
-    }
-
+    // Do *not* calibrate here - IMUService will load offsets from config first
     ESP_LOGI(TAG, "IMUCalibrationService Initialized.");
     return ESP_OK;
 }
 
-// <<< ADDED: Event subscription logic >>>
 void IMUCalibrationService::subscribeToEvents(EventBus& bus) {
     // Subscribe to external calibration requests
     bus.subscribe(EventType::START_CALIBRATION_REQUEST, [this](const BaseEvent& ev) {
@@ -103,9 +89,7 @@ esp_err_t IMUCalibrationService::calibrate() {
     m_eventBus.publish(CalibrationStartedEvent());
 
     // --- Store Old Offsets & Clear Accumulators/Vectors ---
-    float old_offset_x_dps = m_gyro_offset_dps[0];
-    float old_offset_y_dps = m_gyro_offset_dps[1];
-    float old_offset_z_dps = m_gyro_offset_dps[2];
+    // We don't need old offsets anymore, as we publish the new ones for saving
     double gx_sum_dps = 0, gy_sum_dps = 0, gz_sum_dps = 0;
     int successful_samples = 0;
     int attempts = 0;
@@ -166,6 +150,8 @@ esp_err_t IMUCalibrationService::calibrate() {
         float offset_gx_dps = gx_sum_dps / successful_samples;
         float offset_gy_dps = gy_sum_dps / successful_samples;
         float offset_gz_dps = gz_sum_dps / successful_samples;
+
+        // Update internal offsets
         m_gyro_offset_dps[0] = offset_gx_dps;
         m_gyro_offset_dps[1] = offset_gy_dps;
         m_gyro_offset_dps[2] = offset_gz_dps;
@@ -192,12 +178,16 @@ esp_err_t IMUCalibrationService::calibrate() {
             ESP_LOGW(TAG, "Warning: Gyro offset or standard deviation seems high. Ensure robot was stationary.");
         }
         final_status = ESP_OK; // Calibration succeeded
+
+        // Publish event with new offsets so ConfigurationService can save them
+        GyroOffsetsUpdatedEvent event(offset_gx_dps, offset_gy_dps, offset_gz_dps);
+        m_eventBus.publish(event);
+        ESP_LOGI(TAG, "Published gyro offsets updated event.");
+
     } else {
-        ESP_LOGE(TAG, "Insufficient successful samples (%d/%d) for calibration. Restoring previous offsets.",
+        ESP_LOGE(TAG, "Insufficient successful samples (%d/%d) for calibration. Offsets not updated.",
                  successful_samples, m_config.calibration_samples);
-        m_gyro_offset_dps[0] = old_offset_x_dps;
-        m_gyro_offset_dps[1] = old_offset_y_dps;
-        m_gyro_offset_dps[2] = old_offset_z_dps;
+        // Keep existing offsets
         final_status = ESP_FAIL; // Calibration failed
     }
 
@@ -211,9 +201,7 @@ esp_err_t IMUCalibrationService::calibrate() {
     return final_status;
 }
 
-// --- Getters (Thread-safe via mutex if needed, but reading floats might be atomic enough) ---
-// For simplicity, not using mutex here, assuming reads are infrequent enough relative to writes (only during calib)
-// Add mutex lock/unlock around reads if strict consistency is required during calibration.
+// Getters remain thread-safe enough for reads vs calibration writes
 float IMUCalibrationService::getGyroOffsetXDPS() const { return m_gyro_offset_dps[0]; }
 float IMUCalibrationService::getGyroOffsetYDPS() const { return m_gyro_offset_dps[1]; }
 float IMUCalibrationService::getGyroOffsetZDPS() const { return m_gyro_offset_dps[2]; }
@@ -221,6 +209,20 @@ float IMUCalibrationService::getGyroOffsetZDPS() const { return m_gyro_offset_dp
 bool IMUCalibrationService::isCalibrating() const {
     // Reading a volatile bool should be safe without mutex
     return m_is_calibrating_flag;
+}
+
+// Set offsets from config (thread-safe)
+void IMUCalibrationService::setOffsets(float x_offset_dps, float y_offset_dps, float z_offset_dps) {
+    if (xSemaphoreTake(m_mutex, portMAX_DELAY) == pdTRUE) {
+        m_gyro_offset_dps[0] = x_offset_dps;
+        m_gyro_offset_dps[1] = y_offset_dps;
+        m_gyro_offset_dps[2] = z_offset_dps;
+        xSemaphoreGive(m_mutex);
+        ESP_LOGI(TAG, "Gyro offsets set from config: X=%.4f Y=%.4f Z=%.4f DPS",
+             x_offset_dps, y_offset_dps, z_offset_dps);
+    } else {
+        ESP_LOGE(TAG, "Failed to acquire mutex to set gyro offsets.");
+    }
 }
 
 // Event handler (can be replaced by lambda in init)

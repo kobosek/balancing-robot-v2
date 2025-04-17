@@ -17,7 +17,6 @@ public:
     // Initialize with filter parameters
     void init(float alpha = 0.98f, float sample_period_s = 0.001f);
 
-    // Method called by IMUService to process ONE sample of processed physical data
     void processSample(float accel_g_x, float accel_g_y, float accel_g_z,
                        float gyro_dps_x, float gyro_dps_y, float gyro_dps_z); // Changed signature
 

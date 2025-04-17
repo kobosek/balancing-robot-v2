@@ -1,19 +1,58 @@
 #include "TelemetryHandler.hpp"
-#include "ConfigurationService.hpp"
+#include "EventBus.hpp" // Include event bus for subscription
+#include "ConfigUpdatedEvent.hpp" // Include event definition
+#include "BaseEvent.hpp"
+#include "EventTypes.hpp"
+#include "ConfigData.hpp" // Need full struct def for WebServerConfig
 #include "cJSON.h"
 #include <memory>
 #include <vector>
 #include "esp_check.h"
 #include "esp_log.h"
 #include <cstring>
+#include <algorithm> // For std::max
 
-TelemetryHandler::TelemetryHandler(ConfigurationService& configService) :
-    m_configService(configService)
-{}
+// Constructor takes initial WebServerConfig
+TelemetryHandler::TelemetryHandler(const WebServerConfig& initialWebConfig) :
+    // m_configService removed
+    m_telemetry_buffer_max_size(100) // Default before applying initial config
+{
+    applyConfig(initialWebConfig); // Apply initial config
+    ESP_LOGI(TAG, "TelemetryHandler constructed.");
+}
+
+// Apply config values
+void TelemetryHandler::applyConfig(const WebServerConfig& config) {
+    m_telemetry_buffer_max_size = std::max((size_t)1, (size_t)config.telemetry_buffer_size); // Ensure at least 1
+    ESP_LOGI(TAG, "Applied TelemetryHandler params: BufferSize=%zu", m_telemetry_buffer_max_size);
+    // Trim buffer if it exceeds new max size
+    std::lock_guard<std::mutex> lock(m_telemetryMutex);
+    while (m_telemetryBuffer.size() > m_telemetry_buffer_max_size) {
+        m_telemetryBuffer.pop_front();
+    }
+}
+
+// Handle config update event
+void TelemetryHandler::handleConfigUpdate(const BaseEvent& event) {
+    if (event.type != EventType::CONFIG_UPDATED) return;
+    ESP_LOGD(TAG, "Handling config update event.");
+    const auto& configEvent = static_cast<const ConfigUpdatedEvent&>(event);
+    applyConfig(configEvent.configData.web);
+}
+
+// Subscribe to events
+void TelemetryHandler::subscribeToEvents(EventBus& bus) {
+    bus.subscribe(EventType::CONFIG_UPDATED, [this](const BaseEvent& ev){
+        this->handleConfigUpdate(ev);
+    });
+    ESP_LOGI(TAG, "Subscribed to CONFIG_UPDATED events.");
+}
+
 
 void TelemetryHandler::addTelemetrySnapshot(const TelemetryDataPoint& data) {
     std::lock_guard<std::mutex> lock(m_telemetryMutex);
-    if (m_telemetryBuffer.size() >= TELEMETRY_BUFFER_MAX_SIZE) {
+    // Use the configured buffer size
+    if (m_telemetryBuffer.size() >= m_telemetry_buffer_max_size) {
         m_telemetryBuffer.pop_front();
     }
     m_telemetryBuffer.push_back(data);
@@ -31,6 +70,9 @@ esp_err_t TelemetryHandler::handleRequest(httpd_req_t *req) {
     std::unique_ptr<char, decltype(char_deleter)> json_str_ptr(nullptr, char_deleter);
 
     std::vector<TelemetryDataPoint> dataToSend;
+    // Note: Interval is no longer fetched from ConfigService here. If needed,
+    // the interval should also be stored locally and updated via handleConfigUpdate.
+    // For now, assuming the JS doesn't strictly *need* the interval from this specific response.
 
     do {
         {
@@ -39,11 +81,11 @@ esp_err_t TelemetryHandler::handleRequest(httpd_req_t *req) {
             m_telemetryBuffer.clear();
         }
 
-        int intervalMs = m_configService.getMainLoopConfig().interval_ms;
+        // int intervalMs = m_configService.getMainLoopConfig().interval_ms; // REMOVED
 
         root_ptr.reset(cJSON_CreateObject()); root = root_ptr.get();
         if (!root) { ESP_LOGE(TAG, "Failed create root JSON"); final_ret = ESP_FAIL; break; }
-        if (!cJSON_AddNumberToObject(root, "interval_ms", intervalMs)) { ESP_LOGE(TAG, "Failed add interval"); final_ret = ESP_FAIL; break; }
+        // if (!cJSON_AddNumberToObject(root, "interval_ms", intervalMs)) { ESP_LOGE(TAG, "Failed add interval"); final_ret = ESP_FAIL; break; } // REMOVED
         cJSON* dataArray = cJSON_AddArrayToObject(root, "data");
         if (!dataArray) { ESP_LOGE(TAG, "Failed create data array"); final_ret = ESP_FAIL; break; }
 
@@ -59,7 +101,7 @@ esp_err_t TelemetryHandler::handleRequest(httpd_req_t *req) {
             cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.speedSetpointLeft_dps)); // 5
             cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.speedSetpointRight_dps));// 6
             cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.desiredAngle_deg));      // 7
-            cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.yawRate_dps));           // 8 <<< ADDED Yaw Rate
+            cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.yawRate_dps));           // 8
 
             cJSON_AddItemToArray(dataArray, pointArray);
         }

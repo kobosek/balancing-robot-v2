@@ -1,15 +1,14 @@
 #pragma once
 #include "BaseEvent.hpp"
-// #include "ConfigData.hpp" // Use forward declaration if only needed as reference/pointer
-// Forward declare if payload reference/pointer is added later
-struct ConfigData; // Defined in config/include
+#include "ConfigData.hpp" // Include full definition for payload
 
 class ConfigUpdatedEvent : public BaseEvent {
 public:
-    // Optional: Add reference to the updated config data if needed by subscribers
-    // const ConfigData& updatedConfig;
+    // Add reference to the updated config data payload
+    const ConfigData& configData;
 
-    ConfigUpdatedEvent(/* const ConfigData& config */) :
-        BaseEvent(EventType::CONFIG_UPDATED)
-        /* , updatedConfig(config) */ {}
+    // Constructor takes the config data
+    explicit ConfigUpdatedEvent(const ConfigData& data) :
+        BaseEvent(EventType::CONFIG_UPDATED),
+        configData(data) {}
 };

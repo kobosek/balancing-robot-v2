@@ -4,15 +4,14 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include <vector>
-#include <mutex> // <<< Already Included
+#include <mutex> 
 #include "esp_log.h"
+#include "ConfigData.hpp" // For MPU6050Config definition
 
 // Forward Declarations
 class MPU6050Driver;
-class ConfigService;
 class EventBus;
 class BaseEvent;
-struct MPU6050Config; // For accessing config details
 
 class IMUCalibrationService {
 public:
@@ -27,6 +26,9 @@ public:
     float getGyroOffsetZDPS() const;
     bool isCalibrating() const;
 
+    // Set gyro offsets from config (software offsets, not hardware registers)
+    void setOffsets(float x_offset_dps, float y_offset_dps, float z_offset_dps);
+
     // <<< ADDED: Method for event subscriptions >>>
     void subscribeToEvents(EventBus& bus);
 
@@ -34,7 +36,7 @@ private:
     static constexpr const char* TAG = "IMUCalibService";
 
     MPU6050Driver& m_driver;
-    const MPU6050Config& m_config; // Reference to config struct for params
+    MPU6050Config m_config; // Copy of config struct for params
     EventBus& m_eventBus;
 
     SemaphoreHandle_t m_mutex;
@@ -51,6 +53,6 @@ private:
     // Calculated scale factor based on config
     float m_gyro_lsb_per_dps;
 
-    void handleStartCalibrationRequest(const BaseEvent& event);
+    void handleStartCalibrationRequest(const BaseEvent& event); // Keep private if only called via lambda
     float calculateGyroScaleFactor() const;
 };

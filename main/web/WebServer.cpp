@@ -1,4 +1,3 @@
-// main/web/WebServer.cpp
 #include "WebServer.hpp"
 
 // Include handler headers
@@ -13,25 +12,28 @@
 #include "StateManager.hpp"
 #include "EventBus.hpp"
 #include "TelemetryDataPoint.hpp"
-#include "JoystickInputEvent.hpp"   // <<<--- Already Included
+#include "JoystickInputEvent.hpp"
+#include "ConfigData.hpp" // Needed for config struct
+#include "EventTypes.hpp" // Needed for subscription
+#include "ConfigUpdatedEvent.hpp" // Needed for subscription
 
 #include "esp_check.h"
 #include "esp_http_server.h"
-#include "cJSON.h"                  // <<<--- Already Included
-#include <memory>                   // For unique_ptr
-#include <cstring>                  // <<<--- Already Included
-#include <algorithm>                // <<<--- Already Included
+#include "cJSON.h"
+#include <memory>
+#include <cstring>
+#include <algorithm>
 
 // Constructor: Instantiate handlers, injecting dependencies
-WebServer::WebServer(ConfigurationService& configService, StateManager& stateManager, EventBus& eventBus)
+WebServer::WebServer(ConfigurationService& configService, StateManager& stateManager, EventBus& eventBus, const WebServerConfig& initialWebConfig)
     : server(nullptr),
-      m_configService(configService), // Store references needed by handlers
-      m_stateManager(stateManager),
-      m_eventBus(eventBus)            // Store EventBus reference
+      m_configService(configService), // Store reference for ConfigApiHandler
+      m_stateManager(stateManager),   // Store reference for StateApiHandler
+      m_eventBus(eventBus)            // Store EventBus reference for WS handler
 {
     m_staticFileHandler = std::make_unique<StaticFileHandler>("/spiffs");
-    m_telemetryHandler = std::make_unique<TelemetryHandler>(m_configService); // Pass config
-    m_configApiHandler = std::make_unique<ConfigApiHandler>(m_configService); // Pass config
+    m_telemetryHandler = std::make_unique<TelemetryHandler>(initialWebConfig); // Pass web config struct
+    m_configApiHandler = std::make_unique<ConfigApiHandler>(m_configService); // Pass config service
     m_commandApiHandler = std::make_unique<CommandApiHandler>(m_eventBus);    // Pass eventBus
     m_stateApiHandler = std::make_unique<StateApiHandler>(m_stateManager);    // Pass stateManager
     ESP_LOGI(TAG, "Webserver handlers created.");
@@ -49,8 +51,21 @@ void WebServer::addTelemetrySnapshot(const TelemetryDataPoint& data) {
     else { ESP_LOGE(TAG, "TelemetryHandler not initialized."); }
 }
 
+// Subscribe to events and forward to handlers if needed
+void WebServer::subscribeToEvents(EventBus& bus) {
+    // Forward config updates to handlers that need them
+    bus.subscribe(EventType::CONFIG_UPDATED, [this](const BaseEvent& ev){
+        if (m_telemetryHandler) m_telemetryHandler->handleConfigUpdate(ev);
+        if (m_configApiHandler) m_configApiHandler->handleConfigUpdate(ev);
+        // Add other handlers here if they need config updates
+    });
+    ESP_LOGI(TAG, "Subscribed WebServer components to CONFIG_UPDATED events.");
+    // Allow handlers to subscribe directly if they need other events
+    if(m_telemetryHandler) m_telemetryHandler->subscribeToEvents(bus);
+    if(m_configApiHandler) m_configApiHandler->subscribeToEvents(bus);
+}
+
 // init: Register handlers, including WebSocket
-// ... (init function remains the same) ...
 esp_err_t WebServer::init() {
     ESP_LOGI(TAG, "Initializing web server routing...");
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -62,9 +77,9 @@ esp_err_t WebServer::init() {
     ESP_LOGI(TAG, "HTTPD server started.");
 
     const httpd_uri_t root_uri = { "/", HTTP_GET, static_get_handler, nullptr };
-    esp_err_t ret = httpd_register_uri_handler(server, &root_uri); // Assign ret
+    esp_err_t ret = httpd_register_uri_handler(server, &root_uri);
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed register root URI");
-    ESP_LOGI(TAG, "Registered handler for: / (GET)"); // <<< ADD LOG
+    ESP_LOGI(TAG, "Registered handler for: / (GET)");
 
     const httpd_uri_t style_uri = { "/style.css", HTTP_GET, static_get_handler, nullptr };
     ret = httpd_register_uri_handler(server, &style_uri);
@@ -80,47 +95,46 @@ esp_err_t WebServer::init() {
     for (const char* js_file : js_files) {
         httpd_uri_t js_uri = { js_file, HTTP_GET, static_get_handler, nullptr };
         ret = httpd_register_uri_handler(server, &js_uri);
-        // Log error but continue, maybe some JS files aren't critical? Or ESP_RETURN_ON_ERROR if all are needed.
         if (ret != ESP_OK) { ESP_LOGE(TAG, "Failed register JS URI: %s (%s)", js_file, esp_err_to_name(ret)); }
         else { ESP_LOGI(TAG, "Registered handler for: %s (GET)", js_file); }
     }
 
     const httpd_uri_t data_uri = { "/data", HTTP_GET, data_get_handler, nullptr };
-    ret = httpd_register_uri_handler(server, &data_uri); // Assign ret
+    ret = httpd_register_uri_handler(server, &data_uri);
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed register data URI");
-    ESP_LOGI(TAG, "Registered handler for: /data (GET)"); // <<< ADD LOG
+    ESP_LOGI(TAG, "Registered handler for: /data (GET)");
 
     const httpd_uri_t get_config_uri = { "/api/config", HTTP_GET, get_config_handler, nullptr };
-    ret = httpd_register_uri_handler(server, &get_config_uri); // Assign ret
+    ret = httpd_register_uri_handler(server, &get_config_uri);
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed register get_config URI");
-    ESP_LOGI(TAG, "Registered handler for: /api/config (GET)"); // <<< ADD LOG
+    ESP_LOGI(TAG, "Registered handler for: /api/config (GET)");
 
     const httpd_uri_t set_config_uri = { "/api/config", HTTP_POST, set_config_handler, nullptr };
-    ret = httpd_register_uri_handler(server, &set_config_uri); // Assign ret
+    ret = httpd_register_uri_handler(server, &set_config_uri);
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed register set_config URI");
-    ESP_LOGI(TAG, "Registered handler for: /api/config (POST)"); // <<< ADD LOG
+    ESP_LOGI(TAG, "Registered handler for: /api/config (POST)");
 
     const httpd_uri_t command_uri = { "/api/command", HTTP_POST, command_handler, nullptr };
-    ret = httpd_register_uri_handler(server, &command_uri); // Assign ret
+    ret = httpd_register_uri_handler(server, &command_uri);
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed register command URI");
-    ESP_LOGI(TAG, "Registered handler for: /api/command (POST)"); // <<< ADD LOG
+    ESP_LOGI(TAG, "Registered handler for: /api/command (POST)");
 
     const httpd_uri_t get_state_uri = { "/api/state", HTTP_GET, get_state_handler, nullptr };
-    ret = httpd_register_uri_handler(server, &get_state_uri); // Assign ret
+    ret = httpd_register_uri_handler(server, &get_state_uri);
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed register get_state URI");
-    ESP_LOGI(TAG, "Registered handler for: /api/state (GET)"); // <<< ADD LOG
+    ESP_LOGI(TAG, "Registered handler for: /api/state (GET)");
 
     // --- Register WebSocket URI Handler ---
     const httpd_uri_t ws_uri = { "/ws", HTTP_GET, websocket_handler, nullptr, true };
-    ret = httpd_register_uri_handler(server, &ws_uri); // Assign ret
+    ret = httpd_register_uri_handler(server, &ws_uri);
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed register WebSocket URI");
-    ESP_LOGI(TAG, "Registered handler for: /ws (WebSocket)"); // <<< ADD LOG
+    ESP_LOGI(TAG, "Registered handler for: /ws (WebSocket)");
 
     // --- Register FALLBACK/WILDCARD file handler LAST ---
     const httpd_uri_t file_uri = { "/*", HTTP_GET, static_get_handler, nullptr };
-    ret = httpd_register_uri_handler(server, &file_uri); // Assign ret
+    ret = httpd_register_uri_handler(server, &file_uri);
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed register fallback file URI");
-    ESP_LOGI(TAG, "Registered handler for: /* (GET) - Fallback"); // <<< ADD LOG
+    ESP_LOGI(TAG, "Registered handler for: /* (GET) - Fallback");
 
     ESP_LOGI(TAG, "All URI handlers registration attempted.");
     return ESP_OK;
@@ -128,7 +142,6 @@ esp_err_t WebServer::init() {
 
 
 // --- Static HTTP Handler Implementations ---
-// ... (static handlers remain the same) ...
 esp_err_t WebServer::static_get_handler(httpd_req_t *req) {
     httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
     if (!instance || !instance->m_staticFileHandler) { ESP_LOGE(TAG, "Static file handler ctx invalid!"); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); return ESP_FAIL; }
@@ -152,7 +165,7 @@ esp_err_t WebServer::set_config_handler(httpd_req_t *req) {
 esp_err_t WebServer::command_handler(httpd_req_t *req) {
      httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
      if (!instance || !instance->m_commandApiHandler) { ESP_LOGE(TAG, "Command API handler ctx invalid!"); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); return ESP_FAIL; }
-    return instance->m_commandApiHandler->handleRequest(req); // Still handles start/stop/etc.
+    return instance->m_commandApiHandler->handleRequest(req);
 }
 esp_err_t WebServer::get_state_handler(httpd_req_t *req) {
      httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
@@ -161,7 +174,6 @@ esp_err_t WebServer::get_state_handler(httpd_req_t *req) {
 }
 
 // --- WebSocket Static Handler ---
-// ... (websocket_handler remains the same) ...
 esp_err_t WebServer::websocket_handler(httpd_req_t *req) {
     // Handle initial GET upgrade request
     if (req->method == HTTP_GET) {
@@ -274,4 +286,3 @@ esp_err_t WebServer::handleWebSocketFrame(httpd_req_t *req, httpd_ws_frame_t *ws
 
     return ret;
 }
-// --- END WebSocket Handling ---

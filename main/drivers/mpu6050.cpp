@@ -5,22 +5,31 @@
 #include "freertos/task.h" // For vTaskDelay
 
 MPU6050Driver::MPU6050Driver() :
+    _bus_handle(nullptr),
     _dev_handle(nullptr),
     _i2c_mutex()
 {}
 
+// main/drivers/mpu6050.cpp
+
 esp_err_t MPU6050Driver::init(const i2c_port_t i2c_port,
-                               const gpio_num_t sda_io,
-                               const gpio_num_t scl_io,
-                               const uint16_t i2c_addr,
-                               const uint32_t i2c_freq) {
+    const gpio_num_t sda_io,
+    const gpio_num_t scl_io,
+    const uint16_t i2c_addr,
+    const uint32_t i2c_freq) {
+
     ESP_LOGD(TAG, "Initializing MPU6050 Driver");
-    std::lock_guard<std::mutex> lock(_i2c_mutex); // Lock during init
+    std::lock_guard<std::mutex> lock(_i2c_mutex);
 
     if (_dev_handle) {
-         ESP_LOGW(TAG, "Driver already initialized.");
-         return ESP_OK;
+    ESP_LOGW(TAG, "Driver already initialized. Skipping init.");
+    return ESP_OK; // Already initialized is not an error here
     }
+    // Reset handles before attempting initialization
+    _dev_handle = nullptr;
+    _bus_handle = nullptr;
+
+    esp_err_t ret = ESP_FAIL; // Default to failure
 
     // --- Configure I2C Bus ---
     i2c_master_bus_config_t bus_config = {
@@ -29,16 +38,18 @@ esp_err_t MPU6050Driver::init(const i2c_port_t i2c_port,
         .scl_io_num = scl_io,
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .glitch_ignore_cnt = 7,
-        .intr_priority = 0,
+        .intr_priority = 0, // Or a suitable priority if needed
         .flags = { .enable_internal_pullup = true }
     };
-    i2c_master_bus_handle_t bus_handle;
-    // Check if bus already exists? For simplicity, assume we own it.
-    esp_err_t ret = i2c_new_master_bus(&bus_config, &bus_handle);
-    if (ret != ESP_OK) {
+    // Try to create the bus
+    ret = i2c_new_master_bus(&bus_config, &_bus_handle);
+    if (ret != ESP_OK || !_bus_handle) {
         ESP_LOGE(TAG, "Failed create I2C master bus: %s", esp_err_to_name(ret));
-        return ret;
+        _bus_handle = nullptr; // Ensure null on failure
+        // DO NOT delete bus here, let destructor handle it if needed
+        return ret; // Return the error from bus creation
     }
+    ESP_LOGD(TAG, "I2C Master Bus created (Handle: %p)", _bus_handle);
 
     // --- Add I2C Device ---
     i2c_device_config_t dev_config = {
@@ -46,23 +57,53 @@ esp_err_t MPU6050Driver::init(const i2c_port_t i2c_port,
         .device_address = i2c_addr,
         .scl_speed_hz = i2c_freq,
     };
-    ret = i2c_master_bus_add_device(bus_handle, &dev_config, &_dev_handle);
-    if (ret != ESP_OK || _dev_handle == nullptr) {
+    // Try to add the device
+    ret = i2c_master_bus_add_device(_bus_handle, &dev_config, &_dev_handle);
+    if (ret != ESP_OK || !_dev_handle) {
         ESP_LOGE(TAG, "Failed add I2C device: %s", esp_err_to_name(ret));
-        // i2c_del_master_bus(bus_handle); // Cleanup bus if created locally
-        _dev_handle = nullptr; // Ensure handle is null on failure
-        return ret == ESP_OK ? ESP_FAIL : ret; // Return ESP_FAIL if ret was OK but handle is null
+        _dev_handle = nullptr; // Ensure null on failure
+        // DO NOT delete bus or device here, let destructor handle cleanup of _bus_handle if it exists
+        return ret == ESP_OK ? ESP_FAIL : ret; // Return error from device add, or ESP_FAIL if ret was OK but handle null
     }
 
-    ESP_LOGI(TAG, "MPU6050 Driver Initialized Successfully (Device Handle Created)");
-    return ESP_OK;
+    ESP_LOGI(TAG, "MPU6050 Driver Initialized Successfully (Bus Handle: %p, Device Handle: %p)", _bus_handle, _dev_handle);
+    return ESP_OK; // Explicitly return OK only if both steps succeeded
 }
 
-// --- Configuration Methods ---
+// Destructor remains the same (it will clean up whatever was successfully created)
+MPU6050Driver::~MPU6050Driver() {
+    ESP_LOGI(TAG, "Deinitializing MPU6050 Driver...");
+    std::lock_guard<std::mutex> lock(_i2c_mutex); // Lock during deinit
+
+    esp_err_t ret;
+    // Remove device first (if it exists)
+    if (_dev_handle) {
+        ret = i2c_master_bus_rm_device(_dev_handle);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to remove I2C device: %s", esp_err_to_name(ret));
+        } else {
+            ESP_LOGD(TAG, "I2C device removed.");
+        }
+        _dev_handle = nullptr;
+    }
+
+    if (_bus_handle) {
+        ret = i2c_del_master_bus(_bus_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to delete I2C master bus: %s", esp_err_to_name(ret));
+    } else {
+        ESP_LOGD(TAG, "I2C master bus deleted.");
+    }
+    _bus_handle = nullptr;
+    }
+
+    ESP_LOGI(TAG, "MPU6050 Driver Deinitialized.");
+}
+
 
 esp_err_t MPU6050Driver::setPowerManagementReg(MPU6050PowerManagement powerBits) {
-     ESP_LOGD(TAG, "Setting PWR_MGMT_1: 0x%02X", static_cast<uint8_t>(powerBits));
-     return writeRegister(MPU6050Register::PWR_MGMT_1, static_cast<uint8_t>(powerBits));
+    ESP_LOGD(TAG, "Setting PWR_MGMT_1: 0x%02X", static_cast<uint8_t>(powerBits));
+    return writeRegister(MPU6050Register::PWR_MGMT_1, static_cast<uint8_t>(powerBits));
 }
 
 esp_err_t MPU6050Driver::resetSensor() {

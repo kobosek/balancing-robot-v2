@@ -1,13 +1,12 @@
-// main/WiFiManager.cpp
-#include "WiFiManager.hpp"              // Relative path within module's include dir
-#include "ConfigurationService.hpp"     // Found via INCLUDE_DIRS
-#include "ConfigData.hpp"               // Found via INCLUDE_DIRS (Needed for WiFiConfig)
+
+#include "WiFiManager.hpp"
+#include "ConfigData.hpp"
 
 #include "nvs_flash.h"
 #include "esp_netif.h"
 
-#include <cstring>                      // For strncpy
-#include "esp_log.h"                    // Moved from header
+#include <cstring>
+#include "esp_log.h"
 #include <cstring> // For strncpy
 
 // Static member initialization
@@ -35,8 +34,8 @@ esp_err_t WiFiManager::initNVS() {
     return ret;
 }
 
-// Init now takes ConfigurationService
-esp_err_t WiFiManager::init(ConfigurationService& configService) {
+// Init now takes WiFiConfig struct
+esp_err_t WiFiManager::init(const WiFiConfig& initialConfig) {
     ESP_LOGI(TAG, "Initializing WiFiManager");
 
     esp_err_t ret = initNVS();
@@ -66,7 +65,6 @@ esp_err_t WiFiManager::init(ConfigurationService& configService) {
         return ret;
     }
 
-    // This should return a handle, but we might not need it directly
     esp_netif_t* sta_netif = esp_netif_create_default_wifi_sta();
     if (!sta_netif) {
         ESP_LOGE(TAG, "Failed to create STA netif");
@@ -89,15 +87,14 @@ esp_err_t WiFiManager::init(ConfigurationService& configService) {
     esp_event_handler_instance_t instanceAnyId;
     esp_event_handler_instance_t instanceGotIp;
     ret = esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &eventHandler, this, &instanceAnyId);
-    if (ret != ESP_OK) { /* Cleanup */ ESP_LOGE(TAG, "Failed register WIFI_EVENT handler: %s", esp_err_to_name(ret)); return ret; }
+    if (ret != ESP_OK) { ESP_LOGE(TAG, "Failed register WIFI_EVENT handler: %s", esp_err_to_name(ret)); return ret; }
     ret = esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &eventHandler, this, &instanceGotIp);
-    if (ret != ESP_OK) { /* Cleanup */ ESP_LOGE(TAG, "Failed register IP_EVENT handler: %s", esp_err_to_name(ret)); return ret; }
+    if (ret != ESP_OK) { ESP_LOGE(TAG, "Failed register IP_EVENT handler: %s", esp_err_to_name(ret)); return ret; }
 
     ESP_LOGI(TAG, "WiFiManager base initialized successfully. Connecting...");
 
-    // Get WiFi config (our struct) and connect
-    WiFiConfig wifiConfig = configService.getWiFiConfig(); // Get OUR struct instance
-    return connect(wifiConfig); // Call connect with OUR struct
+    // Use the initial config passed to init()
+    return connect(initialConfig); // Call connect with OUR struct
 }
 
 // Connect now takes OUR WiFiConfig struct
@@ -183,6 +180,3 @@ void WiFiManager::eventHandler(void* arg, esp_event_base_t event_base, int32_t e
         if (s_wifiEventGroup) xEventGroupSetBits(s_wifiEventGroup, WIFI_CONNECTED_BIT);
     }
 }
-
-// Optional: Add handler for ConfigUpdatedEvent later
-// void WiFiManager::handleConfigUpdate(const ConfigData& newConfig) { ... }

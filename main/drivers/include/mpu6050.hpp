@@ -14,7 +14,10 @@ enum class MPU6050Register : uint8_t {
     FIFO_COUNT_H = 0x72, FIFO_R_W = 0x74,
     ACCEL_XOUT_H = 0x3B, GYRO_XOUT_H = 0x43,
     WHO_AM_I = 0x75,
-    // Add other registers if needed
+    // Gyro offset registers
+    XG_OFFS_USRH = 0x13, XG_OFFS_USRL = 0x14,
+    YG_OFFS_USRH = 0x15, YG_OFFS_USRL = 0x16,
+    ZG_OFFS_USRH = 0x17, ZG_OFFS_USRL = 0x18
 };
 
 enum class MPU6050Interrupt : uint8_t {
@@ -78,7 +81,7 @@ enum class MPU6050SampleRateDiv : uint8_t {
 class MPU6050Driver {
 public:
     MPU6050Driver();
-    ~MPU6050Driver() = default;
+    ~MPU6050Driver();
 
     // --- Initialization ---
     esp_err_t init(i2c_port_t i2c_port, gpio_num_t sda_io, gpio_num_t scl_io,
@@ -104,6 +107,9 @@ public:
     esp_err_t readInterruptStatus(uint8_t& status) const;
     esp_err_t isFIFOOverflow(bool& isOverflow) const; // Returns bool via parameter
 
+    // --- Calibration Methods ---
+    esp_err_t setGyroOffsets(float x_offset_dps, float y_offset_dps, float z_offset_dps);
+
     // --- Low-level I2C Communication (Public for flexibility/other services) ---
     esp_err_t readRegisters(MPU6050Register reg, uint8_t* data, size_t len) const;
     esp_err_t writeRegister(MPU6050Register reg, uint8_t data);
@@ -111,6 +117,7 @@ public:
 private:
     static constexpr const char* TAG = "MPU6050Driver";
 
+    i2c_master_bus_handle_t _bus_handle;
     i2c_master_dev_handle_t _dev_handle;
     mutable std::mutex _i2c_mutex; // Protect I2C operations
 };

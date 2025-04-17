@@ -1,4 +1,6 @@
-// main/state/include/StateManager.hpp
+// ================================================
+// File: main/core/include/StateManager.hpp
+// ================================================
 #pragma once
 
 #include "SystemState.hpp"
@@ -24,22 +26,24 @@ class DisableFallDetectCommandEvent;
 class IMU_CommunicationErrorEvent;
 class ImuRecoverySucceededEvent;
 class ImuRecoveryFailedEvent;
-class AttemptImuRecoveryCommand; // <<< ADDED Forward declaration needed
+class AttemptImuRecoveryCommand;
+class ConfigUpdatedEvent; // Need event definition
+// class ConfigurationService; // No longer needed
+struct SystemBehaviorConfig; // Forward declare needed config struct
+struct ConfigData; // Needed by handler
 
 class StateManager {
 public:
-    StateManager(EventBus& eventBus);
+    // Constructor now takes initial config struct
+    StateManager(EventBus& eventBus, const SystemBehaviorConfig& initialBehaviorConfig);
     ~StateManager() = default;
 
     SystemState getCurrentState() const;
     void setState(SystemState newState);
 
-    // <<< MODIFIED: Renamed/clarified init's purpose >>>
     esp_err_t init();
-    // <<< ADDED: Method for event subscriptions >>>
     void subscribeToEvents(EventBus& bus);
 
-    // Method for enabling/disabling auto recovery
     void setAutoRecovery(bool enabled);
     bool isAutoRecoveryEnabled() const;
     void enableFallDetection(bool enabled);
@@ -47,13 +51,9 @@ public:
 
 private:
     static constexpr const char* TAG = "StateManager";
-    static constexpr float RECOVERY_ANGLE_THRESHOLD_RAD = 0.087f;
-    static constexpr uint64_t RECOVERY_HOLD_TIME_US = 2000000;
-    // IMU Recovery constants
-    static const uint8_t MAX_IMU_RECOVERY_ATTEMPTS = 3;
-    static const uint32_t IMU_RECOVERY_DELAY_MS = 1000;
 
     EventBus& m_eventBus;
+    // ConfigurationService& m_configService; // REMOVE
     SystemState m_currentState;
 
     // State for recovery logic
@@ -64,6 +64,12 @@ private:
     // State for IMU recovery logic
     SystemState m_preImuRecoveryState = SystemState::IDLE;
     uint8_t m_imu_recovery_attempts = 0;
+
+    // Local copies of configuration values for performance/convenience
+    float m_recovery_angle_threshold_rad;
+    uint64_t m_recovery_hold_time_us;
+    uint8_t m_max_imu_recovery_attempts;
+    // uint32_t m_imu_recovery_delay_ms; // Not currently used directly
 
     // Event handler methods (private)
     void handleFallDetected(const FallDetectionEvent& event);
@@ -80,6 +86,7 @@ private:
     void handleImuCommunicationError(const IMU_CommunicationErrorEvent& event);
     void handleImuRecoverySucceeded(const ImuRecoverySucceededEvent& event);
     void handleImuRecoveryFailed(const ImuRecoveryFailedEvent& event);
+    void handleConfigUpdate(const BaseEvent& event); // Add event handler
 
     // Recovery helpers
     void requestImuRecovery();
@@ -87,4 +94,6 @@ private:
 
     // Helper for logging state names
     std::string stateToString(SystemState state) const;
+    // Helper to apply config values
+    void applyConfig(const SystemBehaviorConfig& config);
 };

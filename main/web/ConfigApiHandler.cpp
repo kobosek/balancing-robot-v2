@@ -1,12 +1,44 @@
 #include "ConfigApiHandler.hpp"
-#include "ConfigurationService.hpp" // Need full definition
-#include <memory>                   // For unique_ptr
+#include "ConfigurationService.hpp"
+#include "ConfigData.hpp"
+#include "EventBus.hpp" // Include event bus
+#include "ConfigUpdatedEvent.hpp" // Include event definition
+#include "BaseEvent.hpp"
+#include "EventTypes.hpp"
+#include <memory>
 #include <string>
-#include <new>                      // For std::nothrow
+#include <new>
+#include <algorithm>
 
 ConfigApiHandler::ConfigApiHandler(ConfigurationService& configService) :
-    m_configService(configService)
-{}
+    m_configService(configService),
+    m_max_post_data_size(4096) // Default before applying config
+{
+    applyConfig(m_configService.getWebServerConfig()); // Apply initial config
+    ESP_LOGI(TAG, "ConfigApiHandler constructed.");
+}
+
+// Apply relevant config values
+void ConfigApiHandler::applyConfig(const WebServerConfig& config) {
+    m_max_post_data_size = std::max((size_t)512, (size_t)config.max_config_post_size); // Ensure reasonable min
+    ESP_LOGI(TAG, "Applied ConfigApiHandler params: MaxPostSize=%zu", m_max_post_data_size);
+}
+
+// Handle config update event
+void ConfigApiHandler::handleConfigUpdate(const BaseEvent& event) {
+    if (event.type != EventType::CONFIG_UPDATED) return;
+    ESP_LOGD(TAG, "Handling config update event.");
+    const auto& configEvent = static_cast<const ConfigUpdatedEvent&>(event);
+    applyConfig(configEvent.configData.web);
+}
+
+// Subscribe to config updates
+void ConfigApiHandler::subscribeToEvents(EventBus& bus) {
+    bus.subscribe(EventType::CONFIG_UPDATED, [this](const BaseEvent& ev){
+        this->handleConfigUpdate(ev);
+    });
+    ESP_LOGI(TAG, "Subscribed to CONFIG_UPDATED events.");
+}
 
 esp_err_t ConfigApiHandler::handleGetRequest(httpd_req_t *req) {
     ESP_LOGD(TAG, "Received request for /api/config (GET)");
@@ -30,7 +62,8 @@ esp_err_t ConfigApiHandler::handlePostRequest(httpd_req_t *req) {
     ESP_LOGD(TAG, "Received request for /api/config (POST)");
     size_t content_len = req->content_len;
 
-    if (content_len == 0 || content_len > MAX_POST_DATA_SIZE) {
+    // Use configured max size
+    if (content_len == 0 || content_len > m_max_post_data_size) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
                             content_len == 0 ? "Empty body" : "Payload too large");
         return ESP_FAIL;
@@ -65,7 +98,12 @@ esp_err_t ConfigApiHandler::handlePostRequest(httpd_req_t *req) {
         return ESP_OK;
     } else {
         ESP_LOGE(TAG, "Config update failed (err: %s)", esp_err_to_name(ret));
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid config format or save failed");
+        // Provide a slightly more specific error message if possible
+        if (ret == ESP_FAIL) { // Assuming ESP_FAIL is used for validation errors by ConfigurationService
+             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid config data provided");
+        } else {
+             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid config format or save failed");
+        }
         return ESP_FAIL;
     }
 }

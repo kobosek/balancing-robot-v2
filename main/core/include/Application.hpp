@@ -11,13 +11,13 @@ class JsonConfigParser;
 class ConfigurationService;
 class StateManager;
 class RobotController;
-class WiFiManager; // Added
-class WebServer;   // Added
+class WiFiManager;
+class WebServer;
 
 // Forward declarations for IMU components
 class MPU6050Driver;
-class IMUCalibrationService; 
-class IMUHealthMonitor;   
+class IMUCalibrationService;
+class IMUHealthMonitor;
 class IMUService;
 class OrientationEstimator;
 
@@ -54,13 +54,13 @@ private:
     std::unique_ptr<ConfigurationService> m_configService;
     std::unique_ptr<StateManager> m_stateManager;
     std::unique_ptr<RobotController> m_robotController;
-    std::unique_ptr<WiFiManager> m_wifiManager; // Added
-    std::unique_ptr<WebServer> m_webServer;     // Added
+    std::unique_ptr<WiFiManager> m_wifiManager;
+    std::unique_ptr<WebServer> m_webServer;
 
     // IMU Components (using unique_ptr)
     std::unique_ptr<MPU6050Driver> m_mpuDriver;
-    std::unique_ptr<IMUCalibrationService> m_imuCalibrationService; // Store interface pointer
-    std::unique_ptr<IMUHealthMonitor> m_imuHealthMonitor;          // Store interface pointer
+    std::unique_ptr<IMUCalibrationService> m_imuCalibrationService;
+    std::unique_ptr<IMUHealthMonitor> m_imuHealthMonitor;
     std::unique_ptr<IMUService> m_imuService;
     std::unique_ptr<OrientationEstimator> m_orientationEstimator;
 
@@ -75,9 +75,9 @@ private:
     // Application tasks (using unique_ptr)
     std::unique_ptr<ControlTask> m_controlTask;
     std::unique_ptr<IMUFifoTask> m_imuFifoTask;
-    std::unique_ptr<IMUHealthMonitorTask> m_imuHealthMonitorTask; // Renamed task
+    std::unique_ptr<IMUHealthMonitorTask> m_imuHealthMonitorTask;
     std::unique_ptr<BatteryMonitorTask> m_batteryMonitorTask;
 
-    // Task management methods
-    esp_err_t createAndStartTasks();
+
+    esp_err_t createAndStartTasks(int intervalMs, int batteryIntervalMs);
 };
