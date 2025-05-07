@@ -1,12 +1,13 @@
-// ================================================
-// File: main/algorithms/include/BalancingAlgorithm.hpp
-// ================================================
+
 #pragma once
 
 #include "ConfigData.hpp" // Include full definition
 #include "EventBus.hpp"
 #include "PIDController.hpp"
 #include "esp_log.h"
+
+// Forward declarations for event classes
+class CONFIG_PidConfigUpdate;
 
 class BaseEvent; // Forward declare
 
@@ -62,7 +63,11 @@ private:
     float m_last_speed_setpoint_right_dps = 0.0f;
     // --- End Members ---
 
-    // Internal helper to apply config from event
+    // Internal helpers to apply config from events
     void applyConfig(const ConfigData& config);
     void handleConfigUpdate(const BaseEvent& event);
+    void handlePIDConfigUpdate(const CONFIG_PidConfigUpdate& event);
+    
+    // Helper to update dimensions from config
+    void updateDimensions(const EncoderConfig& encoderConfig, const RobotDimensionsConfig& dimensionsConfig);
 };

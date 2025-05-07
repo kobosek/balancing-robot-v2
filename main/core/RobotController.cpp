@@ -10,12 +10,12 @@
 #include "SystemState.hpp"
 #include "WebServer.hpp"
 #include "TelemetryDataPoint.hpp"
-#include "BatteryStatusUpdatedEvent.hpp" // <<< Already Included
+#include "BATTERY_StatusUpdate.hpp" // <<< Already Included
 #include "CommandProcessor.hpp"
 #include "EventBus.hpp"
 #include "EventTypes.hpp"
-#include "TargetMovementCommand.hpp"
-#include "OrientationDataEvent.hpp"
+#include "MOTION_TargetMovement.hpp"
+#include "IMU_OrientationData.hpp"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -57,7 +57,7 @@ esp_err_t RobotController::init(EventBus& bus) {
 
 // <<< ADDED: Event subscription logic >>>
 void RobotController::subscribeToEvents(EventBus& bus) {
-    bus.subscribe(EventType::TARGET_MOVEMENT_CMD_SET, [this](const BaseEvent& ev) {
+    bus.subscribe(EventType::MOTION_TARGET_SET, [this](const BaseEvent& ev) {
         this->handleTargetMovementCommand(ev);
     });
     ESP_LOGI(TAG, "Subscribed to TARGET_MOVEMENT_CMD_SET events.");
@@ -65,8 +65,8 @@ void RobotController::subscribeToEvents(EventBus& bus) {
 
 
 void RobotController::handleTargetMovementCommand(const BaseEvent& event) {
-    if (event.type == EventType::TARGET_MOVEMENT_CMD_SET) {
-        const auto& cmd = static_cast<const TargetMovementCommand&>(event);
+    if (event.type == EventType::MOTION_TARGET_SET) {
+        const auto& cmd = static_cast<const MOTION_TargetMovement&>(event);
         { // Lock scope
             std::lock_guard<std::mutex> lock(m_target_values_mutex);
             m_latestTargetPitchOffset_deg = cmd.targetPitchOffset_deg;
@@ -81,7 +81,7 @@ void RobotController::runControlStep(float dt) {
 
     // Check State
     SystemState currentState = m_stateManager.getCurrentState();
-    if (currentState == SystemState::IMU_RECOVERY || currentState == SystemState::FATAL_ERROR || currentState == SystemState::INIT) {
+    if (currentState == SystemState::FATAL_ERROR || currentState == SystemState::INIT || currentState == SystemState::SHUTDOWN) {
         m_motorService.setMotorEffort(0.0f, 0.0f);
         m_algorithm.resetState();
         ESP_LOGV(TAG, "Skipping control step due to state: %d", static_cast<int>(currentState));
@@ -95,7 +95,7 @@ void RobotController::runControlStep(float dt) {
 
     // Publish orientation data event for auto recovery and other systems
     if (m_eventBus) {
-        OrientationDataEvent orientation_event(pitch_deg * OrientationEstimator::DEG_TO_RAD, pitch_rate_dps * OrientationEstimator::DEG_TO_RAD);
+        IMU_OrientationData orientation_event(pitch_deg * OrientationEstimator::DEG_TO_RAD, pitch_rate_dps * OrientationEstimator::DEG_TO_RAD);
         m_eventBus->publish(orientation_event);
     }
 

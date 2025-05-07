@@ -2,25 +2,29 @@
 
 idf_component_register(SRCS # --- Tasks ---
                             "tasks/ControlTask.cpp"
-                            "tasks/BatteryTask.cpp"
-                            "tasks/IMUTasks.cpp"          # Contains both FIFO and Health tasks now
                             # --- Core ---
                             "core/EventBus.cpp"
                             "core/StateManager.cpp"
-                            "core/RobotController.cpp"      # Facade
+                            "core/RobotController.cpp" 
                             "core/Application.cpp"
-                            # --- Config ---
-                            "config/SPIFFSStorageService.cpp"
-                            "config/JsonConfigParser.cpp"
-                            "config/ConfigurationService.cpp"
+                            # --- Configuration Service ---
+                            "services/configuration_service/SPIFFSStorageService.cpp"
+                            "services/configuration_service/JsonConfigParser.cpp"
+                            "services/configuration_service/ConfigurationService.cpp"
+                            # --- IMU Service---
+                            "services/imu_service/IMUService.cpp"
+                            "services/imu_service/IMUCalibrationService.cpp"
+                            "services/imu_service/IMUHealthMonitor.cpp"
+                            "services/imu_service/OrientationEstimator.cpp" # Refactored Estimator
+                            "services/imu_service/mpu6050.cpp"
+                            "services/imu_service/IMUTasks.cpp"          # Contains both FIFO and Health tasks now
+                            # --- Battery Service 
+                            "services/battery_service/BatteryService.cpp"
+                            "services/battery_service/BatteryTask.cpp"
                             # --- Services ---
                             "services/WiFiManager.cpp"
-                            "services/IMUService.cpp"             # Refactored Service
-                            "services/IMUCalibrationService.cpp"  # New Service
-                            "services/IMUHealthMonitor.cpp"       # New Service
                             "services/EncoderService.cpp"
                             "services/MotorService.cpp"
-                            "services/BatteryService.cpp"
                             # --- Web ---
                             "web/WebServer.cpp"
                             "web/StaticFileHandler.cpp"
@@ -30,26 +34,25 @@ idf_component_register(SRCS # --- Tasks ---
                             "web/StateApiHandler.cpp"
                             # --- Algorithms ---
                             "algorithms/PIDController.cpp"
-                            "algorithms/OrientationEstimator.cpp" # Refactored Estimator
                             "algorithms/BalancingAlgorithm.cpp"
                             "algorithms/FallDetector.cpp"
                             "algorithms/CommandProcessor.cpp"
                             # --- Drivers ---
-                            "drivers/mpu6050.cpp"                 # Refactored Driver
                             "drivers/MX1616H_HWDriver.cpp"
                             # --- Main Entry ---
                             "main.cpp"
                        INCLUDE_DIRS "."
-                                    "tasks/include"
-                                    "algorithms/include"
-                                    "config/include"
                                     "core/include"
-                                    "drivers/include"
-                                    "events"
-                                    "services/include" # Added service include dir
+                                    "core/events"
+                                    "services/include"
+                                    "services/battery_service/include"
+                                    "services/configuration_service/include"
+                                    "services/imu_service/include"
                                     "web/include"
+                                    "tasks/include"
+                                    "drivers/include"
+                                    "algorithms/include"
                        REQUIRES esp_wifi esp_event esp_netif esp_http_server nvs_flash
                                 esp_timer spiffs driver json pthread esp_adc 
                        PRIV_REQUIRES json
                       )
-

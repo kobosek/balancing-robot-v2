@@ -1,8 +1,8 @@
 {
   "config_version": 1,
   "wifi": {
-    "ssid": "StajniaAugiasza",
-    "password": "Lubieplacki4321"
+    "ssid": "Natalia-1",
+    "password": "Natalia14"
   },
   "mainLoop": {
     "interval_ms": 5

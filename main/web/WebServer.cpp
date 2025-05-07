@@ -12,10 +12,10 @@
 #include "StateManager.hpp"
 #include "EventBus.hpp"
 #include "TelemetryDataPoint.hpp"
-#include "JoystickInputEvent.hpp"
+#include "UI_JoystickInput.hpp"
 #include "ConfigData.hpp" // Needed for config struct
 #include "EventTypes.hpp" // Needed for subscription
-#include "ConfigUpdatedEvent.hpp" // Needed for subscription
+#include "CONFIG_FullConfigUpdate.hpp" // Needed for subscription
 
 #include "esp_check.h"
 #include "esp_http_server.h"
@@ -54,7 +54,7 @@ void WebServer::addTelemetrySnapshot(const TelemetryDataPoint& data) {
 // Subscribe to events and forward to handlers if needed
 void WebServer::subscribeToEvents(EventBus& bus) {
     // Forward config updates to handlers that need them
-    bus.subscribe(EventType::CONFIG_UPDATED, [this](const BaseEvent& ev){
+    bus.subscribe(EventType::CONFIG_FULL_UPDATE, [this](const BaseEvent& ev){
         if (m_telemetryHandler) m_telemetryHandler->handleConfigUpdate(ev);
         if (m_configApiHandler) m_configApiHandler->handleConfigUpdate(ev);
         // Add other handlers here if they need config updates
@@ -71,6 +71,7 @@ esp_err_t WebServer::init() {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true;
     config.max_uri_handlers = 24;
+    config.stack_size = 8192; // Increase stack size to prevent overflow in HTTP server task
     config.global_user_ctx = this; // Pass 'this' WebServer instance
 
     ESP_RETURN_ON_ERROR(httpd_start(&server, &config), TAG, "Error starting httpd server");
@@ -261,7 +262,7 @@ esp_err_t WebServer::handleWebSocketFrame(httpd_req_t *req, httpd_ws_frame_t *ws
         joystick_y = std::max(-1.0f, std::min(1.0f, joystick_y));
 
         ESP_LOGV(TAG, "WS: Publishing JOYSTICK_INPUT_RECEIVED: X=%.3f, Y=%.3f", joystick_x, joystick_y);
-        JoystickInputEvent js_event(joystick_x, joystick_y);
+        UI_JoystickInput js_event(joystick_x, joystick_y);
         m_eventBus.publish(js_event); // Use the member variable
 
         ret = ESP_OK; // Successfully processed

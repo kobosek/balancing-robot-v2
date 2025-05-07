@@ -14,7 +14,7 @@ class StateManager;
 class WebServer;
 class CommandProcessor;
 class BaseEvent;
-class TargetMovementCommand;
+class MOTION_TargetMovement;
 class EventBus;
 
 class RobotController {

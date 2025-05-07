@@ -1,6 +1,6 @@
 #include "TelemetryHandler.hpp"
 #include "EventBus.hpp" // Include event bus for subscription
-#include "ConfigUpdatedEvent.hpp" // Include event definition
+#include "CONFIG_FullConfigUpdate.hpp" // Include event definition
 #include "BaseEvent.hpp"
 #include "EventTypes.hpp"
 #include "ConfigData.hpp" // Need full struct def for WebServerConfig
@@ -34,15 +34,15 @@ void TelemetryHandler::applyConfig(const WebServerConfig& config) {
 
 // Handle config update event
 void TelemetryHandler::handleConfigUpdate(const BaseEvent& event) {
-    if (event.type != EventType::CONFIG_UPDATED) return;
+    if (event.type != EventType::CONFIG_FULL_UPDATE) return;
     ESP_LOGD(TAG, "Handling config update event.");
-    const auto& configEvent = static_cast<const ConfigUpdatedEvent&>(event);
+    const auto& configEvent = static_cast<const CONFIG_FullConfigUpdate&>(event);
     applyConfig(configEvent.configData.web);
 }
 
 // Subscribe to events
 void TelemetryHandler::subscribeToEvents(EventBus& bus) {
-    bus.subscribe(EventType::CONFIG_UPDATED, [this](const BaseEvent& ev){
+    bus.subscribe(EventType::CONFIG_FULL_UPDATE, [this](const BaseEvent& ev){
         this->handleConfigUpdate(ev);
     });
     ESP_LOGI(TAG, "Subscribed to CONFIG_UPDATED events.");

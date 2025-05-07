@@ -1,6 +1,6 @@
 // main/MotorService.cpp
 #include "MotorService.hpp"             // Relative path within module's include dir
-#include "SystemStateChangedEvent.hpp"  // Found via INCLUDE_DIRS
+#include "SYSTEM_StateChanged.hpp"  // Found via INCLUDE_DIRS
 #include "MX1616H_HWDriver.hpp"         // Found via INCLUDE_DIRS (needed for make_unique)
 #include "BaseEvent.hpp"                // Found via INCLUDE_DIRS (needed for handle state change)
 #include "EventTypes.hpp"               // Found via INCLUDE_DIRS (needed for handle state change)
@@ -143,7 +143,7 @@ esp_err_t MotorService::setMotorEffort(float leftEffort, float rightEffort) {
 void MotorService::handleSystemStateChange(const BaseEvent& event) {
     // (Implementation remains the same)
     if(event.type != EventType::SYSTEM_STATE_CHANGED) return;
-    const auto& stateEvent = static_cast<const SystemStateChangedEvent&>(event);
+    const auto& stateEvent = static_cast<const SYSTEM_StateChanged&>(event);
     m_current_system_state = stateEvent.newState;
     ESP_LOGI(TAG, "Received State Change event: %d", static_cast<int>(m_current_system_state));
     bool should_be_enabled = (m_current_system_state == SystemState::BALANCING);

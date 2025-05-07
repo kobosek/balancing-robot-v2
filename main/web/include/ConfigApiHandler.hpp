@@ -8,7 +8,7 @@
 // Forward declare dependencies
 class ConfigurationService;
 class BaseEvent;
-class ConfigUpdatedEvent;
+class CONFIG_FullConfigUpdate;
 class EventBus; // Forward declare for subscribeToEvents
 
 class ConfigApiHandler {

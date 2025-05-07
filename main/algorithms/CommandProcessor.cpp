@@ -3,13 +3,13 @@
 // ================================================
 #include "CommandProcessor.hpp"
 #include "EventTypes.hpp"
-#include "SystemStateChangedEvent.hpp"
-#include "TargetMovementCommand.hpp"
+#include "SYSTEM_StateChanged.hpp"
+#include "MOTION_TargetMovement.hpp"
 #include "SystemState.hpp"
 #include "EventBus.hpp"
 #include "BaseEvent.hpp"
-#include "JoystickInputEvent.hpp"
-#include "ConfigUpdatedEvent.hpp" // Include event with payload
+#include "UI_JoystickInput.hpp"
+#include "CONFIG_FullConfigUpdate.hpp" // Include event with payload
 #include "ConfigData.hpp"
 #include "esp_log.h"
 #include "esp_check.h"
@@ -76,19 +76,19 @@ void CommandProcessor::subscribeToEvents(EventBus& bus) {
     // Subscribe to state changes
     bus.subscribe(EventType::SYSTEM_STATE_CHANGED, [this](const BaseEvent& ev){
         if(ev.type == EventType::SYSTEM_STATE_CHANGED) {
-             this->handleSystemStateChange(static_cast<const SystemStateChangedEvent&>(ev));
+             this->handleSystemStateChange(static_cast<const SYSTEM_StateChanged&>(ev));
         }
     });
     ESP_LOGI(TAG, "Subscribed to SYSTEM_STATE_CHANGED events.");
     // Subscribe to raw joystick input
-    bus.subscribe(EventType::JOYSTICK_INPUT_RECEIVED, [this](const BaseEvent& ev){
-        if(ev.type == EventType::JOYSTICK_INPUT_RECEIVED) {
-            this->handleJoystickInput(static_cast<const JoystickInputEvent&>(ev));
+    bus.subscribe(EventType::UI_JOYSTICK_INPUT, [this](const BaseEvent& ev){
+        if(ev.type == EventType::UI_JOYSTICK_INPUT) {
+            this->handleJoystickInput(static_cast<const UI_JoystickInput&>(ev));
         }
     });
     ESP_LOGI(TAG, "Subscribed to JOYSTICK_INPUT_RECEIVED events.");
     // Subscribe to config updates to reload parameters
-    bus.subscribe(EventType::CONFIG_UPDATED, [this](const BaseEvent& ev) {
+    bus.subscribe(EventType::CONFIG_FULL_UPDATE, [this](const BaseEvent& ev) {
         this->handleConfigUpdate(ev); // Call specific handler
     });
     ESP_LOGI(TAG, "Subscribed to CONFIG_UPDATED events.");
@@ -121,14 +121,14 @@ void CommandProcessor::applyConfig(const ControlConfig& controlConf, const Syste
 
 // Handle config update event
 void CommandProcessor::handleConfigUpdate(const BaseEvent& event) {
-    if (event.type != EventType::CONFIG_UPDATED) return;
+    if (event.type != EventType::CONFIG_FULL_UPDATE) return;
     ESP_LOGD(TAG, "Config update event received, applying new parameters.");
-    const auto& configEvent = static_cast<const ConfigUpdatedEvent&>(event);
+    const auto& configEvent = static_cast<const CONFIG_FullConfigUpdate&>(event);
     // Extract relevant parts and apply
     applyConfig(configEvent.configData.control, configEvent.configData.behavior);
 }
 
-void CommandProcessor::handleSystemStateChange(const SystemStateChangedEvent& event) {
+void CommandProcessor::handleSystemStateChange(const SYSTEM_StateChanged& event) {
     SystemState previous_state = event.previousState;
     m_current_state = event.newState;
 
@@ -164,7 +164,7 @@ void CommandProcessor::handleSystemStateChange(const SystemStateChangedEvent& ev
     }
 }
 
-void CommandProcessor::handleJoystickInput(const JoystickInputEvent& event) {
+void CommandProcessor::handleJoystickInput(const UI_JoystickInput& event) {
     int64_t current_time = esp_timer_get_time();
     bool was_timed_out = false;
 
@@ -276,7 +276,7 @@ esp_err_t CommandProcessor::stopTimeoutTimer() {
 
 // Helper to publish the final target command
 void CommandProcessor::publishTargetCommand(float pitchOffsetDeg, float angVelDps) {
-    TargetMovementCommand cmd(pitchOffsetDeg, angVelDps);
+    MOTION_TargetMovement cmd(pitchOffsetDeg, angVelDps);
     m_eventBus.publish(cmd);
     ESP_LOGD(TAG, "CP: Published Target CMD: PitchOffset=%.2f deg, AngVel=%.2f dps", pitchOffsetDeg, angVelDps);
 }

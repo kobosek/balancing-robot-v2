@@ -4,7 +4,7 @@
 #pragma once
 
 #include "EventBus.hpp"
-#include "FallDetectionEvent.hpp"
+#include "MOTION_FallDetected.hpp"
 #include "ConfigData.hpp" // Include full definition
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -12,7 +12,7 @@
 // Forward declarations
 // class ConfigurationService; // REMOVE
 class BaseEvent;
-class ConfigUpdatedEvent;
+class CONFIG_FullConfigUpdate;
 
 class FallDetector {
 public:

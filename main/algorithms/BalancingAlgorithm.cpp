@@ -2,7 +2,8 @@
 // File: main/algorithms/BalancingAlgorithm.cpp
 // ================================================
 #include "BalancingAlgorithm.hpp"
-#include "ConfigUpdatedEvent.hpp"
+#include "CONFIG_FullConfigUpdate.hpp"
+#include "CONFIG_PidConfigUpdate.hpp"
 #include "BaseEvent.hpp"
 #include "EventTypes.hpp"
 #include "esp_check.h"
@@ -56,8 +57,18 @@ esp_err_t BalancingAlgorithm::init() {
 }
 
 void BalancingAlgorithm::subscribeToEvents(EventBus& bus) {
-    bus.subscribe(EventType::CONFIG_UPDATED, [this](const BaseEvent& ev){ this->handleConfigUpdate(ev); });
-    ESP_LOGI(TAG, "Subscribed to CONFIG_UPDATED events.");
+    // Subscribe to general config updates (for backward compatibility)
+    bus.subscribe(EventType::CONFIG_FULL_UPDATE, [this](const BaseEvent& ev){ 
+        this->handleConfigUpdate(ev); 
+    });
+    
+    // Subscribe to granular PID config updates
+    bus.subscribe(EventType::CONFIG_PID_UPDATE, [this](const BaseEvent& ev){
+        const CONFIG_PidConfigUpdate& pidEvent = static_cast<const CONFIG_PidConfigUpdate&>(ev);
+        this->handlePIDConfigUpdate(pidEvent);
+    });
+    
+    ESP_LOGI(TAG, "Subscribed to CONFIG_UPDATED and CONFIG_PID_UPDATE events.");
 }
 
 void BalancingAlgorithm::resetState() {
@@ -132,15 +143,50 @@ void BalancingAlgorithm::applyConfig(const ConfigData& config) {
      ESP_LOGD(TAG, "Stored Angle PID limits: Min=%.1f, Max=%.1f", m_angle_pid_output_min, m_angle_pid_output_max);
 
      // Update dimensions from config
-     m_wheel_radius_m = config.encoder.wheel_diameter_mm / 2000.0f;
-     m_robot_wheelbase_m = config.dimensions.wheelbase_m;
-     ESP_LOGD(TAG, "Internal params updated. Wheel Radius: %.4f m, Wheelbase: %.4f m", m_wheel_radius_m, m_robot_wheelbase_m);
+     updateDimensions(config.encoder, config.dimensions);
 }
 
 // Handle config update event
 void BalancingAlgorithm::handleConfigUpdate(const BaseEvent& event) {
-     if (event.type != EventType::CONFIG_UPDATED) return;
-     ESP_LOGD(TAG, "Handling config update event."); // Use DEBUG level
-     const auto& configEvent = static_cast<const ConfigUpdatedEvent&>(event);
+     if (event.type != EventType::CONFIG_FULL_UPDATE) return;
+     ESP_LOGD(TAG, "Handling general config update event."); // Use DEBUG level
+     const auto& configEvent = static_cast<const CONFIG_FullConfigUpdate&>(event);
      applyConfig(configEvent.configData); // Apply the full config payload
+}
+
+// Handle granular PID config update event
+void BalancingAlgorithm::handlePIDConfigUpdate(const CONFIG_PidConfigUpdate& event) {
+    ESP_LOGD(TAG, "Handling granular PID config update for '%s'", event.pidName.c_str());
+    
+    // Update the specific PID controller based on the name
+    if (event.pidName == "angle") {
+        m_anglePid.updateParams(event.config);
+        m_angle_pid_output_min = event.config.getOutputMin();
+        m_angle_pid_output_max = event.config.getOutputMax();
+        ESP_LOGD(TAG, "Updated angle PID controller. Limits: Min=%.1f, Max=%.1f", 
+                 m_angle_pid_output_min, m_angle_pid_output_max);
+    } 
+    else if (event.pidName == "speed_left") {
+        m_speedPidLeft.updateParams(event.config);
+        ESP_LOGD(TAG, "Updated speed_left PID controller");
+    } 
+    else if (event.pidName == "speed_right") {
+        m_speedPidRight.updateParams(event.config);
+        ESP_LOGD(TAG, "Updated speed_right PID controller");
+    } 
+    else if (event.pidName == "yaw_rate") {
+        m_yawRatePid.updateParams(event.config);
+        ESP_LOGD(TAG, "Updated yaw_rate PID controller");
+    } 
+    else {
+        ESP_LOGW(TAG, "Received PID config update for unknown controller: %s", event.pidName.c_str());
+    }
+}
+
+// Helper to update dimensions from config
+void BalancingAlgorithm::updateDimensions(const EncoderConfig& encoderConfig, const RobotDimensionsConfig& dimensionsConfig) {
+    m_wheel_radius_m = encoderConfig.wheel_diameter_mm / 2000.0f;
+    m_robot_wheelbase_m = dimensionsConfig.wheelbase_m;
+    ESP_LOGD(TAG, "Internal dimensions updated. Wheel Radius: %.4f m, Wheelbase: %.4f m", 
+             m_wheel_radius_m, m_robot_wheelbase_m);
 }

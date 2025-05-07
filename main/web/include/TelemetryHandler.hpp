@@ -11,7 +11,7 @@
 
 // Forward declare dependencies
 class BaseEvent;
-class ConfigUpdatedEvent;
+class CONFIG_FullConfigUpdate;
 class EventBus; // Forward declare for subscribeToEvents
 
 class TelemetryHandler {

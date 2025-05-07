@@ -4,9 +4,9 @@
 #pragma once
 #include "EventBus.hpp"
 #include "SystemState.hpp"
-#include "SystemStateChangedEvent.hpp"
-#include "TargetMovementCommand.hpp" // Output event (now contains pitch offset)
-#include "JoystickInputEvent.hpp"    // Input event
+#include "SYSTEM_StateChanged.hpp"
+#include "MOTION_TargetMovement.hpp" // Output event (now contains pitch offset)
+#include "UI_JoystickInput.hpp"    // Input event
 #include "ConfigData.hpp"           // For ControlConfig & SystemBehaviorConfig
 #include "esp_log.h"
 #include <mutex>                    // For thread safety
@@ -15,7 +15,7 @@
 // Forward declarations
 // class ConfigurationService; // REMOVE
 class BaseEvent; // ADD
-class ConfigUpdatedEvent; // ADD
+class CONFIG_FullConfigUpdate; // ADD
 
 class CommandProcessor {
 public:
@@ -54,8 +54,8 @@ private:
 
 
     // --- Event Handlers ---
-    void handleSystemStateChange(const SystemStateChangedEvent& event);
-    void handleJoystickInput(const JoystickInputEvent& event);
+    void handleSystemStateChange(const SYSTEM_StateChanged& event);
+    void handleJoystickInput(const UI_JoystickInput& event);
     void handleConfigUpdate(const BaseEvent& event); // ADD
 
     // --- Internal Helpers ---

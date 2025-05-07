@@ -229,11 +229,15 @@ esp_err_t Application::createAndStartTasks(int intervalMs, int batteryIntervalMs
     ESP_RETURN_ON_FALSE(m_batteryService != nullptr, ESP_FAIL, TAG, "BatteryService is null");
     m_batteryMonitorTask = std::make_unique<BatteryMonitorTask>(*m_batteryService, batteryIntervalMs);
 
+    ESP_RETURN_ON_FALSE(m_imuCalibrationService != nullptr, ESP_FAIL, TAG, "IMUCalibrationService is null");
+    m_imuCalibrationTask = std::make_unique<IMUCalibrationTask>(*m_imuCalibrationService, *m_eventBus);
+
     // --- Start Tasks (Using hardcoded params for now, move to config later if needed) ---
     if (!m_controlTask->start(configMAX_PRIORITIES - 1, 1, 4096)) { ESP_LOGE(TAG, "Failed to start Control task!"); return ESP_FAIL; }
     if (!m_imuFifoTask->start(configMAX_PRIORITIES - 2, 0, 6144)) { ESP_LOGE(TAG, "Failed to start IMU FIFO task!"); return ESP_FAIL; }
     if (!m_imuHealthMonitorTask->start(5, 1, 4096)) { ESP_LOGE(TAG, "Failed to start IMU Health Monitor task!"); return ESP_FAIL; }
     if (!m_batteryMonitorTask->start(5, 0, 3072)) { ESP_LOGE(TAG, "Failed to start Battery Monitor task!"); return ESP_FAIL; }
+    if (!m_imuCalibrationTask->start(5, 1, 4096)) { ESP_LOGE(TAG, "Failed to start IMU Calibration task!"); return ESP_FAIL; }
 
     ESP_LOGI(TAG, "All application tasks started successfully");
     return ESP_OK;

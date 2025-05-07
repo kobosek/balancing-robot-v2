@@ -35,6 +35,7 @@ class IMUFifoTask;
 class IMUHealthMonitorTask; // Renamed task
 class BatteryMonitorTask;
 class ControlTask;
+class IMUCalibrationTask;
 
 class Application {
 public:
@@ -77,7 +78,7 @@ private:
     std::unique_ptr<IMUFifoTask> m_imuFifoTask;
     std::unique_ptr<IMUHealthMonitorTask> m_imuHealthMonitorTask;
     std::unique_ptr<BatteryMonitorTask> m_batteryMonitorTask;
-
+    std::unique_ptr<IMUCalibrationTask> m_imuCalibrationTask;
 
     esp_err_t createAndStartTasks(int intervalMs, int batteryIntervalMs);
 };

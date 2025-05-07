@@ -1,7 +1,7 @@
 #include "FallDetector.hpp"
-#include "FallDetectionEvent.hpp"
+#include "MOTION_FallDetected.hpp"
 #include "EventBus.hpp"
-#include "ConfigUpdatedEvent.hpp" // Include event with payload
+#include "CONFIG_FullConfigUpdate.hpp" // Include event with payload
 #include "BaseEvent.hpp"
 #include "EventTypes.hpp"
 #include "esp_log.h"
@@ -31,7 +31,7 @@ FallDetector::FallDetector(EventBus& bus, const SystemBehaviorConfig& initialBeh
 }
 
 void FallDetector::subscribeToEvents(EventBus& bus) {
-    bus.subscribe(EventType::CONFIG_UPDATED, [this](const BaseEvent& ev) {
+    bus.subscribe(EventType::CONFIG_FULL_UPDATE, [this](const BaseEvent& ev) {
         this->handleConfigUpdate(ev);
     });
     ESP_LOGI(TAG, "Subscribed to CONFIG_UPDATED events.");
@@ -48,9 +48,9 @@ void FallDetector::applyConfig(const SystemBehaviorConfig& config) {
 
 // Handle config update event
 void FallDetector::handleConfigUpdate(const BaseEvent& event) {
-    if (event.type != EventType::CONFIG_UPDATED) return;
+    if (event.type != EventType::CONFIG_FULL_UPDATE) return;
     ESP_LOGD(TAG, "Handling config update event.");
-    const auto& configEvent = static_cast<const ConfigUpdatedEvent&>(event);
+    const auto& configEvent = static_cast<const CONFIG_FullConfigUpdate&>(event);
     applyConfig(configEvent.configData.behavior);
 }
 
@@ -80,7 +80,7 @@ void FallDetector::check(float pitch_rad) {
             // Only publish ONCE per fall event
             if (!m_fall_event_published && (current_time_us - m_fall_start_time_us) >= m_threshold_duration_us) {
                 ESP_LOGW(TAG, "Fall confirmed! Angle threshold exceeded for %llu us.", m_threshold_duration_us);
-                FallDetectionEvent event;
+                MOTION_FallDetected event;
                 m_eventBus.publish(event);
                 m_fall_event_published = true; // <<< Set flag to prevent re-publishing
             }

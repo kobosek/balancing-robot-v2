@@ -2,13 +2,13 @@
 #include "CommandApiHandler.hpp"
 #include "EventBus.hpp"             // Need full definition
 #include "EventTypes.hpp"           // Need full definition
-#include "StartBalancingCommand.hpp"// Need full definition
-#include "StopCommand.hpp"          // Need full definition
-#include "CalibrateCommandEvent.hpp"        // <<< ADDED
-#include "EnableRecoveryCommandEvent.hpp"   // <<< ADDED
-#include "DisableRecoveryCommandEvent.hpp"  // <<< ADDED
-#include "EnableFallDetectCommandEvent.hpp"  // <<< ADDED
-#include "DisableFallDetectCommandEvent.hpp" // <<< ADDED
+#include "UI_StartBalancing.hpp"// Need full definition
+#include "UI_Stop.hpp"          // Need full definition
+#include "UI_CalibrateImu.hpp"        // <<< ADDED
+#include "UI_EnableFallRecovery.hpp"   // <<< ADDED
+#include "UI_DisableFallRecovery.hpp"  // <<< ADDED
+#include "UI_EnableFallDetection.hpp"  // <<< ADDED
+#include "UI_DisableFallDetection.hpp" // <<< ADDED
 #include "cJSON.h"
 #include <memory>                   // For unique_ptr
 #include <string>
@@ -54,43 +54,43 @@ esp_err_t CommandApiHandler::handleRequest(httpd_req_t *req) {
 
     if (command_str == "start") {
         ESP_LOGI(TAG, "Publishing START_COMMAND_RECEIVED");
-        StartBalancingCommand cmd_event;
+        UI_StartBalancing cmd_event;
         m_eventBus.publish(cmd_event);
         message = "Start command sent";
         ret = ESP_OK;
     } else if (command_str == "stop") {
         ESP_LOGI(TAG, "Publishing STOP_COMMAND_RECEIVED");
-        StopCommand cmd_event;
+        UI_Stop cmd_event;
         m_eventBus.publish(cmd_event);
         message = "Stop command sent";
         ret = ESP_OK;
     } else if (command_str == "calibrate") { // <<< ADDED
         ESP_LOGI(TAG, "Publishing CALIBRATE_COMMAND_RECEIVED");
-        CalibrateCommandEvent cmd_event;
+        UI_CalibrateImu cmd_event;
         m_eventBus.publish(cmd_event);
         message = "Calibrate command sent";
         ret = ESP_OK;
     } else if (command_str == "enable_recovery") { // <<< ADDED
         ESP_LOGI(TAG, "Publishing ENABLE_RECOVERY_COMMAND_RECEIVED");
-        EnableRecoveryCommandEvent cmd_event;
+        UI_EnableFallRecovery cmd_event;
         m_eventBus.publish(cmd_event);
         message = "Enable recovery command sent";
         ret = ESP_OK;
      } else if (command_str == "disable_recovery") { // <<< ADDED
         ESP_LOGI(TAG, "Publishing DISABLE_RECOVERY_COMMAND_RECEIVED");
-        DisableRecoveryCommandEvent cmd_event;
+        UI_DisableFallRecovery cmd_event;
         m_eventBus.publish(cmd_event);
         message = "Disable recovery command sent";
         ret = ESP_OK;
     } else if (command_str == "enable_fall_detect") {
         ESP_LOGI(TAG, "Publishing ENABLE_FALL_DETECT_COMMAND_RECEIVED");
-        EnableFallDetectCommandEvent cmd_event;
+        UI_EnableFallDetection cmd_event;
         m_eventBus.publish(cmd_event);
         message = "Enable fall detect command sent";
         ret = ESP_OK;
      } else if (command_str == "disable_fall_detect") {
         ESP_LOGI(TAG, "Publishing DISABLE_FALL_DETECT_COMMAND_RECEIVED");
-        DisableFallDetectCommandEvent cmd_event;
+        UI_DisableFallDetection cmd_event;
         m_eventBus.publish(cmd_event);
         message = "Disable fall detect command sent";
         ret = ESP_OK;
