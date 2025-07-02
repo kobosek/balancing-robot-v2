@@ -2,13 +2,24 @@
 #include "StateApiHandler.hpp"
 #include "StateManager.hpp" // Need full definition
 #include "SystemState.hpp"  // Need full definition
+#include "BaseEvent.hpp"    // Need for BaseEvent
 #include "cJSON.h"
 #include <memory>
 #include <string>
 #include "esp_log.h"
 #include "esp_http_server.h"
 
-StateApiHandler::StateApiHandler(StateManager& stateManager) : m_stateManager(stateManager) {}
+StateApiHandler::StateApiHandler(StateManager& stateManager) : m_stateManager(stateManager) {
+    ESP_LOGI(TAG, "StateApiHandler constructed.");
+}
+
+// EventHandler implementation
+void StateApiHandler::handleEvent(const BaseEvent& event) {
+    // Currently this handler doesn't need to process any events
+    // Just log unhandled events at verbose level
+    ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
+             getHandlerName().c_str(), static_cast<int>(event.type));
+}
 
 // Helper function remains the same
 static const char* stateToString(SystemState state) {

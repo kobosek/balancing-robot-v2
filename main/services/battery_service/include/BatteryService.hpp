@@ -7,7 +7,7 @@
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "driver/gpio.h"
-// #include "ConfigurationService.hpp" // REMOVE
+#include "EventHandler.hpp"             // For EventHandler base class
 #include "esp_log.h"
 #include <mutex>
 #include "freertos/FreeRTOS.h"
@@ -17,7 +17,7 @@
 class BaseEvent;
 class CONFIG_FullConfigUpdate;
 
-class BatteryService {
+class BatteryService : public EventHandler {
 public:
     // Constructor now takes initial config structs
     BatteryService(const BatteryConfig& initialConfig, const SystemBehaviorConfig& initialBehavior, EventBus& bus);
@@ -28,7 +28,11 @@ public:
     BatteryStatus getLatestStatus() const;
     // TickType_t getMonitoringInterval() const; // No longer needed, Task takes interval
 
-    // Subscribe to config updates
+    // Event handling via EventHandler interface
+    void handleEvent(const BaseEvent& event) override;
+    std::string getHandlerName() const override { return TAG; }
+    
+    // Keep for backwards compatibility during transition
     void subscribeToEvents(EventBus& bus);
 
 private:
@@ -57,5 +61,5 @@ private:
     esp_err_t map_gpio_to_channel();
     // void loadConfigParameters(); // REMOVE or make private apply
     void applyConfig(const BatteryConfig& batConf, const SystemBehaviorConfig& behaviorConf); // Add apply helper
-    void handleConfigUpdate(const BaseEvent& event); // Add event handler
+    void handleConfigUpdate(const CONFIG_FullConfigUpdate& event); // Specific event handler
 };

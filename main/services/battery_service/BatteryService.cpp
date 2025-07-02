@@ -190,12 +190,24 @@ void BatteryService::applyConfig(const BatteryConfig& batConf, const SystemBehav
     // If needed: check if m_oneshot_adc_handle exists, compare new config values, and call relevant ADC/Cali functions.
 }
 
+void BatteryService::handleEvent(const BaseEvent& event) {
+    // Central event handler that dispatches to specific handlers based on event type
+    switch (event.type) {
+        case EventType::CONFIG_FULL_UPDATE:
+            handleConfigUpdate(static_cast<const CONFIG_FullConfigUpdate&>(event));
+            break;
+            
+        default:
+            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
+                     getHandlerName().c_str(), static_cast<int>(event.type));
+            break;
+    }
+}
+
 // Handle config update event
-void BatteryService::handleConfigUpdate(const BaseEvent& event) {
-    if (event.type != EventType::CONFIG_FULL_UPDATE) return;
+void BatteryService::handleConfigUpdate(const CONFIG_FullConfigUpdate& event) {
     ESP_LOGD(TAG, "Config update received, reloading BatteryService parameters.");
-    const auto& configEvent = static_cast<const CONFIG_FullConfigUpdate&>(event);
-    applyConfig(configEvent.configData.battery, configEvent.configData.behavior);
+    applyConfig(event.configData.battery, event.configData.behavior);
 }
 
 BatteryStatus BatteryService::getLatestStatus() const {
@@ -327,10 +339,4 @@ void BatteryService::updateBatteryStatus() {
     }
 }
 
-// Subscribe to events
-void BatteryService::subscribeToEvents(EventBus& bus) {
-    bus.subscribe(EventType::CONFIG_FULL_UPDATE, [this](const BaseEvent& ev){
-        this->handleConfigUpdate(ev);
-    });
-    ESP_LOGI(TAG, "Subscribed to CONFIG_UPDATED events.");
-}
+// EventHandler implementation

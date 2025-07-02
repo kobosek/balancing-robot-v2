@@ -2,6 +2,7 @@
 
 #include "ConfigData.hpp"
 #include "EventBus.hpp"
+#include "EventHandler.hpp"
 #include <string>
 #include <mutex>
 #include "esp_err.h" // Include ESP types
@@ -10,8 +11,9 @@ class IStorageService;
 class IConfigParser;
 class ConfigUpdatedEvent;
 class BaseEvent;
+class IMU_GyroOffsetsUpdated;
 
-class ConfigurationService {
+class ConfigurationService : public EventHandler {
 public:
     ConfigurationService(IStorageService& storage, IConfigParser& parser, EventBus& bus, const std::string& configKey = "config.json");
 
@@ -41,7 +43,11 @@ public:
     // Update persistent gyro offsets
     void updateImuGyroOffsets(float x, float y, float z);
 
-    // Subscribe to system events (e.g., IMU_GyroOffsetsUpdated)
+    // EventHandler interface implementation
+    void handleEvent(const BaseEvent& event) override;
+    std::string getHandlerName() const override { return TAG; }
+    
+    // Keep for backward compatibility
     void subscribeToEvents(EventBus& bus);
 
 private:

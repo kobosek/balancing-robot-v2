@@ -4,13 +4,15 @@
 #include "esp_timer.h"
 #include <atomic>
 #include "ConfigData.hpp" // Include full definition
+#include "EventHandler.hpp" // For EventHandler base class
 
 // Forward Declarations
 class MPU6050Driver;
 class EventBus;
 class BaseEvent;
 class CONFIG_FullConfigUpdate;
-class IMU_CommunicationError; // Forward declaration for communication error event
+class IMU_CommunicationError;
+class IMU_StateChanged;
 enum class IMUState; // Add forward declaration for IMU state
 
 class IMUHealthMonitor {
@@ -28,11 +30,9 @@ public:
     // Set operational mode based on IMU state
     void setLimitedHealthChecks(bool limitChecks);
 
-    // Public constant for WHO_AM_I check (used by IMUService recovery)
     static constexpr uint8_t MPU6050_WHO_AM_I_VALUE = 0x68;
 
-    // Method to subscribe to necessary events
-    void subscribeToEvents(EventBus& bus);
+    void applyConfig(const SystemBehaviorConfig& config);
 
 private:
     static constexpr const char* TAG = "IMUHealthMonitor";
@@ -52,12 +52,4 @@ private:
     std::atomic<uint8_t> m_no_data_counter{0};
     std::atomic<bool> m_sensor_disconnected{false};
     std::atomic<bool> m_limited_checks{false}; // Renamed from m_calibration_active for clarity
-
-    // Event Handlers
-    void handleCalibrationStarted(const BaseEvent& ev);
-    void handleCalibrationComplete(const BaseEvent& ev);
-    void handleConfigUpdate(const BaseEvent& event);
-
-    // Helper to apply config values
-    void applyConfig(const SystemBehaviorConfig& config);
 };

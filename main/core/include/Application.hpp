@@ -16,8 +16,6 @@ class WebServer;
 
 // Forward declarations for IMU components
 class MPU6050Driver;
-class IMUCalibrationService;
-class IMUHealthMonitor;
 class IMUService;
 class OrientationEstimator;
 
@@ -31,11 +29,8 @@ class CommandProcessor;
 
 // Task class forward declarations
 class Task; // Base task class
-class IMUFifoTask;
-class IMUHealthMonitorTask; // Renamed task
 class BatteryMonitorTask;
 class ControlTask;
-class IMUCalibrationTask;
 
 class Application {
 public:
@@ -52,33 +47,28 @@ private:
     EventBus* m_eventBus = nullptr; // Singleton reference
     std::unique_ptr<SPIFFSStorageService> m_storageService;
     std::unique_ptr<JsonConfigParser> m_configParser;
-    std::unique_ptr<ConfigurationService> m_configService;
-    std::unique_ptr<StateManager> m_stateManager;
-    std::unique_ptr<RobotController> m_robotController;
+    std::shared_ptr<ConfigurationService> m_configService;
+    std::shared_ptr<StateManager> m_stateManager;
+    std::shared_ptr<RobotController> m_robotController;
     std::unique_ptr<WiFiManager> m_wifiManager;
-    std::unique_ptr<WebServer> m_webServer;
+    std::shared_ptr<WebServer> m_webServer;
 
     // IMU Components (using unique_ptr)
     std::unique_ptr<MPU6050Driver> m_mpuDriver;
-    std::unique_ptr<IMUCalibrationService> m_imuCalibrationService;
-    std::unique_ptr<IMUHealthMonitor> m_imuHealthMonitor;
-    std::unique_ptr<IMUService> m_imuService;
-    std::unique_ptr<OrientationEstimator> m_orientationEstimator;
+    std::shared_ptr<IMUService> m_imuService;
+    std::shared_ptr<OrientationEstimator> m_orientationEstimator;
 
     // Other Components (using unique_ptr)
     std::unique_ptr<EncoderService> m_encoderService;
-    std::unique_ptr<MotorService> m_motorService;
-    std::unique_ptr<BalancingAlgorithm> m_balancingAlgorithm;
-    std::unique_ptr<FallDetector> m_fallDetector;
-    std::unique_ptr<BatteryService> m_batteryService;
-    std::unique_ptr<CommandProcessor> m_commandProcessor;
+    std::shared_ptr<MotorService> m_motorService;
+    std::shared_ptr<BalancingAlgorithm> m_balancingAlgorithm;
+    std::shared_ptr<FallDetector> m_fallDetector;
+    std::shared_ptr<BatteryService> m_batteryService;
+    std::shared_ptr<CommandProcessor> m_commandProcessor;
 
     // Application tasks (using unique_ptr)
     std::unique_ptr<ControlTask> m_controlTask;
-    std::unique_ptr<IMUFifoTask> m_imuFifoTask;
-    std::unique_ptr<IMUHealthMonitorTask> m_imuHealthMonitorTask;
     std::unique_ptr<BatteryMonitorTask> m_batteryMonitorTask;
-    std::unique_ptr<IMUCalibrationTask> m_imuCalibrationTask;
 
     esp_err_t createAndStartTasks(int intervalMs, int batteryIntervalMs);
 };

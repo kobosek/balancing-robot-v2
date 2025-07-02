@@ -32,7 +32,6 @@ enum class EventType {
 
     // Internal Requests / Notifications
     IMU_CALIBRATION_REQUEST,         // IMU_CalibrationRequest
-    IMU_CALIBRATION_STARTED,         // IMU_CalibrationStarted
     IMU_CALIBRATION_COMPLETED,       // IMU_CalibrationCompleted
     MOTION_TARGET_SET,               // MOTION_TargetMovement
 
@@ -43,12 +42,10 @@ enum class EventType {
     IMU_COMMUNICATION_ERROR,         // IMU_CommunicationError
 
     // IMU Recovery Events
-    IMU_ATTEMPT_RECOVERY,         // IMU_AttemptRecovery
     IMU_RECOVERY_SUCCEEDED,          // IMU_RecoverySucceeded
     IMU_RECOVERY_FAILED,             // IMU_RecoveryFailed
 
     // IMU State Management Events
-    IMU_STATE_TRANSITION_REQUEST,    // IMU_StateTransitionRequest
     IMU_STATE_CHANGED,               // IMU_StateChanged
     IMU_CALIBRATION_REJECTED,        // IMU_CalibrationRequestRejected
     MOTION_USING_FALLBACK_VALUES,    // MOTION_UsingFallbackValues

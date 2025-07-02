@@ -32,22 +32,25 @@ void TelemetryHandler::applyConfig(const WebServerConfig& config) {
     }
 }
 
+// EventHandler implementation
+void TelemetryHandler::handleEvent(const BaseEvent& event) {
+    switch (event.type) {
+        case EventType::CONFIG_FULL_UPDATE:
+            handleConfigUpdate(static_cast<const CONFIG_FullConfigUpdate&>(event));
+            break;
+            
+        default:
+            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
+                     getHandlerName().c_str(), static_cast<int>(event.type));
+            break;
+    }
+}
+
 // Handle config update event
-void TelemetryHandler::handleConfigUpdate(const BaseEvent& event) {
-    if (event.type != EventType::CONFIG_FULL_UPDATE) return;
+void TelemetryHandler::handleConfigUpdate(const CONFIG_FullConfigUpdate& event) {
     ESP_LOGD(TAG, "Handling config update event.");
-    const auto& configEvent = static_cast<const CONFIG_FullConfigUpdate&>(event);
-    applyConfig(configEvent.configData.web);
+    applyConfig(event.configData.web);
 }
-
-// Subscribe to events
-void TelemetryHandler::subscribeToEvents(EventBus& bus) {
-    bus.subscribe(EventType::CONFIG_FULL_UPDATE, [this](const BaseEvent& ev){
-        this->handleConfigUpdate(ev);
-    });
-    ESP_LOGI(TAG, "Subscribed to CONFIG_UPDATED events.");
-}
-
 
 void TelemetryHandler::addTelemetrySnapshot(const TelemetryDataPoint& data) {
     std::lock_guard<std::mutex> lock(m_telemetryMutex);

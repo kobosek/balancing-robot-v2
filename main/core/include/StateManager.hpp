@@ -5,6 +5,7 @@
 
 #include "SystemState.hpp"
 #include "EventBus.hpp"
+#include "EventHandler.hpp"
 #include <mutex>
 #include <string>
 #include "esp_log.h"
@@ -23,18 +24,16 @@ class UI_EnableFallRecovery;
 class UI_DisableFallRecovery;
 class UI_EnableFallDetection;
 class UI_DisableFallDetection;
-class IMU_CommunicationError;
 class IMU_RecoverySucceeded;
 class IMU_RecoveryFailed;
-class AttemptImuRecoveryCommand;
 class CONFIG_FullConfigUpdate; 
 class IMU_CalibrationRequest;
 class IMU_CalibrationRequestRejected;
-// class ConfigurationService; 
+
 struct SystemBehaviorConfig; 
 struct ConfigData; 
 
-class StateManager {
+class StateManager : public EventHandler {
 public:
     StateManager(EventBus& eventBus, const SystemBehaviorConfig& initialBehaviorConfig);
     ~StateManager() = default;
@@ -43,6 +42,11 @@ public:
     void setState(SystemState newState);
 
     esp_err_t init();
+    // EventHandler interface implementation
+    void handleEvent(const BaseEvent& event) override;
+    std::string getHandlerName() const override { return TAG; }
+    
+    // Kept for backward compatibility
     void subscribeToEvents(EventBus& bus);
 
     void setAutoRecovery(bool enabled);
@@ -67,7 +71,6 @@ private:
     float m_recovery_angle_threshold_rad;
     uint64_t m_recovery_hold_time_us;
     uint8_t m_max_imu_recovery_attempts;
-    // uint32_t m_imu_recovery_delay_ms; 
 
     void handleFallDetected(const MOTION_FallDetected& event);
     void handleStartBalancing(const UI_StartBalancing& event);
@@ -80,18 +83,13 @@ private:
     void handleDisableRecovery(const UI_DisableFallRecovery& event);
     void handleEnableFallDetect(const UI_EnableFallDetection& event);
     void handleDisableFallDetect(const UI_DisableFallDetection& event);
-    void handleImuCommunicationError(const IMU_CommunicationError& event);
     void handleImuRecoverySucceeded(const IMU_RecoverySucceeded& event);
     void handleImuRecoveryFailed(const IMU_RecoveryFailed& event);
     void handleCalibrationRejected(const IMU_CalibrationRequestRejected& event);
-    void handleConfigUpdate(const BaseEvent& event); 
+    void handleConfigUpdate(const CONFIG_FullConfigUpdate& event);
 
-    void initiateIMURecovery(bool minimal_interruption = false);
     void initiateCalibration(bool force = false);
-    void requestImuRecovery();
-    void handleRecoveryFailure();
-    void monitorIMUState(); 
-
+    
     std::string stateToString(SystemState state) const;
     void applyConfig(const SystemBehaviorConfig& config);
 };

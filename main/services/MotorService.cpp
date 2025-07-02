@@ -62,15 +62,19 @@ esp_err_t MotorService::init() {
     return ESP_OK;
 }
 
-// <<< ADDED: Event subscription logic >>>
-void MotorService::subscribeToEvents(EventBus& bus) {
-    bus.subscribe(EventType::SYSTEM_STATE_CHANGED,
-        [this](const BaseEvent& ev){
-            // This lambda captures 'this' and calls the member handler
-            this->handleSystemStateChange(ev);
-        }
-    );
-    ESP_LOGI(TAG, "Subscribed to SYSTEM_STATE_CHANGED events.");
+// EventHandler implementation
+void MotorService::handleEvent(const BaseEvent& event) {
+    // Central event handler that dispatches to specific handlers based on event type
+    switch (event.type) {
+        case EventType::SYSTEM_STATE_CHANGED:
+            handleSystemStateChange(static_cast<const SYSTEM_StateChanged&>(event));
+            break;
+            
+        default:
+            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
+                     getHandlerName().c_str(), static_cast<int>(event.type));
+            break;
+    }
 }
 
 esp_err_t MotorService::configureLEDCTimer() {
@@ -107,7 +111,6 @@ esp_err_t MotorService::configureLEDCTimer() {
     return ESP_OK;
 }
 
-
 esp_err_t MotorService::setMotorEffort(float leftEffort, float rightEffort) {
     // (Implementation remains the same)
     leftEffort = std::max(-1.0f, std::min(1.0f, leftEffort));
@@ -140,13 +143,21 @@ esp_err_t MotorService::setMotorEffort(float leftEffort, float rightEffort) {
     return (ret_l == ESP_OK && ret_r == ESP_OK) ? ESP_OK : ESP_FAIL;
 }
 
-void MotorService::handleSystemStateChange(const BaseEvent& event) {
-    // (Implementation remains the same)
-    if(event.type != EventType::SYSTEM_STATE_CHANGED) return;
-    const auto& stateEvent = static_cast<const SYSTEM_StateChanged&>(event);
-    m_current_system_state = stateEvent.newState;
+void MotorService::handleSystemStateChange(const SYSTEM_StateChanged& event) {
+    m_current_system_state = event.newState;
     ESP_LOGI(TAG, "Received State Change event: %d", static_cast<int>(m_current_system_state));
+    
     bool should_be_enabled = (m_current_system_state == SystemState::BALANCING);
-    if (should_be_enabled && !m_enabled) { ESP_LOGI(TAG, "Enabling motors."); m_enabled = true; }
-    else if (!should_be_enabled && m_enabled) { ESP_LOGI(TAG, "Disabling motors."); m_enabled = false; esp_err_t stop_ret = setMotorEffort(0.0f, 0.0f); if(stop_ret != ESP_OK) { ESP_LOGE(TAG, "Failed stop motors!"); } }
+    
+    if (should_be_enabled && !m_enabled) { 
+        ESP_LOGI(TAG, "Enabling motors."); 
+        m_enabled = true; 
+    } else if (!should_be_enabled && m_enabled) { 
+        ESP_LOGI(TAG, "Disabling motors."); 
+        m_enabled = false; 
+        esp_err_t stop_ret = setMotorEffort(0.0f, 0.0f); 
+        if(stop_ret != ESP_OK) { 
+            ESP_LOGE(TAG, "Failed stop motors!"); 
+        } 
+    }
 }

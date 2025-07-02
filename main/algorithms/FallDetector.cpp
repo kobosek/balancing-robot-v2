@@ -30,13 +30,19 @@ FallDetector::FallDetector(EventBus& bus, const SystemBehaviorConfig& initialBeh
     ESP_LOGI(TAG, "FallDetector initialized."); // Log message simplified
 }
 
-void FallDetector::subscribeToEvents(EventBus& bus) {
-    bus.subscribe(EventType::CONFIG_FULL_UPDATE, [this](const BaseEvent& ev) {
-        this->handleConfigUpdate(ev);
-    });
-    ESP_LOGI(TAG, "Subscribed to CONFIG_UPDATED events.");
+void FallDetector::handleEvent(const BaseEvent& event) {
+    // Central event handler that dispatches to specific handlers based on event type
+    switch (event.type) {
+        case EventType::CONFIG_FULL_UPDATE:
+            handleConfigUpdate(static_cast<const CONFIG_FullConfigUpdate&>(event));
+            break;
+            
+        default:
+            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
+                     getHandlerName().c_str(), static_cast<int>(event.type));
+            break;
+    }
 }
-
 
 // Apply config values from struct
 void FallDetector::applyConfig(const SystemBehaviorConfig& config) {
@@ -47,11 +53,9 @@ void FallDetector::applyConfig(const SystemBehaviorConfig& config) {
 }
 
 // Handle config update event
-void FallDetector::handleConfigUpdate(const BaseEvent& event) {
-    if (event.type != EventType::CONFIG_FULL_UPDATE) return;
+void FallDetector::handleConfigUpdate(const CONFIG_FullConfigUpdate& event) {
     ESP_LOGD(TAG, "Handling config update event.");
-    const auto& configEvent = static_cast<const CONFIG_FullConfigUpdate&>(event);
-    applyConfig(configEvent.configData.behavior);
+    applyConfig(event.configData.behavior);
 }
 
 // Call this externally if needed, e.g., when leaving FALLEN state in StateManager

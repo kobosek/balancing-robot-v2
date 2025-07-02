@@ -56,19 +56,22 @@ esp_err_t BalancingAlgorithm::init() {
     return ESP_OK;
 }
 
-void BalancingAlgorithm::subscribeToEvents(EventBus& bus) {
-    // Subscribe to general config updates (for backward compatibility)
-    bus.subscribe(EventType::CONFIG_FULL_UPDATE, [this](const BaseEvent& ev){ 
-        this->handleConfigUpdate(ev); 
-    });
-    
-    // Subscribe to granular PID config updates
-    bus.subscribe(EventType::CONFIG_PID_UPDATE, [this](const BaseEvent& ev){
-        const CONFIG_PidConfigUpdate& pidEvent = static_cast<const CONFIG_PidConfigUpdate&>(ev);
-        this->handlePIDConfigUpdate(pidEvent);
-    });
-    
-    ESP_LOGI(TAG, "Subscribed to CONFIG_UPDATED and CONFIG_PID_UPDATE events.");
+void BalancingAlgorithm::handleEvent(const BaseEvent& event) {
+    // Central event handler that dispatches to specific handlers based on event type
+    switch (event.type) {
+        case EventType::CONFIG_FULL_UPDATE:
+            handleConfigUpdate(static_cast<const CONFIG_FullConfigUpdate&>(event));
+            break;
+            
+        case EventType::CONFIG_PID_UPDATE:
+            handlePIDConfigUpdate(static_cast<const CONFIG_PidConfigUpdate&>(event));
+            break;
+            
+        default:
+            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
+                     getHandlerName().c_str(), static_cast<int>(event.type));
+            break;
+    }
 }
 
 void BalancingAlgorithm::resetState() {
@@ -147,11 +150,9 @@ void BalancingAlgorithm::applyConfig(const ConfigData& config) {
 }
 
 // Handle config update event
-void BalancingAlgorithm::handleConfigUpdate(const BaseEvent& event) {
-     if (event.type != EventType::CONFIG_FULL_UPDATE) return;
+void BalancingAlgorithm::handleConfigUpdate(const CONFIG_FullConfigUpdate& event) {
      ESP_LOGD(TAG, "Handling general config update event."); // Use DEBUG level
-     const auto& configEvent = static_cast<const CONFIG_FullConfigUpdate&>(event);
-     applyConfig(configEvent.configData); // Apply the full config payload
+     applyConfig(event.configData); // Apply the full config payload
 }
 
 // Handle granular PID config update event

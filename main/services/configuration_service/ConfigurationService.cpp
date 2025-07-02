@@ -168,16 +168,31 @@ void ConfigurationService::updateImuGyroOffsets(float x, float y, float z) {
     m_eventBus.publish(event);
 }
 
+// EventHandler implementation
+void ConfigurationService::handleEvent(const BaseEvent& event) {
+    // Central event handler that dispatches to specific handlers based on event type
+    switch (event.type) {
+        case EventType::CONFIG_GYRO_OFFSETS_UPDATE:
+            {
+                const IMU_GyroOffsetsUpdated& offsetEvent = static_cast<const IMU_GyroOffsetsUpdated&>(event);
+                updateImuGyroOffsets(
+                    offsetEvent.x_dps,
+                    offsetEvent.y_dps,
+                    offsetEvent.z_dps
+                );
+            }
+            break;
+        
+        default:
+            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
+                     getHandlerName().c_str(), static_cast<int>(event.type));
+            break;
+    }
+}
+
+// Keep for backward compatibility
 void ConfigurationService::subscribeToEvents(EventBus& bus) {
-    // Subscribe to gyro offsets updates from calibration
-    bus.subscribe(EventType::CONFIG_GYRO_OFFSETS_UPDATE, [this](const BaseEvent& event) {
-        const IMU_GyroOffsetsUpdated& offsetEvent = static_cast<const IMU_GyroOffsetsUpdated&>(event);
-        this->updateImuGyroOffsets(
-            offsetEvent.x_dps,
-            offsetEvent.y_dps,
-            offsetEvent.z_dps
-        );
-    });
+    ESP_LOGW(TAG, "ConfigurationService::subscribeToEvents is deprecated. Use EventBus::subscribe with EventHandler instead.");
 }
 
 void ConfigurationService::publishGranularConfigEvents(const ConfigData& oldConfig, const ConfigData& newConfig) {

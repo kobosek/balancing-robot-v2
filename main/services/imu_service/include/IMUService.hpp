@@ -4,6 +4,7 @@
 #include "ConfigData.hpp"
 #include "SystemState.hpp"
 #include "IMUState.hpp"
+#include "EventHandler.hpp"
 #include "esp_err.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -16,29 +17,45 @@ class MPU6050Driver;
 class OrientationEstimator;
 class EventBus;
 class BaseEvent;
-class IMUCalibrationService;
-class IMUHealthMonitor;
+class IMUCalibration;
 class IMU_CommunicationError;
 class IMU_AttemptRecovery; 
 class CONFIG_FullConfigUpdate; 
 class CONFIG_ImuConfigUpdate; 
-class IMU_CalibrationStarted; 
 class IMU_CalibrationCompleted; 
+class IMU_CalibrationRequest;
+class SYSTEM_StateChanged;
+class IMU_StateTransitionRequest;
 
+// Task forward declarations
+class Task;
+class FIFOTask;
+class HealthMonitorTask;
 
-class IMUService {
+// Forward declare IMU components that will be encapsulated
+class IMUHealthMonitor;
+class FIFOProcessor;
+
+class IMUService : public EventHandler {
 public:
-    IMUService(MPU6050Driver& driver,
-               IMUCalibrationService& calibrationService,
-               IMUHealthMonitor& healthMonitor,
-               OrientationEstimator& estimator,
-               const MPU6050Config& config, 
+    // Updated constructor that doesn't take references to components we'll create internally
+    IMUService(std::shared_ptr<OrientationEstimator> estimator,
+               const MPU6050Config& config,
+               const SystemBehaviorConfig& behaviorConfig,
                EventBus& bus);
     ~IMUService();
 
     esp_err_t init();
+    
+    // Start the IMU-related tasks
+    bool startTasks();
+    
+    // Stop the IMU-related tasks
+    void stopTasks();
     void processDataPipeline();
-    void subscribeToEvents(EventBus& bus);
+    // EventHandler interface implementation
+    void handleEvent(const BaseEvent& event) override;
+    std::string getHandlerName() const override { return TAG; }
     
     IMUState getCurrentState() const { return m_current_state.load(std::memory_order_relaxed); }
     SystemState getSystemState() const { return m_system_state.load(std::memory_order_relaxed); }
@@ -50,12 +67,21 @@ public:
 private:
     static constexpr const char* TAG = "IMUService";
 
-    MPU6050Driver& m_driver;
-    IMUCalibrationService& m_calibrationService;
-    IMUHealthMonitor& m_healthMonitor;
-    OrientationEstimator& m_estimator;
-    MPU6050Config m_config; 
+    std::unique_ptr<MPU6050Driver> m_driver;
+    std::shared_ptr<OrientationEstimator> m_estimator;
+    MPU6050Config m_config;
+    SystemBehaviorConfig m_behaviorConfig;
     EventBus& m_eventBus;
+    
+    // Owned components
+    std::unique_ptr<IMUHealthMonitor> m_healthMonitor;
+    std::unique_ptr<FIFOProcessor> m_fifoProcessor;
+    std::unique_ptr<IMUCalibration> m_calibration;
+    
+    // Task components
+    std::unique_ptr<FIFOTask> m_fifoTask;
+    std::unique_ptr<HealthMonitorTask> m_healthMonitorTask;
+    std::atomic<bool> m_is_calibrating_flag;  // Tracks if calibration is in progress
 
     std::atomic<IMUState> m_current_state; // Default initialized by constructor if needed
     std::atomic<SystemState> m_system_state;
@@ -70,12 +96,6 @@ private:
     float m_gyro_lsb_per_dps;
     float m_sample_period_s;
 
-    static constexpr size_t FIFO_PACKET_SIZE = 12; 
-    static constexpr size_t MAX_FIFO_BUFFER_SIZE = 1024; 
-    static constexpr uint16_t MAX_SAMPLES_PER_PIPELINE_CALL = 20; // Max MPU samples (6 floats) to process per task cycle
-
-    uint8_t m_fifo_buffer[MAX_FIFO_BUFFER_SIZE];
-    std::atomic<uint8_t> m_isr_data_counter; // Incremented by ISR, read and reset by task
 
     bool m_isr_handler_installed;
     
@@ -92,27 +112,24 @@ private:
     
     static bool isValidTransition(IMUState from, IMUState to);
     
-    // FIFO management helpers
-    esp_err_t enableFIFO();
-    esp_err_t disableFIFO();
-    esp_err_t resetFIFO();
-    esp_err_t resetAndReEnableFIFO(); // Composite helper
-    
-    bool validateFIFOData(const uint8_t* data, size_t length);
+    // FIFO management now delegated to FIFOProcessor
 
     // Private Methods
-    static void IRAM_ATTR isrHandler(void* arg);
     esp_err_t configureSensorHardware(); // Applies m_config to hardware
-    esp_err_t attemptRecovery(const IMURecoveryConfig& config); // Performs recovery steps
+    esp_err_t attemptRecovery(const IMURecoveryConfig& config); // Low-level recovery implementation
+    void startRecoveryProcess(const IMURecoveryConfig& config); // High-level recovery coordinator
     void calculateScalingFactors(); 
     void applyConfig(const MPU6050Config& newConfig);
-
+    void applyConfig(const SystemBehaviorConfig& config);
+    
     // Event Handlers
-    void handleConfigUpdate(const BaseEvent& event); // For CONFIG_FullConfigUpdate
+    void handleConfigUpdate(const CONFIG_FullConfigUpdate& event);
     void handleIMUConfigUpdate(const CONFIG_ImuConfigUpdate& event);
     void handleImuCommunicationError(const IMU_CommunicationError& event);
-    void handleCalibrationStarted(const IMU_CalibrationStarted& event);
-    void handleCalibrationComplete(const IMU_CalibrationCompleted& event);
-    void handleAttemptImuRecovery(const IMU_AttemptRecovery& event);
-    void handleSystemStateChanged(const BaseEvent& event); // For SYSTEM_StateChanged
+    void handleCalibrationRequest(const IMU_CalibrationRequest& event);
+
+    void handleSystemStateChanged(const SYSTEM_StateChanged& event);
+    
+    // Calibration method called directly within IMUService
+    esp_err_t performCalibration();
 };

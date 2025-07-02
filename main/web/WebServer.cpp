@@ -51,18 +51,27 @@ void WebServer::addTelemetrySnapshot(const TelemetryDataPoint& data) {
     else { ESP_LOGE(TAG, "TelemetryHandler not initialized."); }
 }
 
-// Subscribe to events and forward to handlers if needed
-void WebServer::subscribeToEvents(EventBus& bus) {
-    // Forward config updates to handlers that need them
-    bus.subscribe(EventType::CONFIG_FULL_UPDATE, [this](const BaseEvent& ev){
-        if (m_telemetryHandler) m_telemetryHandler->handleConfigUpdate(ev);
-        if (m_configApiHandler) m_configApiHandler->handleConfigUpdate(ev);
-        // Add other handlers here if they need config updates
-    });
-    ESP_LOGI(TAG, "Subscribed WebServer components to CONFIG_UPDATED events.");
-    // Allow handlers to subscribe directly if they need other events
-    if(m_telemetryHandler) m_telemetryHandler->subscribeToEvents(bus);
-    if(m_configApiHandler) m_configApiHandler->subscribeToEvents(bus);
+// EventHandler implementation
+void WebServer::handleEvent(const BaseEvent& event) {
+    // Central event handler that dispatches to specific handlers based on event type
+    switch (event.type) {
+        case EventType::CONFIG_FULL_UPDATE:
+            // Forward config updates to handlers that need them
+            if (m_telemetryHandler) {
+                ESP_LOGV(TAG, "Forwarding CONFIG_FULL_UPDATE to TelemetryHandler");
+                m_telemetryHandler->handleEvent(event);
+            }
+            if (m_configApiHandler) {
+                ESP_LOGV(TAG, "Forwarding CONFIG_FULL_UPDATE to ConfigApiHandler");
+                m_configApiHandler->handleEvent(event);
+            }
+            break;
+            
+        default:
+            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
+                     getHandlerName().c_str(), static_cast<int>(event.type));
+            break;
+    }
 }
 
 // init: Register handlers, including WebSocket

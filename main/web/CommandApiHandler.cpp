@@ -9,13 +9,24 @@
 #include "UI_DisableFallRecovery.hpp"  // <<< ADDED
 #include "UI_EnableFallDetection.hpp"  // <<< ADDED
 #include "UI_DisableFallDetection.hpp" // <<< ADDED
+#include "BaseEvent.hpp"           // Need for BaseEvent
 #include "cJSON.h"
 #include <memory>                   // For unique_ptr
 #include <string>
 #include "esp_http_server.h" // <<< ADDED for httpd_resp_* functions
 #include "esp_log.h"         // <<< ADDED for logging
 
-CommandApiHandler::CommandApiHandler(EventBus& eventBus) : m_eventBus(eventBus) {}
+CommandApiHandler::CommandApiHandler(EventBus& eventBus) : m_eventBus(eventBus) {
+    ESP_LOGI(TAG, "CommandApiHandler constructed.");
+}
+
+// EventHandler implementation
+void CommandApiHandler::handleEvent(const BaseEvent& event) {
+    // Currently this handler doesn't need to process any events
+    // Just log unhandled events at verbose level
+    ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
+             getHandlerName().c_str(), static_cast<int>(event.type));
+}
 
 esp_err_t CommandApiHandler::handleRequest(httpd_req_t *req) {
     ESP_LOGD(TAG, "Received request for /api/command (POST)");

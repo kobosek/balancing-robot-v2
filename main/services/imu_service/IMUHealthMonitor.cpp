@@ -4,9 +4,7 @@
 #include "CONFIG_FullConfigUpdate.hpp" // Include event with payload
 #include "IMU_CommunicationError.hpp"
 #include "EventTypes.hpp"
-#include "IMU_CalibrationStarted.hpp" // For event type check, could use BaseEvent with type check
 #include "IMU_CalibrationCompleted.hpp" // For event type check
-#include "IMU_StateChanged.hpp" // To react to IMU state changes
 #include "BaseEvent.hpp"
 #include "ConfigData.hpp" // Needed for SystemBehaviorConfig
 #include "IMUService.hpp" // Include for IMUState enum and stateToString
@@ -49,29 +47,6 @@ void IMUHealthMonitor::pet() {
     // Reset counters on successful pet, indicating data flow is okay
     m_no_data_counter.store(0, std::memory_order_relaxed);
 }
-
-void IMUHealthMonitor::subscribeToEvents(EventBus& bus) {
-    // Subscribe to IMU_StateChanged events to adapt behavior
-    bus.subscribe(EventType::IMU_STATE_CHANGED, [this](const BaseEvent& ev){
-        const auto& stateEvent = static_cast<const IMU_StateChanged&>(ev);
-        this->notifyIMUStateChange(stateEvent.newState);
-    });
-    // Subscribe to CONFIG_UPDATED to reload thresholds
-    bus.subscribe(EventType::CONFIG_FULL_UPDATE, [this](const BaseEvent& ev){
-        this->handleConfigUpdate(ev);
-    });
-    ESP_LOGI(TAG, "Subscribed to IMU_STATE_CHANGED and CONFIG_FULL_UPDATE events.");
-}
-
-// Handle config update event
-void IMUHealthMonitor::handleConfigUpdate(const BaseEvent& event) {
-    // Basic type check, could be more robust if BaseEvent had a dynamic_cast safe way
-    if (event.type != EventType::CONFIG_FULL_UPDATE) return;
-    ESP_LOGD(TAG, "Handling config update event.");
-    const auto& configEvent = static_cast<const CONFIG_FullConfigUpdate&>(event);
-    applyConfig(configEvent.configData.behavior);
-}
-
 
 // Methods for state machine coordination
 void IMUHealthMonitor::notifyIMUStateChange(IMUState newState) {
@@ -129,7 +104,7 @@ void IMUHealthMonitor::checkHealth() {
             m_last_proactive_check_time_us.store(current_time, std::memory_order_release);
 
             uint8_t who_am_i = 0;
-            esp_err_t ret = m_driver.readRegisters(MPU6050Register::WHO_AM_I, &who_am_i, 1);
+            esp_err_t ret = m_driver.getDeviceID(who_am_i);
 
             if (ret != ESP_OK) {
                 uint8_t failures = m_consecutive_i2c_failures.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -177,7 +152,7 @@ void IMUHealthMonitor::checkHealth() {
     }
 
     uint8_t who_am_i = 0;
-    esp_err_t ret = m_driver.readRegisters(MPU6050Register::WHO_AM_I, &who_am_i, 1);
+    esp_err_t ret = m_driver.getDeviceID(who_am_i);
 
     if (ret != ESP_OK) {
         uint8_t failures = m_consecutive_i2c_failures.fetch_add(1, std::memory_order_relaxed) + 1;

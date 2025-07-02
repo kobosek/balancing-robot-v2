@@ -2,15 +2,12 @@
 #include "driver/i2c_master.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h" // For vTaskDelay
 
 MPU6050Driver::MPU6050Driver() :
     _bus_handle(nullptr),
     _dev_handle(nullptr),
     _i2c_mutex()
 {}
-
-// main/drivers/mpu6050.cpp
 
 esp_err_t MPU6050Driver::init(const i2c_port_t i2c_port,
     const gpio_num_t sda_io,
@@ -22,8 +19,8 @@ esp_err_t MPU6050Driver::init(const i2c_port_t i2c_port,
     std::lock_guard<std::mutex> lock(_i2c_mutex);
 
     if (_dev_handle) {
-    ESP_LOGW(TAG, "Driver already initialized. Skipping init.");
-    return ESP_OK; // Already initialized is not an error here
+        ESP_LOGW(TAG, "Driver already initialized. Skipping init.");
+        return ESP_OK; // Already initialized is not an error here
     }
     // Reset handles before attempting initialization
     _dev_handle = nullptr;
@@ -45,9 +42,8 @@ esp_err_t MPU6050Driver::init(const i2c_port_t i2c_port,
     ret = i2c_new_master_bus(&bus_config, &_bus_handle);
     if (ret != ESP_OK || !_bus_handle) {
         ESP_LOGE(TAG, "Failed create I2C master bus: %s", esp_err_to_name(ret));
-        _bus_handle = nullptr; // Ensure null on failure
-        // DO NOT delete bus here, let destructor handle it if needed
-        return ret; // Return the error from bus creation
+        _bus_handle = nullptr; 
+        return ret; 
     }
     ESP_LOGD(TAG, "I2C Master Bus created (Handle: %p)", _bus_handle);
 
@@ -70,7 +66,6 @@ esp_err_t MPU6050Driver::init(const i2c_port_t i2c_port,
     return ESP_OK; // Explicitly return OK only if both steps succeeded
 }
 
-// Destructor remains the same (it will clean up whatever was successfully created)
 MPU6050Driver::~MPU6050Driver() {
     ESP_LOGI(TAG, "Deinitializing MPU6050 Driver...");
     std::lock_guard<std::mutex> lock(_i2c_mutex); // Lock during deinit
@@ -114,17 +109,7 @@ esp_err_t MPU6050Driver::resetSensor() {
          ESP_LOGE(TAG, "Failed to write RESET bit: %s", esp_err_to_name(ret));
          return ret;
      }
-     // Wait for reset to complete (MPU6050 datasheet recommends >50ms, 100ms is safe)
-     vTaskDelay(pdMS_TO_TICKS(100));
-
-     // Optional: Wake up sensor after reset (might be done by subsequent config)
-     // ret = setPowerManagementReg(MPU6050PowerManagement::CLOCK_PLL_XGYRO); // Example wake-up
-     // if (ret != ESP_OK) {
-     //     ESP_LOGE(TAG, "Failed to wake sensor after reset: %s", esp_err_to_name(ret));
-     // } else {
-          ESP_LOGI(TAG, "Sensor reset command sent.");
-     // }
-     return ESP_OK; // Return status of the reset command itself
+     return ESP_OK; 
 }
 
 esp_err_t MPU6050Driver::setDLPFConfigReg(MPU6050DLPFConfig config) {
@@ -160,10 +145,8 @@ esp_err_t MPU6050Driver::configureInterruptPinReg(MPU6050InterruptPinConfig intP
 esp_err_t MPU6050Driver::configureFIFOReg(MPU6050UserControl userCtrlBits, MPU6050FIFOEnable fifoEnableBits) {
      ESP_LOGD(TAG, "Setting USER_CTRL: 0x%02X, FIFO_EN: 0x%02X",
             static_cast<uint8_t>(userCtrlBits), static_cast<uint8_t>(fifoEnableBits));
-    // Write USER_CTRL first (handles FIFO_ENABLE bit)
     esp_err_t ret = writeRegister(MPU6050Register::USER_CTRL, static_cast<uint8_t>(userCtrlBits));
     if (ret == ESP_OK) {
-        // Only write FIFO_EN if USER_CTRL succeeded and FIFO is actually being enabled
         if(static_cast<uint8_t>(userCtrlBits) & static_cast<uint8_t>(MPU6050UserControl::FIFO_ENABLE)) {
              ret = writeRegister(MPU6050Register::FIFO_EN, static_cast<uint8_t>(fifoEnableBits));
              if (ret != ESP_OK) { ESP_LOGE(TAG, "Failed to write FIFO_EN register: %s", esp_err_to_name(ret)); }
@@ -173,8 +156,6 @@ esp_err_t MPU6050Driver::configureFIFOReg(MPU6050UserControl userCtrlBits, MPU60
     }
     return ret;
 }
-
-// --- Raw Data Reading --- REMOVED SCALING
 
 esp_err_t MPU6050Driver::readRawAccelXYZ(int16_t& ax, int16_t& ay, int16_t& az) const {
     uint8_t data[6];
@@ -204,8 +185,6 @@ esp_err_t MPU6050Driver::readRawGyroXYZ(int16_t& gx, int16_t& gy, int16_t& gz) c
     return ESP_OK;
 }
 
-// --- FIFO and Status ---
-
 esp_err_t MPU6050Driver::readFifoCount(uint16_t& count) const {
     uint8_t count_buf[2];
     esp_err_t ret = readRegisters(MPU6050Register::FIFO_COUNT_H, count_buf, 2);
@@ -226,7 +205,7 @@ esp_err_t MPU6050Driver::readFifoBuffer(uint8_t* buffer, size_t len) const {
      return readRegisters(MPU6050Register::FIFO_R_W, buffer, len);
 }
 
-esp_err_t MPU6050Driver::readInterruptStatus(uint8_t& status) const {
+esp_err_t MPU6050Driver::getInterruptStatus(uint8_t& status) const {
      esp_err_t ret = readRegisters(MPU6050Register::INTERRUPT_STATUS, &status, 1);
       if (ret != ESP_OK) {
          ESP_LOGE(TAG, "Failed to read interrupt status: %s", esp_err_to_name(ret));
@@ -236,10 +215,25 @@ esp_err_t MPU6050Driver::readInterruptStatus(uint8_t& status) const {
      return ret;
 }
 
+esp_err_t MPU6050Driver::isDataReady(bool& isDataReady) const {
+     uint8_t status = 0;
+     isDataReady = false; // Default
+     esp_err_t ret = getInterruptStatus(status);
+     if (ret == ESP_OK) {
+         isDataReady = (status & static_cast<uint8_t>(MPU6050Interrupt::DATA_READY));
+         if (isDataReady) {
+             ESP_LOGV(TAG, "Data Ready Flag SET in Interrupt Status (0x%02X)", status);
+         } else {
+              ESP_LOGV(TAG, "Data Ready Flag NOT SET in Interrupt Status (0x%02X)", status);
+         }
+     }
+     return ret;
+}
+
 esp_err_t MPU6050Driver::isFIFOOverflow(bool& isOverflow) const {
      uint8_t status = 0;
      isOverflow = false; // Default
-     esp_err_t ret = readInterruptStatus(status);
+     esp_err_t ret = getInterruptStatus(status);
      if (ret == ESP_OK) {
          isOverflow = (status & static_cast<uint8_t>(MPU6050Interrupt::FIFO_OVERFLOW));
          if (isOverflow) {
@@ -248,12 +242,8 @@ esp_err_t MPU6050Driver::isFIFOOverflow(bool& isOverflow) const {
               ESP_LOGV(TAG, "FIFO Overflow Flag NOT SET in Interrupt Status (0x%02X)", status);
          }
      }
-     // Return the status of the I2C read operation, not the overflow state itself
      return ret;
 }
-
-
-// --- Low-level I2C Communication ---
 
 esp_err_t MPU6050Driver::writeRegister(MPU6050Register reg, uint8_t data) {
     std::lock_guard<std::mutex> lock(_i2c_mutex);
@@ -290,4 +280,138 @@ esp_err_t MPU6050Driver::readRegisters(MPU6050Register reg, uint8_t* data, size_
          ESP_LOGV(TAG, "Read %d bytes from reg 0x%02X", len, reg_addr);
     }
     return ret;
+}
+
+// --- New methods for encapsulated functionality ---
+
+esp_err_t MPU6050Driver::enableFIFO(MPU6050FIFOEnable fifoEnableBits) {
+    ESP_LOGD(TAG, "Enabling FIFO with sensor bits: 0x%02X", static_cast<uint8_t>(fifoEnableBits));
+    // First set user control to enable FIFO
+    esp_err_t ret = writeRegister(MPU6050Register::USER_CTRL, 
+                                 static_cast<uint8_t>(MPU6050UserControl::FIFO_ENABLE));
+    if (ret != ESP_OK) return ret;
+    
+    // Then enable specific sensors for FIFO
+    return writeRegister(MPU6050Register::FIFO_EN, static_cast<uint8_t>(fifoEnableBits));
+}
+
+esp_err_t MPU6050Driver::disableFIFO() {
+    ESP_LOGD(TAG, "Disabling FIFO");
+    // First clear FIFO_EN register (disable all sensors)
+    esp_err_t ret = writeRegister(MPU6050Register::FIFO_EN, 0);
+    if (ret != ESP_OK) return ret;
+    
+    // Then clear FIFO_ENABLE bit in USER_CTRL
+    return writeRegister(MPU6050Register::USER_CTRL, 0);
+}
+
+esp_err_t MPU6050Driver::resetFIFO() {
+    ESP_LOGD(TAG, "Resetting FIFO");
+    // Set FIFO_RESET bit in USER_CTRL
+    return writeRegister(MPU6050Register::USER_CTRL, 
+                        static_cast<uint8_t>(MPU6050UserControl::FIFO_RESET));
+}
+
+esp_err_t MPU6050Driver::resetSignalPath() {
+    ESP_LOGD(TAG, "Resetting signal path");
+    return writeRegister(MPU6050Register::USER_CTRL, 
+                        static_cast<uint8_t>(MPU6050UserControl::SIG_COND_RESET));
+}
+
+esp_err_t MPU6050Driver::clearAllUserControlBits() {
+    ESP_LOGD(TAG, "Clearing all USER_CTRL bits");
+    return writeRegister(MPU6050Register::USER_CTRL, 0);
+}
+
+esp_err_t MPU6050Driver::performFullFIFOReset() {
+    ESP_LOGD(TAG, "Performing full FIFO reset sequence");
+    // First disable FIFO
+    esp_err_t ret = disableFIFO();
+    if (ret != ESP_OK) return ret;
+    
+    // Reset FIFO
+    ret = resetFIFO();
+    if (ret != ESP_OK) return ret;
+    
+    // Reset signal paths
+    ret = resetSignalPath();
+    if (ret != ESP_OK) return ret;
+    
+    return ESP_OK;
+}
+
+esp_err_t MPU6050Driver::setUserControlBits(MPU6050UserControl bits) {
+    ESP_LOGD(TAG, "Setting USER_CTRL bits: 0x%02X", static_cast<uint8_t>(bits));
+    uint8_t current_value = 0;
+    esp_err_t ret = readRegisters(MPU6050Register::USER_CTRL, &current_value, 1);
+    if (ret != ESP_OK) return ret;
+    
+    // Set new bits while preserving others
+    uint8_t new_value = current_value | static_cast<uint8_t>(bits);
+    return writeRegister(MPU6050Register::USER_CTRL, new_value);
+}
+
+esp_err_t MPU6050Driver::clearUserControlBits(MPU6050UserControl bits) {
+    ESP_LOGD(TAG, "Clearing USER_CTRL bits: 0x%02X", static_cast<uint8_t>(bits));
+    uint8_t current_value = 0;
+    esp_err_t ret = readRegisters(MPU6050Register::USER_CTRL, &current_value, 1);
+    if (ret != ESP_OK) return ret;
+    
+    // Clear specified bits while preserving others
+    uint8_t new_value = current_value & ~static_cast<uint8_t>(bits);
+    return writeRegister(MPU6050Register::USER_CTRL, new_value);
+}
+
+esp_err_t MPU6050Driver::getDeviceID(uint8_t& id) {
+    ESP_LOGD(TAG, "Reading device ID (WHO_AM_I register)");
+    return readRegisters(MPU6050Register::WHO_AM_I, &id, 1);
+}
+
+esp_err_t MPU6050Driver::validateSensorID(uint8_t& id_value) {
+    ESP_LOGD(TAG, "Validating sensor ID");
+    esp_err_t ret = getDeviceID(id_value);
+    if (ret != ESP_OK) return ret;
+    
+    // Check ID is valid (0x68 = default address, 0x69 = alternate address when AD0 pin is high)
+    if (id_value != 0x68 && id_value != 0x69) {
+        ESP_LOGE(TAG, "Invalid WHO_AM_I value: 0x%02X (expected 0x68 or 0x69)", id_value);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    
+    ESP_LOGI(TAG, "Sensor ID validated: 0x%02X", id_value);
+    return ESP_OK;
+}
+
+esp_err_t MPU6050Driver::writeRegisterMasked(MPU6050Register reg, uint8_t value, uint8_t mask) {
+    uint8_t current_value = 0;
+    esp_err_t ret = readRegisters(reg, &current_value, 1);
+    if (ret != ESP_OK) return ret;
+    
+    // Clear bits that will be set, then set new bits
+    uint8_t new_value = (current_value & ~mask) | (value & mask);
+    return writeRegister(reg, new_value);
+}
+
+esp_err_t MPU6050Driver::configureForDataAcquisition(
+    MPU6050DLPFConfig dlpfConfig,
+    MPU6050SampleRateDiv sampleRate,
+    MPU6050AccelConfig accelRange,
+    MPU6050GyroConfig gyroRange
+) {
+    ESP_LOGI(TAG, "Configuring MPU6050 for data acquisition");
+    
+    esp_err_t ret = setDLPFConfigReg(dlpfConfig);
+    if (ret != ESP_OK) return ret;
+    
+    ret = setSampleRateDivReg(sampleRate);
+    if (ret != ESP_OK) return ret;
+    
+    ret = setAccelRangeReg(accelRange);
+    if (ret != ESP_OK) return ret;
+    
+    ret = setGyroRangeReg(gyroRange);
+    if (ret != ESP_OK) return ret;
+    
+    ESP_LOGI(TAG, "MPU6050 configuration complete");
+    return ESP_OK;
 }

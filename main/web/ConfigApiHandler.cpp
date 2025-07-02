@@ -24,20 +24,24 @@ void ConfigApiHandler::applyConfig(const WebServerConfig& config) {
     ESP_LOGI(TAG, "Applied ConfigApiHandler params: MaxPostSize=%zu", m_max_post_data_size);
 }
 
-// Handle config update event
-void ConfigApiHandler::handleConfigUpdate(const BaseEvent& event) {
-    if (event.type != EventType::CONFIG_FULL_UPDATE) return;
-    ESP_LOGD(TAG, "Handling config update event.");
-    const auto& configEvent = static_cast<const CONFIG_FullConfigUpdate&>(event);
-    applyConfig(configEvent.configData.web);
+// EventHandler implementation
+void ConfigApiHandler::handleEvent(const BaseEvent& event) {
+    switch (event.type) {
+        case EventType::CONFIG_FULL_UPDATE:
+            handleConfigUpdate(static_cast<const CONFIG_FullConfigUpdate&>(event));
+            break;
+            
+        default:
+            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
+                     getHandlerName().c_str(), static_cast<int>(event.type));
+            break;
+    }
 }
 
-// Subscribe to config updates
-void ConfigApiHandler::subscribeToEvents(EventBus& bus) {
-    bus.subscribe(EventType::CONFIG_FULL_UPDATE, [this](const BaseEvent& ev){
-        this->handleConfigUpdate(ev);
-    });
-    ESP_LOGI(TAG, "Subscribed to CONFIG_UPDATED events.");
+// Handle config update event
+void ConfigApiHandler::handleConfigUpdate(const CONFIG_FullConfigUpdate& event) {
+    ESP_LOGD(TAG, "Handling config update event.");
+    applyConfig(event.configData.web);
 }
 
 esp_err_t ConfigApiHandler::handleGetRequest(httpd_req_t *req) {

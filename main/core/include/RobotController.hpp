@@ -2,6 +2,8 @@
 
 #include <mutex>
 #include "esp_err.h"
+#include "EventHandler.hpp"
+#include <memory>
 
 // Forward Declarations
 class OrientationEstimator;
@@ -17,10 +19,10 @@ class BaseEvent;
 class MOTION_TargetMovement;
 class EventBus;
 
-class RobotController {
+class RobotController : public EventHandler {
 public:
     RobotController(
-        OrientationEstimator& estimator,
+        std::shared_ptr<OrientationEstimator> estimator,
         EncoderService& encoderService,
         MotorService& motorService,
         BalancingAlgorithm& algorithm,
@@ -34,14 +36,15 @@ public:
     esp_err_t init(EventBus& bus);
     void runControlStep(float dt);
 
-    // <<< ADDED: Method for event subscriptions >>>
-    void subscribeToEvents(EventBus& bus);
+    // EventHandler interface implementation
+    void handleEvent(const BaseEvent& event) override;
+    std::string getHandlerName() const override { return TAG; }
 
 private:
     static constexpr const char* TAG = "RobotController";
 
     // References to components
-    OrientationEstimator& m_estimator;
+    std::shared_ptr<OrientationEstimator> m_estimator;
     EncoderService& m_encoderService;
     MotorService& m_motorService;
     BalancingAlgorithm& m_algorithm;
@@ -59,5 +62,5 @@ private:
     // Event bus reference
     EventBus* m_eventBus = nullptr;
 
-    void handleTargetMovementCommand(const BaseEvent& event);
+    void handleTargetMovementCommand(const MOTION_TargetMovement& event);
 };

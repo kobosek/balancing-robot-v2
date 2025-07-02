@@ -5,14 +5,16 @@
 #include "EventBus.hpp"                 // Found via INCLUDE_DIRS
 #include "SystemState.hpp"              // Found via INCLUDE_DIRS
 #include "MX1616H_HWDriver.hpp"         // Found via INCLUDE_DIRS
+#include "EventHandler.hpp"             // For EventHandler base class
 // #include "esp_log.h" // Moved to .cpp
 #include <memory>
 #include <algorithm>                    // Not needed in header
 #include <cmath>                        // Not needed in header
  // Forward declare event class
 class BaseEvent; // <<< Already defined
+class SYSTEM_StateChanged; // Forward declaration for event handler
 
-class MotorService {
+class MotorService : public EventHandler {
 public:
     MotorService(const MotorConfig& config, EventBus& bus);
     ~MotorService() = default;
@@ -21,7 +23,11 @@ public:
     esp_err_t init();
     esp_err_t setMotorEffort(float leftEffort, float rightEffort);
 
-    // <<< ADDED: Method for event subscriptions >>>
+    // Event handling via EventHandler interface
+    void handleEvent(const BaseEvent& event) override;
+    std::string getHandlerName() const override { return TAG; }
+    
+    // Kept for backward compatibility
     void subscribeToEvents(EventBus& bus);
 
 private:
@@ -38,8 +44,8 @@ private:
     bool m_enabled = false;
     uint32_t m_pwm_max_duty = 0;
 
-    // Declaration only
-    void handleSystemStateChange(const BaseEvent& event);
+    // Event handlers for specific event types
+    void handleSystemStateChange(const SYSTEM_StateChanged& event);
     // Declaration only
     esp_err_t configureLEDCTimer();
 };

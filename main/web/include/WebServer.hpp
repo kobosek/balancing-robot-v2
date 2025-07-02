@@ -7,6 +7,7 @@
 #include <memory>
 #include "TelemetryDataPoint.hpp"
 #include "ConfigData.hpp" // Include full definition
+#include "EventHandler.hpp"
 
 // Forward declare dependencies needed by constructor/members
 class ConfigurationService; // Still needed for ConfigApiHandler
@@ -21,7 +22,7 @@ class ConfigApiHandler;
 class CommandApiHandler;
 class StateApiHandler;
 
-class WebServer {
+class WebServer : public EventHandler {
 public:
     // Constructor takes high-level dependencies + WebServerConfig
     WebServer(ConfigurationService& configService, // Keep config service for handler that needs it
@@ -35,8 +36,10 @@ public:
     // Expose method to add telemetry data (delegates to TelemetryHandler)
     void addTelemetrySnapshot(const TelemetryDataPoint& data);
 
-    // Subscribe to events (e.g., config updates for handlers)
-    void subscribeToEvents(EventBus& bus);
+    // EventHandler interface implementation
+    void handleEvent(const BaseEvent& event) override;
+    std::string getHandlerName() const override { return TAG; }
+
 
 private:
     static constexpr const char* TAG = "WebServer";

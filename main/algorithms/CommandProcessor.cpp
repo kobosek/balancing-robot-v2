@@ -57,41 +57,48 @@ esp_err_t CommandProcessor::init() {
     m_input_timed_out = true; // Start in timed-out state
 
     // Create the timeout timer
-    const esp_timer_create_args_t timer_args = {
-            .callback = &CommandProcessor::timeout_timer_callback,
-            .arg = this,
-            .dispatch_method = ESP_TIMER_TASK,
-            .name = "cp_timeout_timer",
-            .skip_unhandled_events = false // Initialize this field
-    };
+    esp_timer_create_args_t timer_args = {};
+    timer_args.callback = &CommandProcessor::timeout_timer_callback;
+    timer_args.arg = this;
+    timer_args.name = "joystick_timeout"; // Optional timer name
 
+    ESP_LOGI(TAG, "Creating joystick timeout timer...");
     esp_err_t ret = esp_timer_create(&timer_args, &m_timeout_timer);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed to create timeout timer");
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create timeout timer: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Start the timer running
+    ret = startTimeoutTimer();
+    if (ret != ESP_OK) {
+        return ret;
+    }
 
     ESP_LOGI(TAG, "Command Processor Initialized.");
     return ESP_OK;
 }
 
-void CommandProcessor::subscribeToEvents(EventBus& bus) {
-    // Subscribe to state changes
-    bus.subscribe(EventType::SYSTEM_STATE_CHANGED, [this](const BaseEvent& ev){
-        if(ev.type == EventType::SYSTEM_STATE_CHANGED) {
-             this->handleSystemStateChange(static_cast<const SYSTEM_StateChanged&>(ev));
-        }
-    });
-    ESP_LOGI(TAG, "Subscribed to SYSTEM_STATE_CHANGED events.");
-    // Subscribe to raw joystick input
-    bus.subscribe(EventType::UI_JOYSTICK_INPUT, [this](const BaseEvent& ev){
-        if(ev.type == EventType::UI_JOYSTICK_INPUT) {
-            this->handleJoystickInput(static_cast<const UI_JoystickInput&>(ev));
-        }
-    });
-    ESP_LOGI(TAG, "Subscribed to JOYSTICK_INPUT_RECEIVED events.");
-    // Subscribe to config updates to reload parameters
-    bus.subscribe(EventType::CONFIG_FULL_UPDATE, [this](const BaseEvent& ev) {
-        this->handleConfigUpdate(ev); // Call specific handler
-    });
-    ESP_LOGI(TAG, "Subscribed to CONFIG_UPDATED events.");
+void CommandProcessor::handleEvent(const BaseEvent& event) {
+    // Central event handler that dispatches to specific handlers based on event type
+    switch (event.type) {
+        case EventType::SYSTEM_STATE_CHANGED:
+            handleSystemStateChange(static_cast<const SYSTEM_StateChanged&>(event));
+            break;
+            
+        case EventType::UI_JOYSTICK_INPUT:
+            handleJoystickInput(static_cast<const UI_JoystickInput&>(event));
+            break;
+            
+        case EventType::CONFIG_FULL_UPDATE:
+            handleConfigUpdate(static_cast<const CONFIG_FullConfigUpdate&>(event));
+            break;
+            
+        default:
+            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
+                     getHandlerName().c_str(), static_cast<int>(event.type));
+            break;
+    }
 }
 
 // Helper to apply config values
@@ -120,12 +127,12 @@ void CommandProcessor::applyConfig(const ControlConfig& controlConf, const Syste
 }
 
 // Handle config update event
-void CommandProcessor::handleConfigUpdate(const BaseEvent& event) {
-    if (event.type != EventType::CONFIG_FULL_UPDATE) return;
-    ESP_LOGD(TAG, "Config update event received, applying new parameters.");
-    const auto& configEvent = static_cast<const CONFIG_FullConfigUpdate&>(event);
-    // Extract relevant parts and apply
-    applyConfig(configEvent.configData.control, configEvent.configData.behavior);
+void CommandProcessor::handleConfigUpdate(const CONFIG_FullConfigUpdate& event) {
+    // Process the full config update
+    ESP_LOGI(TAG, "Processing config update.");
+    
+    // Apply the new config values from the event payload
+    applyConfig(event.configData.control, event.configData.behavior);
 }
 
 void CommandProcessor::handleSystemStateChange(const SYSTEM_StateChanged& event) {

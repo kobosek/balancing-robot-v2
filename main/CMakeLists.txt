@@ -13,11 +13,13 @@ idf_component_register(SRCS # --- Tasks ---
                             "services/configuration_service/ConfigurationService.cpp"
                             # --- IMU Service---
                             "services/imu_service/IMUService.cpp"
-                            "services/imu_service/IMUCalibrationService.cpp"
+                            "services/imu_service/IMUCalibration.cpp"
                             "services/imu_service/IMUHealthMonitor.cpp"
                             "services/imu_service/OrientationEstimator.cpp" # Refactored Estimator
                             "services/imu_service/mpu6050.cpp"
-                            "services/imu_service/IMUTasks.cpp"          # Contains both FIFO and Health tasks now
+                            "services/imu_service/FIFOTask.cpp"
+                            "services/imu_service/HealthMonitorTask.cpp"
+                            "services/imu_service/FIFOProcessor.cpp"
                             # --- Battery Service 
                             "services/battery_service/BatteryService.cpp"
                             "services/battery_service/BatteryTask.cpp"

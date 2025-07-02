@@ -4,17 +4,17 @@
 #pragma once
 
 #include "EventBus.hpp"
+#include "EventHandler.hpp" // Include for EventHandler base class
 #include "MOTION_FallDetected.hpp"
 #include "ConfigData.hpp" // Include full definition
 #include "esp_log.h"
 #include "esp_timer.h"
 
 // Forward declarations
-// class ConfigurationService; // REMOVE
 class BaseEvent;
 class CONFIG_FullConfigUpdate;
 
-class FallDetector {
+class FallDetector : public EventHandler {
 public:
     // Constructor now takes initial SystemBehaviorConfig
     FallDetector(EventBus& bus, const SystemBehaviorConfig& initialBehaviorConfig);
@@ -26,8 +26,9 @@ public:
     // Call externally (e.g. from StateManager) when leaving FALLEN state if needed
     void reset();
 
-    // Subscribe to config updates
-    void subscribeToEvents(EventBus& bus);
+    // EventHandler interface implementation
+    void handleEvent(const BaseEvent& event) override;
+    std::string getHandlerName() const override { return "FallDetector"; }
 
 private:
     static constexpr const char* TAG = "FallDetector";
@@ -41,5 +42,5 @@ private:
     bool m_fall_event_published = false;
 
     void applyConfig(const SystemBehaviorConfig& config);
-    void handleConfigUpdate(const BaseEvent& event);
+    void handleConfigUpdate(const CONFIG_FullConfigUpdate& event);
 };

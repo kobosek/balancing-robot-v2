@@ -3,20 +3,20 @@
 
 #include "ConfigData.hpp" // Include full definition
 #include "EventBus.hpp"
+#include "EventHandler.hpp" // Include for EventHandler base class
 #include "PIDController.hpp"
 #include "esp_log.h"
 
 // Forward declarations for event classes
 class CONFIG_PidConfigUpdate;
-
-class BaseEvent; // Forward declare
+class CONFIG_FullConfigUpdate;
 
 struct MotorEffort {
     float left = 0.0f;
     float right = 0.0f;
 };
 
-class BalancingAlgorithm {
+class BalancingAlgorithm : public EventHandler {
 public:
     // Constructor takes initial config structs
     BalancingAlgorithm(EventBus& eventBus,
@@ -34,7 +34,9 @@ public:
                       float targetPitchOffset_deg, float targetAngVel_dps);
     void resetState();
 
-    void subscribeToEvents(EventBus& bus);
+    // EventHandler interface implementation
+    void handleEvent(const BaseEvent& event) override;
+    std::string getHandlerName() const override { return "BalancingAlgorithm"; }
 
     // --- Getters for Telemetry ---
     float getLastSpeedSetpointLeftDPS() const { return m_last_speed_setpoint_left_dps; }
@@ -65,7 +67,7 @@ private:
 
     // Internal helpers to apply config from events
     void applyConfig(const ConfigData& config);
-    void handleConfigUpdate(const BaseEvent& event);
+    void handleConfigUpdate(const CONFIG_FullConfigUpdate& event);
     void handlePIDConfigUpdate(const CONFIG_PidConfigUpdate& event);
     
     // Helper to update dimensions from config

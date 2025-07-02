@@ -1,25 +1,25 @@
 // main/services/IMUService.cpp
 
 #include "IMUService.hpp"
+#include "IMUCalibration.hpp"
 #include "mpu6050.hpp"
 #include "OrientationEstimator.hpp"
 #include "SYSTEM_StateChanged.hpp"
 #include "IMU_RecoverySucceeded.hpp"
 #include "IMU_RecoveryFailed.hpp"
-#include "IMU_AttemptRecovery.hpp"
 #include "MOTION_UsingFallbackValues.hpp"
 #include "CONFIG_ImuConfigUpdate.hpp" 
-#include "IMUCalibrationService.hpp"
 #include "IMUHealthMonitor.hpp"
 #include "ConfigData.hpp"
 #include "EventBus.hpp"
+#include "IMU_GyroOffsetsUpdated.hpp"
+#include "IMU_CalibrationRequestRejected.hpp"
 #include "EventTypes.hpp"
 #include "IMU_CommunicationError.hpp"
 #include "CONFIG_FullConfigUpdate.hpp" 
-#include "IMU_CalibrationStarted.hpp"
+
+#include "IMU_CalibrationRequest.hpp"
 #include "IMU_CalibrationCompleted.hpp"
-#include "IMU_StateChanged.hpp" 
-#include "IMU_StateTransitionRequest.hpp"
 #include "BaseEvent.hpp"
 #include "driver/gpio.h"
 #include "esp_check.h"
@@ -27,49 +27,52 @@
 #include <vector>
 #include "freertos/task.h" 
 #include <algorithm>      
+#include "FIFOProcessor.hpp"
+#include "FIFOTask.hpp"
+#include "HealthMonitorTask.hpp"
+#include "IMUHealthMonitor.hpp"
 
 // Constructor Implementation
-IMUService::IMUService(MPU6050Driver& driver,
-                       IMUCalibrationService& calibrationService,
-                       IMUHealthMonitor& healthMonitor,
-                       OrientationEstimator& estimator,
-                       const MPU6050Config& config, 
+IMUService::IMUService(std::shared_ptr<OrientationEstimator> estimator,
+                       const MPU6050Config& config,
+                       const SystemBehaviorConfig& behaviorConfig,
                        EventBus& bus) :
-    m_driver(driver),
-    m_calibrationService(calibrationService),
-    m_healthMonitor(healthMonitor),
     m_estimator(estimator),
-    m_config(config), 
+    m_config(config),
+    m_behaviorConfig(behaviorConfig),
     m_eventBus(bus),
+    m_is_calibrating_flag(false),
     m_current_state(IMUState::INITIALIZED),
     m_system_state(SystemState::INIT),
     m_recovery_attempt_in_progress(false),
     m_recovery_start_time_ms(0),
     m_recovery_timeout_ms(5000), 
     m_accel_lsb_per_g(1.0f), 
-    m_gyro_lsb_per_dps(1.0f), 
-    m_sample_period_s(0.001f), 
-    m_isr_data_counter(0),
-    m_isr_handler_installed(false) 
+    m_gyro_lsb_per_dps(1.0f),
+    m_sample_period_s(1.0f / 100.0f), // Default 100Hz
+    m_isr_handler_installed(false)
 {
-    // Constructor body (if needed)
+
 }
 
 IMUService::~IMUService() {
     ESP_LOGI(TAG, "Deconstructing IMUService...");
     if (m_isr_handler_installed) { 
         if (m_config.int_pin >= 0 && m_config.int_pin < GPIO_NUM_MAX) {
-            esp_err_t ret = gpio_isr_handler_remove(static_cast<gpio_num_t>(m_config.int_pin));
+            // Delegate interrupt unregistration to FIFOProcessor
+            esp_err_t ret = m_fifoProcessor->unregisterInterrupt(m_config.int_pin);
             if (ret == ESP_OK) {
-                ESP_LOGI(TAG, "Removed ISR handler for pin %d", (int)m_config.int_pin);
+                ESP_LOGI(TAG, "FIFOProcessor removed ISR handler for pin %d", (int)m_config.int_pin);
             } else {
-                ESP_LOGE(TAG, "Error removing ISR handler for pin %d: %s", (int)m_config.int_pin, esp_err_to_name(ret));
+                ESP_LOGE(TAG, "Error while FIFOProcessor was removing ISR handler for pin %d: %s", 
+                         (int)m_config.int_pin, esp_err_to_name(ret));
             }
         }
         m_isr_handler_installed = false; 
     } else {
          ESP_LOGI(TAG, "ISR handler not removed (was not successfully installed or pin invalid).");
     }
+    stopTasks();
     ESP_LOGI(TAG, "IMUService deconstructed.");
 }
 
@@ -109,30 +112,29 @@ void IMUService::applyConfig(const MPU6050Config& newConfig) {
     // If full reinit is needed, it includes offset setting.
     // Otherwise, if only offsets changed, update them specifically.
     if (needsEstimatorReinit) {
-        m_estimator.init(m_config.comp_filter_alpha, m_sample_period_s,
+        m_estimator->init(m_config.comp_filter_alpha, m_sample_period_s,
                          m_config.gyro_offset_x, m_config.gyro_offset_y, m_config.gyro_offset_z);
         ESP_LOGI(TAG, "Re-initialized OrientationEstimator due to config change.");
     } else if (gyroOffsetsChanged) {
-        m_estimator.updateGyroOffsets(m_config.gyro_offset_x, m_config.gyro_offset_y, m_config.gyro_offset_z);
+        m_estimator->updateGyroOffsets(m_config.gyro_offset_x, m_config.gyro_offset_y, m_config.gyro_offset_z);
         ESP_LOGI(TAG, "Updated OrientationEstimator gyro offsets due to config change.");
     }
-    
-    // CalibrationService always gets the latest offsets from config directly
-    // It's used for the calibration routine itself, not for feeding the estimator anymore.
-    m_calibrationService.setOffsets(m_config.gyro_offset_x, m_config.gyro_offset_y, m_config.gyro_offset_z);
-    
+
     if (m_current_state.load(std::memory_order_acquire) == IMUState::CALIBRATION && hardwareConfigChanged) {
         ESP_LOGI(TAG, "Hardware config parameters changed during CALIBRATION. Hardware will be reconfigured upon transitioning to OPERATIONAL.");
     }
 }
 
-void IMUService::handleConfigUpdate(const BaseEvent& event) {
-    if (event.type != EventType::CONFIG_FULL_UPDATE) return;
+void IMUService::applyConfig(const SystemBehaviorConfig& config) {
+    m_healthMonitor->applyConfig(config);
+}
+
+void IMUService::handleConfigUpdate(const CONFIG_FullConfigUpdate& event) {
     ESP_LOGD(TAG, "Handling general config update event (CONFIG_FullConfigUpdate).");
-    const auto& configEvent = static_cast<const CONFIG_FullConfigUpdate&>(event);
     
     MPU6050Config oldImuConfig = m_config; 
-    applyConfig(configEvent.configData.imu); 
+    applyConfig(event.configData.imu); 
+    applyConfig(event.configData.behavior); 
 
     bool criticalHardwareChanged = (oldImuConfig.accel_range != m_config.accel_range ||
                                    oldImuConfig.gyro_range != m_config.gyro_range ||
@@ -163,6 +165,7 @@ void IMUService::handleIMUConfigUpdate(const CONFIG_ImuConfigUpdate& event) {
 
 
 void IMUService::calculateScalingFactors() {
+    // Using the baseline calculation method (no averaging) to get the current scaling factors:
     switch(m_config.accel_range) {
         case 0: m_accel_lsb_per_g = 16384.0f; break;
         case 1: m_accel_lsb_per_g = 8192.0f;  break;
@@ -191,6 +194,10 @@ void IMUService::calculateScalingFactors() {
     }
     ESP_LOGI(TAG, "Calculated Sample Period: %.6f s (Gyro Rate: %.0f Hz, Divisor: %d, DLPF Conf: %d)",
              m_sample_period_s, gyro_output_rate_hz, m_config.sample_rate_divisor, m_config.dlpf_config);
+    
+    // Update the FIFOProcessor with the new scaling factors
+    m_fifoProcessor->setScalingFactors(m_accel_lsb_per_g, m_gyro_lsb_per_dps);
+
 }
 
 
@@ -198,7 +205,7 @@ esp_err_t IMUService::configureSensorHardware() {
     ESP_LOGI(TAG, "Configuring MPU6050 hardware settings using current m_config...");
     esp_err_t ret;
 
-    ret = m_driver.setPowerManagementReg(MPU6050PowerManagement::CLOCK_INTERNAL); 
+    ret = m_driver->setPowerManagementReg(MPU6050PowerManagement::CLOCK_INTERNAL); 
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to set power management/clock source");
     vTaskDelay(pdMS_TO_TICKS(50)); 
 
@@ -236,33 +243,31 @@ esp_err_t IMUService::configureSensorHardware() {
     ESP_LOGI(TAG, "Setting HW: AccelRange=%d, GyroRange=%d, DLPF=%d, SampRateDiv=%d", 
             static_cast<int>(accelRegValue), static_cast<int>(gyroRegValue), static_cast<int>(dlpf), static_cast<int>(rateDiv));
 
-    ret = m_driver.setAccelRangeReg(accelRegValue); ESP_RETURN_ON_ERROR(ret, TAG, "Failed set Accel Range Reg");
-    ret = m_driver.setGyroRangeReg(gyroRegValue);   ESP_RETURN_ON_ERROR(ret, TAG, "Failed set Gyro Range Reg");
-    ret = m_driver.setDLPFConfigReg(dlpf);       ESP_RETURN_ON_ERROR(ret, TAG, "Failed set DLPF Reg");
-    ret = m_driver.setSampleRateDivReg(rateDiv); ESP_RETURN_ON_ERROR(ret, TAG, "Failed set Sample Rate Div Reg");
+    ret = m_driver->setAccelRangeReg(accelRegValue); ESP_RETURN_ON_ERROR(ret, TAG, "Failed set Accel Range Reg");
+    ret = m_driver->setGyroRangeReg(gyroRegValue);   ESP_RETURN_ON_ERROR(ret, TAG, "Failed set Gyro Range Reg");
+    ret = m_driver->setDLPFConfigReg(dlpf);       ESP_RETURN_ON_ERROR(ret, TAG, "Failed set DLPF Reg");
+    ret = m_driver->setSampleRateDivReg(rateDiv); ESP_RETURN_ON_ERROR(ret, TAG, "Failed set Sample Rate Div Reg");
 
     if (m_config.int_pin >= 0 && m_config.int_pin < GPIO_NUM_MAX) {
         MPU6050InterruptPinConfig intPinConfigVal = m_config.interrupt_active_high ?
             MPU6050InterruptPinConfig::ACTIVE_HIGH : MPU6050InterruptPinConfig::ACTIVE_LOW;
-        ret = m_driver.configureInterruptPinReg(intPinConfigVal, MPU6050Interrupt::DATA_READY);
+        ret = m_driver->configureInterruptPinReg(intPinConfigVal, MPU6050Interrupt::DATA_READY);
         ESP_RETURN_ON_ERROR(ret, TAG, "Failed setup MPU Interrupt Reg");
         ESP_LOGI(TAG,"MPU Interrupt Pin configured for DATA_READY.");
     } else {
         ESP_LOGW(TAG, "Interrupt pin (%d) not configured in MPU6050 hardware (disabling MPU INT).", m_config.int_pin);
-         ret = m_driver.configureInterruptPinReg(MPU6050InterruptPinConfig::ACTIVE_HIGH, (MPU6050Interrupt)0); 
+         ret = m_driver->configureInterruptPinReg(MPU6050InterruptPinConfig::ACTIVE_HIGH, (MPU6050Interrupt)0); 
          ESP_RETURN_ON_ERROR(ret, TAG, "Failed to disable MPU Interrupt Reg");
     }
 
-    ret = m_driver.configureFIFOReg(MPU6050UserControl::FIFO_RESET, (MPU6050FIFOEnable)0); 
+    ret = m_driver->resetFIFO(); 
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed reset MPU FIFO");
     vTaskDelay(pdMS_TO_TICKS(2)); 
-    ret = m_driver.configureFIFOReg(MPU6050UserControl::SIG_COND_RESET, (MPU6050FIFOEnable)0); 
+    ret = m_driver->resetSignalPath(); 
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed reset MPU Signal Paths");
     vTaskDelay(pdMS_TO_TICKS(2));
-    ret = m_driver.writeRegister(MPU6050Register::USER_CTRL, 0); 
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed to clear USER_CTRL for FIFO disable");
-    ret = m_driver.writeRegister(MPU6050Register::FIFO_EN, 0);   
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed to clear FIFO_EN for FIFO disable");
+    ret = m_driver->disableFIFO();
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed to disable FIFO");
 
 
     ESP_LOGI(TAG, "MPU6050 hardware configuration complete.");
@@ -270,242 +275,136 @@ esp_err_t IMUService::configureSensorHardware() {
 }
 
 esp_err_t IMUService::init() {
-    ESP_LOGI(TAG, "Initializing IMUService...");
-    esp_err_t ret;
-    m_isr_handler_installed = false; 
+    ESP_LOGI(TAG, "Initializing IMU Service");
 
-    // 1. Initialize Driver
-    ret = m_driver.init(static_cast<i2c_port_t>(m_config.i2c_port), 
-                        static_cast<gpio_num_t>(m_config.sda_pin), 
-                        static_cast<gpio_num_t>(m_config.scl_pin), 
-                        m_config.device_address, 
-                        m_config.i2c_freq_hz);
+    // Make sure m_config is valid
+    if (m_config.accel_range == 0 || m_config.gyro_range == 0) {
+        ESP_LOGE(TAG, "Invalid IMU config detected: accel_range=%d, gyro_range=%d",
+                 m_config.accel_range, m_config.gyro_range);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Set IMU state to INITIALIZED 
+    m_current_state.store(IMUState::INITIALIZED, std::memory_order_relaxed);
+
+    m_driver = std::make_unique<MPU6050Driver>(); 
+
+    ESP_LOGI(TAG, "Initializing MPU6050 hardware");
+    // Initialize the actual driver now
+    esp_err_t ret = m_driver->init(m_config.i2c_port, m_config.sda_pin, m_config.scl_pin, m_config.device_address, m_config.i2c_freq_hz);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG,"Failed init MPU6050 driver: %s. IMUService init failed.", esp_err_to_name(ret));
-        return ret; 
-    }
-    ESP_LOGI(TAG,"MPU6050 Driver Initialized.");
+        ESP_LOGE(TAG, "MPU6050 init failed: %s", esp_err_to_name(ret));
+        return ret;
+    }    
+    
+    // Create owned components
+    m_healthMonitor = std::make_unique<IMUHealthMonitor>(*m_driver, m_eventBus, m_behaviorConfig);
+    
+    // Create FIFOProcessor after health monitor
+    m_fifoProcessor = std::make_unique<FIFOProcessor>(
+        *m_driver,
+        m_estimator,
+        *m_healthMonitor,
+        m_eventBus
+    );
 
-    // 2. Calculate Scaling Factors (updates m_sample_period_s)
-    calculateScalingFactors();
+    m_fifoTask = std::make_unique<FIFOTask>(*m_fifoProcessor);
 
-    // 3. Configure Sensor Hardware
-    ret = configureSensorHardware(); 
+    m_healthMonitorTask = std::make_unique<HealthMonitorTask>(*m_healthMonitor);
+
+    m_calibration = std::make_unique<IMUCalibration>(*m_driver);
+
+    // Configure the hardware according to our config
+    ret = configureSensorHardware();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG,"Failed to configure MPU6050 hardware: %s. IMUService init failed.", esp_err_to_name(ret));
-        return ret; 
-    }
-    ESP_LOGI(TAG,"MPU6050 Hardware Configured.");
-
-    // 4. Initialize Calibration Service
-    ret = m_calibrationService.init();
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize Calibration Service");
-    // Set offsets in CalibrationService (it uses them for its calibration routine logic)
-    // These are also the initial offsets for the estimator.
-    m_calibrationService.setOffsets(m_config.gyro_offset_x, m_config.gyro_offset_y, m_config.gyro_offset_z);
-    ESP_LOGI(TAG,"Calibration Service Initialized and offsets applied.");
-
-    // 5. Initialize Orientation Estimator
-    // Pass initial offsets from config. These might be 0 if not calibrated yet, or loaded values.
-    m_estimator.init(m_config.comp_filter_alpha, m_sample_period_s,
-                     m_config.gyro_offset_x, m_config.gyro_offset_y, m_config.gyro_offset_z);
-    ESP_LOGI(TAG,"Orientation Estimator Initialized.");
-
-    // 6. Setup GPIO ISR
-    if (m_config.int_pin >= 0 && m_config.int_pin < GPIO_NUM_MAX) {
-        ESP_LOGI(TAG, "Configuring GPIO interrupt for pin %d...", m_config.int_pin);
-        gpio_config_t io_conf = {};
-        io_conf.pin_bit_mask = (1ULL << m_config.int_pin);
-        io_conf.mode = GPIO_MODE_INPUT;
-        io_conf.pull_up_en = GPIO_PULLUP_DISABLE; 
-        io_conf.pull_down_en = m_config.interrupt_active_high ? GPIO_PULLDOWN_ENABLE : GPIO_PULLDOWN_DISABLE;
-        io_conf.intr_type = m_config.interrupt_active_high ? GPIO_INTR_POSEDGE : GPIO_INTR_NEGEDGE;
-        ret = gpio_config(&io_conf);
-        ESP_RETURN_ON_ERROR(ret, TAG, "Failed config INT GPIO %d", m_config.int_pin);
-
-        ret = gpio_install_isr_service(ESP_INTR_FLAG_LOWMED); 
-        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-             ESP_LOGE(TAG, "Failed install ISR service: %s", esp_err_to_name(ret));
-             return ret;
-        } else if (ret == ESP_ERR_INVALID_STATE) {
-             ESP_LOGW(TAG,"ISR service already installed. Proceeding.");
-        }
-
-        gpio_isr_handler_remove(static_cast<gpio_num_t>(m_config.int_pin)); 
-
-        ret = gpio_isr_handler_add(static_cast<gpio_num_t>(m_config.int_pin), isrHandler, this);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed add ISR handler for pin %d: %s", m_config.int_pin, esp_err_to_name(ret));
-            return ret; 
-        }
-        m_isr_handler_installed = true; 
-        ESP_LOGI(TAG, "GPIO interrupt configured and handler added for INT pin %d.", m_config.int_pin);
-    } else {
-         ESP_LOGW(TAG, "GPIO Interrupt not configured (pin=%d is invalid or disabled).", m_config.int_pin);
+        ESP_LOGE(TAG, "MPU6050 configuration failed: %s", esp_err_to_name(ret));
+        return ret;
     }
 
-    m_isr_data_counter.store(0, std::memory_order_relaxed);
-    m_recovery_attempt_in_progress.store(false, std::memory_order_relaxed);
+    ESP_LOGI(TAG, "IMU Service initialized successfully");
 
-    ESP_LOGI(TAG, "IMUService Core Initialized successfully.");
-    transitionToState(IMUState::OPERATIONAL); 
+    // Create the tasks (but don't start them yet)
+
+    
+    if (!m_fifoTask || !m_healthMonitorTask) {
+        ESP_LOGE(TAG, "Failed to create IMU tasks");
+        return ESP_ERR_NO_MEM;
+    }
+
+    // IMU initially transitions to OPERATIONAL state after init
+    transitionToState(IMUState::OPERATIONAL);
+
     return ESP_OK;
-}
+} 
 
-void IMUService::subscribeToEvents(EventBus& bus) {
-    ESP_LOGI(TAG, "Subscribing IMUService to events...");
+bool IMUService::startTasks() {
+    ESP_LOGI(TAG, "Starting IMU tasks");
     
-    bus.subscribe(EventType::CONFIG_FULL_UPDATE, [this](const BaseEvent& event) {
-        this->handleConfigUpdate(event);
-    });
-    bus.subscribe(EventType::CONFIG_IMU_UPDATE, [this](const BaseEvent& event) {
-        this->handleIMUConfigUpdate(static_cast<const CONFIG_ImuConfigUpdate&>(event));
-    });
-    bus.subscribe(EventType::IMU_COMMUNICATION_ERROR, [this](const BaseEvent& event) {
-        this->handleImuCommunicationError(static_cast<const IMU_CommunicationError&>(event));
-    });
-    bus.subscribe(EventType::IMU_CALIBRATION_STARTED, [this](const BaseEvent& event) {
-        this->handleCalibrationStarted(static_cast<const IMU_CalibrationStarted&>(event));
-    });
-    bus.subscribe(EventType::IMU_CALIBRATION_COMPLETED, [this](const BaseEvent& event) {
-        this->handleCalibrationComplete(static_cast<const IMU_CalibrationCompleted&>(event));
-    });
-    bus.subscribe(EventType::IMU_STATE_TRANSITION_REQUEST, [this](const BaseEvent& event) {
-        const auto& req = static_cast<const IMU_StateTransitionRequest&>(event);
-        ESP_LOGI(TAG, "Received state transition request to %s", stateToString(req.requestedState));
-        this->transitionToState(req.requestedState);
-    });
-    bus.subscribe(EventType::SYSTEM_STATE_CHANGED, [this](const BaseEvent& event) {
-        this->handleSystemStateChanged(event);
-    });
-    bus.subscribe(EventType::IMU_ATTEMPT_RECOVERY, [this](const BaseEvent& event) {
-        this->handleAttemptImuRecovery(static_cast<const IMU_AttemptRecovery&>(event));
-    });
-
-    ESP_LOGI(TAG, "IMUService subscribed to: CONFIG_FULL_UPDATE, CONFIG_IMU_UPDATE, IMU_COMM_ERROR, CALIB_STARTED, CALIB_COMPLETE, IMU_STATE_TRANS_REQ, SYS_STATE_CHANGED, IMU_ATTEMPT_RECOVERY.");
-}
-
-// --- Core Data Pipeline ---
-void IMUService::processDataPipeline() {
-    if (m_current_state.load(std::memory_order_relaxed) != IMUState::OPERATIONAL) {
-        return;
-    }
-
-    uint8_t isr_hint = m_isr_data_counter.exchange(0, std::memory_order_relaxed); 
-    if (isr_hint > 0) {
-         ESP_LOGV(TAG,"ISR hint received (%d data-ready events), checking FIFO count.", isr_hint);
-    }
-
-    uint16_t fifo_count = 0;
-    esp_err_t ret = m_driver.readFifoCount(fifo_count);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to read FIFO count: %s. Publishing error.", esp_err_to_name(ret));
-        m_eventBus.publish(IMU_CommunicationError(ret)); 
-        return; 
-    }
-
-    bool overflow_flag = false;
-    ret = m_driver.isFIFOOverflow(overflow_flag); 
-    if (ret != ESP_OK) {
-         ESP_LOGW(TAG, "Failed to check FIFO overflow status from interrupt register: %s", esp_err_to_name(ret));
-    }
-    if (overflow_flag || fifo_count >= MAX_FIFO_BUFFER_SIZE) { 
-         ESP_LOGW(TAG, "FIFO overflow detected (Flag: %d, Count: %u). Resetting FIFO.", overflow_flag, fifo_count);
-         resetAndReEnableFIFO(); 
-         return; 
-    }
-
-    if (fifo_count < FIFO_PACKET_SIZE) {
-        return; 
-    }
-
-    uint16_t num_samples_available = fifo_count / FIFO_PACKET_SIZE;
-    uint16_t num_samples_to_read = std::min(num_samples_available, MAX_SAMPLES_PER_PIPELINE_CALL);
-    uint16_t bytes_to_read = num_samples_to_read * FIFO_PACKET_SIZE;
-
-    if (bytes_to_read > MAX_FIFO_BUFFER_SIZE) { 
-        ESP_LOGW(TAG, "Calculated bytes_to_read (%u) > MAX_FIFO_BUFFER_SIZE (%u). Clamping.",
-                 bytes_to_read, MAX_FIFO_BUFFER_SIZE);
-        bytes_to_read = MAX_FIFO_BUFFER_SIZE;
-        num_samples_to_read = bytes_to_read / FIFO_PACKET_SIZE;
-    }
-
-    ESP_LOGV(TAG, "FIFO: %u bytes (%u avail). Reading: %u bytes (%u samples).",
-             fifo_count, num_samples_available, bytes_to_read, num_samples_to_read);
-
-    if (bytes_to_read == 0) {
-        return;
-    }
-    ret = m_driver.readFifoBuffer(m_fifo_buffer, bytes_to_read);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to read FIFO buffer: %s. Publishing error.", esp_err_to_name(ret));
-        m_eventBus.publish(IMU_CommunicationError(ret));
-        return; 
+    // Start FIFO task with high priority
+    if (!m_fifoTask->start(configMAX_PRIORITIES - 2, 0, 6144)) {
+        ESP_LOGE(TAG, "Failed to start FIFO task!");
+        return false;
     }
     
-    if (!validateFIFOData(m_fifo_buffer, bytes_to_read)) {
-        ESP_LOGW(TAG, "FIFO data validation failed. Resetting and re-enabling FIFO.");
-        resetAndReEnableFIFO();
-        return; 
+    // Start Health Monitor task with medium priority
+    if (!m_healthMonitorTask->start(5, 1, 4096)) {
+        ESP_LOGE(TAG, "Failed to start Health Monitor task!");
+        // Stop FIFO task if it was started
+        m_fifoTask->stop();
+        return false;
     }
+    
+    ESP_LOGI(TAG, "All IMU tasks started successfully");
+    return true;
+}
 
-    int processed_sample_count = 0;
-    for (uint16_t i = 0; i < num_samples_to_read; ++i) {
-        int offset = i * FIFO_PACKET_SIZE;
-        if (offset + FIFO_PACKET_SIZE > bytes_to_read) {
-            ESP_LOGE(TAG,"Buffer read boundary error (offset=%d, i=%u, bytes_read=%u). Stopping processing for this batch.", offset, i, bytes_to_read);
-            break; 
-        }
+void IMUService::stopTasks() {
+    ESP_LOGI(TAG, "Stopping IMU tasks");
+    if (m_fifoTask) m_fifoTask->stop();
+    if (m_healthMonitorTask) m_healthMonitorTask->stop();
+}
 
-        int16_t ax_raw = (m_fifo_buffer[offset + 0] << 8) | m_fifo_buffer[offset + 1];
-        int16_t ay_raw = (m_fifo_buffer[offset + 2] << 8) | m_fifo_buffer[offset + 3];
-        int16_t az_raw = (m_fifo_buffer[offset + 4] << 8) | m_fifo_buffer[offset + 5];
-        int16_t gx_raw = (m_fifo_buffer[offset + 6] << 8) | m_fifo_buffer[offset + 7];
-        int16_t gy_raw = (m_fifo_buffer[offset + 8] << 8) | m_fifo_buffer[offset + 9];
-        int16_t gz_raw = (m_fifo_buffer[offset + 10] << 8) | m_fifo_buffer[offset + 11];
-
-        float ax_g = static_cast<float>(ax_raw) / m_accel_lsb_per_g;
-        float ay_g = static_cast<float>(ay_raw) / m_accel_lsb_per_g;
-        float az_g = static_cast<float>(az_raw) / m_accel_lsb_per_g;
-        float gx_dps = static_cast<float>(gx_raw) / m_gyro_lsb_per_dps; // Scaled, but not offset-corrected here
-        float gy_dps = static_cast<float>(gy_raw) / m_gyro_lsb_per_dps; // Scaled, but not offset-corrected here
-        float gz_dps = static_cast<float>(gz_raw) / m_gyro_lsb_per_dps; // Scaled, but not offset-corrected here
-
-        // Pass scaled (but not offset-corrected) gyro data to estimator. Estimator applies its configured offsets.
-        m_estimator.processSample(ax_g, ay_g, az_g, gx_dps, gy_dps, gz_dps);
-        processed_sample_count++;
-    }
-
-    if (processed_sample_count > 0) {
-        ESP_LOGV(TAG, "Processed %d samples from FIFO.", processed_sample_count);
-        m_healthMonitor.pet(); 
-    } else if (bytes_to_read > 0) {
-        ESP_LOGW(TAG, "Read %u bytes from FIFO but processed 0 samples. This might indicate an issue.", bytes_to_read);
+// EventHandler implementation
+void IMUService::handleEvent(const BaseEvent& event) {
+    // Central event handler that dispatches to specific handlers based on event type
+    switch (event.type) {
+        case EventType::CONFIG_FULL_UPDATE:
+            handleConfigUpdate(static_cast<const CONFIG_FullConfigUpdate&>(event));
+            break;
+            
+        case EventType::CONFIG_IMU_UPDATE:
+            handleIMUConfigUpdate(static_cast<const CONFIG_ImuConfigUpdate&>(event));
+            break;
+            
+        case EventType::IMU_COMMUNICATION_ERROR:
+            handleImuCommunicationError(static_cast<const IMU_CommunicationError&>(event));
+            break;
+            
+        case EventType::IMU_CALIBRATION_REQUEST:
+            handleCalibrationRequest(static_cast<const IMU_CalibrationRequest&>(event));
+            break;
+            
+        case EventType::SYSTEM_STATE_CHANGED:
+            handleSystemStateChanged(static_cast<const SYSTEM_StateChanged&>(event));
+            break;
+            
+        default:
+            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
+                     getHandlerName().c_str(), static_cast<int>(event.type));
+            break;
     }
 }
 
-// --- Interrupt Handler ---
-void IRAM_ATTR IMUService::isrHandler(void *arg) {
-    IMUService *s = static_cast<IMUService *>(arg);
-    if (s) {
-        s->m_isr_data_counter.fetch_add(1, std::memory_order_relaxed);
-    }
-}
-
-// --- Recovery Logic ---
-void IMUService::handleSystemStateChanged(const BaseEvent& event) {
-    if (event.type != EventType::SYSTEM_STATE_CHANGED) return;
+void IMUService::handleSystemStateChanged(const SYSTEM_StateChanged& event) {
+    SystemState oldSystemState = m_system_state.exchange(event.newState);
     
-    const auto& stateEvent = static_cast<const SYSTEM_StateChanged&>(event);
-    SystemState oldSystemState = m_system_state.exchange(stateEvent.newState);
-    
-    ESP_LOGI(TAG, "System state changed from: %d to: %d", static_cast<int>(oldSystemState), static_cast<int>(stateEvent.newState));
+    ESP_LOGI(TAG, "System state changed from: %d to: %d", static_cast<int>(oldSystemState), static_cast<int>(event.newState));
     
     if (m_current_state.load() == IMUState::RECOVERY && 
-        (stateEvent.newState == SystemState::BALANCING || stateEvent.newState == SystemState::FALLEN)) {
+        (event.newState == SystemState::BALANCING || event.newState == SystemState::FALLEN)) {
         
         ESP_LOGW(TAG, "System state requires operational IMU (%d) while IMU is in RECOVERY.", 
-                 static_cast<int>(stateEvent.newState));
+                 static_cast<int>(event.newState));
         
         if (m_recovery_attempt_in_progress) {
             uint32_t current_time_ms = esp_timer_get_time() / 1000;
@@ -524,12 +423,26 @@ void IMUService::handleSystemStateChanged(const BaseEvent& event) {
 void IMUService::handleImuCommunicationError(const IMU_CommunicationError& event) {
     ESP_LOGE(TAG, "IMU Communication error detected (Code: %s). Transitioning to RECOVERY.", esp_err_to_name(event.errorCode));
     
+    // Store current system state before recovery
+    SystemState currentSystemState = m_system_state.load();
+    
+    // Transition to RECOVERY state if not already there
     if (m_current_state.load() != IMUState::RECOVERY) {
         transitionToState(IMUState::RECOVERY);
     }
+    
+    // Initiate recovery with minimal interruption if we're balancing
+    bool minimal_interruption = (currentSystemState == SystemState::BALANCING);
+    
+    // Create recovery config
+    IMURecoveryConfig config;
+    config.minimal_interruption = minimal_interruption;
+    config.max_attempts = 3; // Default value, could be configurable
+    config.retry_delay_ms = 250; // Default value, could be configurable
+
+    startRecoveryProcess(config);
 }
 
-// --- State Machine Helper Methods ---
 const char* IMUService::stateToString(IMUState state) {
     switch(state) {
         case IMUState::INITIALIZED: return "INITIALIZED";
@@ -606,24 +519,19 @@ void IMUService::transitionToState(IMUState newState) {
         }
         if (revert_enter_ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to revert to state %s: %s. IMU state might be inconsistent!", stateToString(oldState), esp_err_to_name(revert_enter_ret));
-            m_current_state.store(IMUState::RECOVERY, std::memory_order_acq_rel); 
-            m_eventBus.publish(IMU_StateChanged(oldState, IMUState::RECOVERY)); 
+            newState = IMUState::RECOVERY;
         }
-        return; 
     }
     
-    m_current_state.store(newState, std::memory_order_acq_rel);
-    
-    m_healthMonitor.notifyIMUStateChange(newState);
-    m_calibrationService.notifyIMUStateChange(newState);
-    m_eventBus.publish(IMU_StateChanged(oldState, newState));
+    m_current_state.store(newState, std::memory_order_release);
+    m_healthMonitor->notifyIMUStateChange(newState);
     
     ESP_LOGI(TAG, "Successfully transitioned IMU to state %s", stateToString(newState));
 }
 
 esp_err_t IMUService::enterInitializedState() {
     ESP_LOGI(TAG, "Entering INITIALIZED state.");
-    return disableFIFO();
+    return m_fifoProcessor->disableFIFO();
 }
 
 esp_err_t IMUService::exitInitializedState() {
@@ -632,38 +540,83 @@ esp_err_t IMUService::exitInitializedState() {
 }
 
 esp_err_t IMUService::enterOperationalState() {
-    ESP_LOGI(TAG, "Entering OPERATIONAL state.");
-    esp_err_t config_ret = configureSensorHardware();
-    if (config_ret != ESP_OK) {
-        ESP_LOGE(TAG, "Hardware reconfiguration failed on entering OPERATIONAL state: %s", esp_err_to_name(config_ret));
-        return config_ret; 
+    ESP_LOGI(TAG, "Entering OPERATIONAL state...");
+    esp_err_t ret;
+
+    // Set up ISR for in-task data processing with automatic ISR registration
+    if (m_config.int_pin >= 0 && m_config.int_pin < GPIO_NUM_MAX) {
+        // Use the overloaded method that also registers the ISR
+        // Assume active high by default - most common for MPU6050
+        bool active_high = true; 
+        ret = m_fifoProcessor->enableFIFO(m_config.int_pin, active_high);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to enable FIFO and register ISR on enter OPERATIONAL: %s", esp_err_to_name(ret));
+            return ret;
+        }
+        m_isr_handler_installed = true;
+        ESP_LOGI(TAG, "FIFO enabled and ISR registered for pin %d", m_config.int_pin);
+    } else {
+        // Basic FIFO setup without ISR if pin configuration is invalid
+        ret = m_fifoProcessor->resetAndReEnableFIFO();
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to reset and enable FIFO on enter OPERATIONAL: %s", esp_err_to_name(ret));
+            return ret;
+        }
+        ESP_LOGW(TAG, "INT pin configuration invalid: %d. Using polling mode.", m_config.int_pin);
     }
-    vTaskDelay(pdMS_TO_TICKS(10)); 
     
-    ESP_LOGI(TAG, "Resetting and enabling FIFO for OPERATIONAL state.");
-    return resetAndReEnableFIFO();
+    return ESP_OK;
 }
 
-
 esp_err_t IMUService::exitOperationalState() {
-    ESP_LOGI(TAG, "Exiting OPERATIONAL state. Disabling FIFO.");
-    return disableFIFO(); 
+    ESP_LOGI(TAG, "Exiting OPERATIONAL state");
+    
+    // Use the overloaded method that also unregisters the ISR if necessary
+    esp_err_t ret = m_fifoProcessor->disableFIFO(m_isr_handler_installed);
+    
+    // Mark the ISR as uninstalled if it was installed
+    if (m_isr_handler_installed) {
+        m_isr_handler_installed = false;
+        ESP_LOGI(TAG, "ISR handler marked as uninstalled during exit from OPERATIONAL state");
+    }
+    
+    return ret;
 }
 
 esp_err_t IMUService::enterCalibrationState() {
-    ESP_LOGI(TAG, "Entering CALIBRATION state. Disabling FIFO.");
-    return disableFIFO();
+    ESP_LOGI(TAG, "Entering CALIBRATION state");
+    
+    // Disable FIFO with ISR unregistration if needed
+    esp_err_t ret = m_fifoProcessor->disableFIFO(m_isr_handler_installed);
+    
+    // Update ISR state
+    if (m_isr_handler_installed) {
+        m_isr_handler_installed = false;
+        ESP_LOGI(TAG, "ISR handler marked as uninstalled during enter to CALIBRATION state");
+    }
+    
+    return ret;
 }
 
 esp_err_t IMUService::exitCalibrationState() {
     ESP_LOGD(TAG, "Exiting CALIBRATION state.");
+    m_is_calibrating_flag.store(false, std::memory_order_release);
     return ESP_OK;
 }
 
 esp_err_t IMUService::enterRecoveryState() {
-    ESP_LOGI(TAG, "Entering RECOVERY state. Disabling FIFO.");
-    m_recovery_attempt_in_progress.store(false, std::memory_order_relaxed); 
-    return disableFIFO(); 
+    ESP_LOGI(TAG, "Entering RECOVERY state");
+    
+    // Disable FIFO with ISR unregistration if needed
+    esp_err_t ret = m_fifoProcessor->disableFIFO(m_isr_handler_installed);
+    
+    // Update ISR state
+    if (m_isr_handler_installed) {
+        m_isr_handler_installed = false;
+        ESP_LOGI(TAG, "ISR handler marked as uninstalled during enter to RECOVERY state");
+    }
+    
+    return ret;
 }
 
 esp_err_t IMUService::exitRecoveryState() {
@@ -672,121 +625,86 @@ esp_err_t IMUService::exitRecoveryState() {
     return ESP_OK;
 }
 
-
-esp_err_t IMUService::resetFIFO() {
-    ESP_LOGD(TAG, "Resetting FIFO (USER_CTRL.FIFO_RESET=1)");
-    esp_err_t ret = m_driver.configureFIFOReg(MPU6050UserControl::FIFO_RESET, (MPU6050FIFOEnable)0);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set FIFO_RESET bit: %s", esp_err_to_name(ret));
-    }
-    vTaskDelay(pdMS_TO_TICKS(2)); 
-    return ret;
-}
-
-esp_err_t IMUService::enableFIFO() {
-    ESP_LOGD(TAG, "Enabling FIFO (USER_CTRL.FIFO_ENABLE=1, FIFO_EN=ACCEL|GYRO)");
-    esp_err_t ret = m_driver.configureFIFOReg(MPU6050UserControl::FIFO_ENABLE, MPU6050FIFOEnable::GYRO_ACCEL);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to enable FIFO: %s", esp_err_to_name(ret));
-    }
-    return ret;
-}
-
-esp_err_t IMUService::disableFIFO() {
-    ESP_LOGD(TAG, "Disabling FIFO (USER_CTRL.FIFO_ENABLE=0, FIFO_EN=0) and resetting.");
-    esp_err_t ret;
-    ret = m_driver.writeRegister(MPU6050Register::USER_CTRL, 0); 
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to clear USER_CTRL for FIFO disable: %s", esp_err_to_name(ret));
-    }
-    ret = m_driver.writeRegister(MPU6050Register::FIFO_EN, 0);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to write 0 to FIFO_EN register: %s", esp_err_to_name(ret));
-    }
-    esp_err_t reset_ret = resetFIFO();
-    return (ret == ESP_OK) ? reset_ret : ret; 
-}
-
-esp_err_t IMUService::resetAndReEnableFIFO() {
-    ESP_LOGI(TAG, "Performing FIFO Reset and Re-Enable sequence.");
-    esp_err_t ret = resetFIFO();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to reset FIFO during re-enable sequence: %s. Publishing error.", esp_err_to_name(ret));
-        m_eventBus.publish(IMU_CommunicationError(ret));
-        return ret;
-    }
-    vTaskDelay(pdMS_TO_TICKS(5)); 
+void IMUService::handleCalibrationRequest(const IMU_CalibrationRequest& event) {
+    ESP_LOGI(TAG, "Received IMU_CalibrationRequest event");
     
-    ret = enableFIFO();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to re-enable FIFO after reset: %s. Publishing error.", esp_err_to_name(ret));
-        m_eventBus.publish(IMU_CommunicationError(ret));
-        return ret;
-    }
-    ESP_LOGI(TAG, "FIFO reset and re-enabled successfully.");
-    return ESP_OK;
-}
-
-
-bool IMUService::validateFIFOData(const uint8_t* data, size_t length) {
-    if (data == nullptr) {
-        ESP_LOGE(TAG, "FIFO data validation failed: null data pointer.");
-        return false;
-    }
-    if (length == 0 || length % FIFO_PACKET_SIZE != 0) {
-        ESP_LOGE(TAG, "FIFO data validation failed: invalid length %zu (not multiple of %zu).", 
-                 length, FIFO_PACKET_SIZE);
-        return false;
+    // Reject calibration if we're in recovery state
+    if (m_current_state.load() == IMUState::RECOVERY) {
+        ESP_LOGW(TAG, "Cannot calibrate while in RECOVERY state. Rejecting request.");
+        m_eventBus.publish(IMU_CalibrationRequestRejected(IMU_CalibrationRequestRejected::Reason::RECOVERY_IN_PROGRESS, true)); 
+        return;
     }
     
-    const int numSamples = length / FIFO_PACKET_SIZE;
-    for (int i = 0; i < numSamples; i++) {
-        const uint8_t* sample = data + (i * FIFO_PACKET_SIZE);
-        int16_t accelX = (sample[0] << 8) | sample[1];
-        if ((accelX == 0 || accelX == -1) &&
-            (((sample[2] << 8) | sample[3]) == accelX) && 
-            (((sample[4] << 8) | sample[5]) == accelX)    
-           ) {
-            int16_t gyroX = (sample[6] << 8) | sample[7];
-            if ((gyroX == 0 || gyroX == -1) &&
-                (((sample[8] << 8) | sample[9]) == gyroX) && 
-                (((sample[10] << 8) | sample[11]) == gyroX)  
-               ) {
-                ESP_LOGW(TAG, "FIFO data validation: detected suspicious all-same pattern (0x%04X or 0x0000) in sample %d.", 
-                        static_cast<uint16_t>(accelX), i);
-                return false; 
-            }
-        }
+    // Reject calibration if we're already calibrating
+    if (m_is_calibrating_flag.load()) {
+        ESP_LOGW(TAG, "Calibration already in progress. Rejecting request.");
+        m_eventBus.publish(IMU_CalibrationRequestRejected(IMU_CalibrationRequestRejected::Reason::OTHER, true));   
+        return;
     }
-    return true; 
-}
 
-// Calibration event handlers
-void IMUService::handleCalibrationStarted(const IMU_CalibrationStarted& event) {
-    ESP_LOGI(TAG, "Handling IMU_CalibrationStarted event.");
     transitionToState(IMUState::CALIBRATION);
-}
-
-void IMUService::handleCalibrationComplete(const IMU_CalibrationCompleted& event) {
-    ESP_LOGI(TAG, "Handling IMU_CalibrationComplete event (Status: %s).", esp_err_to_name(event.status));
-    if (event.status == ESP_OK) {
-        // Offsets are saved to config by ConfigurationService listening to IMU_GyroOffsetsUpdated.
-        // IMUService will get the new offsets via CONFIG_ImuConfigUpdate -> applyConfig -> estimator.updateGyroOffsets.
-        ESP_LOGI(TAG, "Calibration successful. Transitioning to OPERATIONAL.");
-        transitionToState(IMUState::OPERATIONAL);
-    } else {
-        ESP_LOGE(TAG, "Calibration failed. Transitioning to RECOVERY to attempt sensor stabilization.");
-        transitionToState(IMUState::RECOVERY);
-    }
-}
-
-void IMUService::handleAttemptImuRecovery(const IMU_AttemptRecovery& event) {
-    ESP_LOGI(TAG, "Handling IMU_AttemptRecovery event. Config: MinimalInterrupt=%s, MaxAttempts=%d, Delay=%dms",
-             event.config.minimal_interruption ? "true" : "false", event.config.max_attempts, event.config.retry_delay_ms);
     
+    // Perform calibration
+    esp_err_t result = performCalibration();
+    
+    // Return to operational state
+    transitionToState(IMUState::OPERATIONAL);
+    
+    // Publish completion event
+    m_eventBus.publish(IMU_CalibrationCompleted(result));
+}
+
+esp_err_t IMUService::performCalibration() {
+    if (m_current_state.load() != IMUState::CALIBRATION) {
+        ESP_LOGE(TAG, "Cannot perform calibration while not in CALIBRATION state");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    m_is_calibrating_flag.store(true, std::memory_order_release);
+    ESP_LOGI(TAG, "Starting gyroscope calibration with %d samples", m_config.calibration_samples);
+    
+    // Rate-limit the calibration by adding a small delay between samples
+    auto rate_limited_progress_callback = [this](int progress, int total) {
+        ESP_LOGD(TAG, "Calibration progress: %d/%d", progress, total);
+        // Add a small delay between samples for all cases
+        // This also covers delay needed after errors since IMUCalibration
+        // reports progress for successful samples only
+        vTaskDelay(pdMS_TO_TICKS(5));
+    };
+    
+    // Perform calibration using our encapsulated calibration logic
+    esp_err_t result = m_calibration->calibrate(m_config, rate_limited_progress_callback);
+    
+    if (result == ESP_OK) {
+        ESP_LOGI(TAG, "Calibration completed successfully");
+        
+        // Update offsets in config
+        m_config.gyro_offset_x = m_calibration->getGyroOffsetXDPS();
+        m_config.gyro_offset_y = m_calibration->getGyroOffsetYDPS();
+        m_config.gyro_offset_z = m_calibration->getGyroOffsetZDPS();
+        
+        // Publish the new offsets
+        m_eventBus.publish(IMU_GyroOffsetsUpdated(
+            m_calibration->getGyroOffsetXDPS(),
+            m_calibration->getGyroOffsetYDPS(),
+            m_calibration->getGyroOffsetZDPS()
+        ));
+    } else {
+        ESP_LOGE(TAG, "Calibration failed: %s", esp_err_to_name(result));
+    }
+    
+    m_is_calibrating_flag.store(false, std::memory_order_release);
+    return result;
+}
+
+void IMUService::startRecoveryProcess(const IMURecoveryConfig& config) {
+    ESP_LOGI(TAG, "Starting IMU recovery process. Config: MinimalInterrupt=%s, MaxAttempts=%d, Delay=%dms",
+            config.minimal_interruption ? "true" : "false", config.max_attempts, config.retry_delay_ms);
+
+    // Ensure we're in RECOVERY state before attempting recovery
     if (m_current_state.load() != IMUState::RECOVERY) {
-        ESP_LOGW(TAG, "IMU_AttemptRecovery received while not in RECOVERY state (current: %s). Transitioning to RECOVERY first.",
-                 stateToString(m_current_state.load()));
+        ESP_LOGW(TAG, "Recovery requested while not in RECOVERY state (current: %s). Transitioning to RECOVERY first.",
+                stateToString(m_current_state.load()));
         transitionToState(IMUState::RECOVERY);
         if (m_current_state.load() != IMUState::RECOVERY) {
             ESP_LOGE(TAG, "Failed to transition to RECOVERY state. Cannot attempt recovery.");
@@ -795,14 +713,18 @@ void IMUService::handleAttemptImuRecovery(const IMU_AttemptRecovery& event) {
         }
         vTaskDelay(pdMS_TO_TICKS(10)); 
     }
-    
+
+    // Set recovery in progress flags and timestamp
     m_recovery_attempt_in_progress = true;
     m_recovery_start_time_ms = esp_timer_get_time() / 1000;
-    
-    esp_err_t result = attemptRecovery(event.config); 
-    
+
+    // Execute the actual recovery procedure
+    esp_err_t result = attemptRecovery(config); 
+
+    // Clear in-progress flag
     m_recovery_attempt_in_progress = false; 
-    
+
+    // Handle recovery result
     if (result == ESP_OK) {
         ESP_LOGI(TAG, "IMU recovery process succeeded. Transitioning to OPERATIONAL state.");
         m_eventBus.publish(IMU_RecoverySucceeded());
@@ -810,7 +732,7 @@ void IMUService::handleAttemptImuRecovery(const IMU_AttemptRecovery& event) {
     } else {
         ESP_LOGE(TAG, "IMU recovery process failed: %s. IMU remains in RECOVERY state.", esp_err_to_name(result));
         m_eventBus.publish(IMU_RecoveryFailed(result));
-    }
+    }    
 }
 
 esp_err_t IMUService::attemptRecovery(const IMURecoveryConfig& config) {
@@ -827,7 +749,7 @@ esp_err_t IMUService::attemptRecovery(const IMURecoveryConfig& config) {
         ESP_LOGI(TAG, "IMU Recovery Attempt %d/%d...", attempt, MAX_RETRIES);
         
         ESP_LOGI(TAG,"Recovery: Resetting sensor...");
-        status = m_driver.resetSensor(); 
+        status = m_driver->resetSensor(); 
         if (status != ESP_OK) {
             ESP_LOGE(TAG, "Recovery Failed (Attempt %d): Sensor reset error (%s)", attempt, esp_err_to_name(status));
             if (attempt < MAX_RETRIES) vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
@@ -846,7 +768,7 @@ esp_err_t IMUService::attemptRecovery(const IMURecoveryConfig& config) {
 
         ESP_LOGI(TAG,"Recovery: Verifying communication (WHO_AM_I)...");
         uint8_t who_am_i_val = 0;
-        status = m_driver.readRegisters(MPU6050Register::WHO_AM_I, &who_am_i_val, 1);
+        status = m_driver->getDeviceID(who_am_i_val);
         if (status != ESP_OK) {
             ESP_LOGE(TAG, "Recovery Failed (Attempt %d): WHO_AM_I read error (%s)", attempt, esp_err_to_name(status));
         } else if (who_am_i_val != IMUHealthMonitor::MPU6050_WHO_AM_I_VALUE) {
@@ -864,9 +786,9 @@ esp_err_t IMUService::attemptRecovery(const IMURecoveryConfig& config) {
         // Re-apply software gyro offsets to the estimator using current m_config
         // This ensures the estimator has the correct offsets after hardware reconfig.
         ESP_LOGI(TAG, "Recovery: Re-applying gyro offsets to OrientationEstimator from m_config.");
-        m_estimator.updateGyroOffsets(m_config.gyro_offset_x, m_config.gyro_offset_y, m_config.gyro_offset_z);
+        m_estimator->updateGyroOffsets(m_config.gyro_offset_x, m_config.gyro_offset_y, m_config.gyro_offset_z);
         // Also ensure CalibrationService itself has the correct offsets loaded for its own logic
-        m_calibrationService.setOffsets(m_config.gyro_offset_x, m_config.gyro_offset_y, m_config.gyro_offset_z);
+        m_calibration->setOffsets(m_config.gyro_offset_x, m_config.gyro_offset_y, m_config.gyro_offset_z);
 
         if (MINIMAL_INTERRUPTION) {
             ESP_LOGI(TAG, "Recovery (Minimal Interruption): Publishing MOTION_UsingFallbackValues(true).");
@@ -874,7 +796,7 @@ esp_err_t IMUService::attemptRecovery(const IMURecoveryConfig& config) {
         }
 
         ESP_LOGI(TAG, "IMU Recovery Attempt %d Succeeded!", attempt);
-        m_healthMonitor.pet(); 
+        m_healthMonitor->pet(); 
         return ESP_OK; 
     }
 

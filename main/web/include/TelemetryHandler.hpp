@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "TelemetryDataPoint.hpp" // Include the struct definition
 #include "ConfigData.hpp" // Include full definition
+#include "EventHandler.hpp"
 #include <deque>
 #include <mutex>
 #include <vector>
@@ -14,19 +15,20 @@ class BaseEvent;
 class CONFIG_FullConfigUpdate;
 class EventBus; // Forward declare for subscribeToEvents
 
-class TelemetryHandler {
-public: // <-- CHANGE: Move methods to public
+class TelemetryHandler : public EventHandler {
+public: 
     // Constructor takes initial WebServerConfig
     TelemetryHandler(const WebServerConfig& initialWebConfig);
 
     esp_err_t handleRequest(httpd_req_t *req);
     void addTelemetrySnapshot(const TelemetryDataPoint& data);
 
-    // Method to subscribe to events
-    void subscribeToEvents(EventBus& bus);
+    // EventHandler interface implementation
+    void handleEvent(const BaseEvent& event) override;
+    std::string getHandlerName() const override { return TAG; }
 
     // Handler for config updates (now public)
-    void handleConfigUpdate(const BaseEvent& event);
+    void handleConfigUpdate(const CONFIG_FullConfigUpdate& event);
 
 private:
     static constexpr const char* TAG = "TelemetryHandler";

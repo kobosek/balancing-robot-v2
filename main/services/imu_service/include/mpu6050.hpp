@@ -87,7 +87,7 @@ public:
     esp_err_t init(i2c_port_t i2c_port, gpio_num_t sda_io, gpio_num_t scl_io,
                    uint16_t i2c_addr = 0x68, uint32_t i2c_freq = 400000);
 
-    // --- Configuration Methods (Write to Registers) ---
+    // --- Configuration Methods ---
     esp_err_t setDLPFConfigReg(MPU6050DLPFConfig config);
     esp_err_t setSampleRateDivReg(MPU6050SampleRateDiv rate_div);
     esp_err_t setAccelRangeReg(MPU6050AccelConfig range);
@@ -96,26 +96,52 @@ public:
     esp_err_t configureFIFOReg(MPU6050UserControl userCtrlBits, MPU6050FIFOEnable fifoEnableBits);
     esp_err_t setPowerManagementReg(MPU6050PowerManagement powerBits);
     esp_err_t resetSensor(); // Specific method for reset sequence
+    
+    // --- Combined Configuration Method ---
+    esp_err_t configureForDataAcquisition(
+        MPU6050DLPFConfig dlpfConfig,
+        MPU6050SampleRateDiv sampleRate,
+        MPU6050AccelConfig accelRange,
+        MPU6050GyroConfig gyroRange
+    );
 
     // --- Raw Data Reading Methods ---
     esp_err_t readRawAccelXYZ(int16_t& ax, int16_t& ay, int16_t& az) const;
     esp_err_t readRawGyroXYZ(int16_t& gx, int16_t& gy, int16_t& gz) const;
 
-    // --- FIFO and Status Methods ---
+    // --- FIFO Management Methods ---
+    esp_err_t enableFIFO(MPU6050FIFOEnable fifoEnableBits);
+    esp_err_t disableFIFO();
+    esp_err_t resetFIFO();
+    esp_err_t resetSignalPath();
+    esp_err_t clearAllUserControlBits();
+    esp_err_t performFullFIFOReset();
     esp_err_t readFifoCount(uint16_t& count) const;
     esp_err_t readFifoBuffer(uint8_t* buffer, size_t len) const;
-    esp_err_t readInterruptStatus(uint8_t& status) const;
-    esp_err_t isFIFOOverflow(bool& isOverflow) const; // Returns bool via parameter
+
+    // --- User Control Register Operations ---
+    esp_err_t setUserControlBits(MPU6050UserControl bits);
+    esp_err_t clearUserControlBits(MPU6050UserControl bits);
+
+    // --- Interrupt Management ---
+    esp_err_t getInterruptStatus(uint8_t& status) const;
+    esp_err_t isDataReady(bool& isDataReady) const;
+    esp_err_t isFIFOOverflow(bool& isOverflow) const;
+
+    // --- Sensor Validation Methods ---
+    esp_err_t getDeviceID(uint8_t& id);
+    esp_err_t validateSensorID(uint8_t& id_value);
 
     // --- Calibration Methods ---
     esp_err_t setGyroOffsets(float x_offset_dps, float y_offset_dps, float z_offset_dps);
 
-    // --- Low-level I2C Communication (Public for flexibility/other services) ---
-    esp_err_t readRegisters(MPU6050Register reg, uint8_t* data, size_t len) const;
-    esp_err_t writeRegister(MPU6050Register reg, uint8_t data);
-
 private:
     static constexpr const char* TAG = "MPU6050Driver";
+
+    // --- Low-level I2C Communication (moved to private) ---
+    esp_err_t readRegisters(MPU6050Register reg, uint8_t* data, size_t len) const;
+    esp_err_t writeRegister(MPU6050Register reg, uint8_t data);
+    esp_err_t writeRegisterMasked(MPU6050Register reg, uint8_t value, uint8_t mask);
 
     i2c_master_bus_handle_t _bus_handle;
     i2c_master_dev_handle_t _dev_handle;

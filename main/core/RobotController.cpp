@@ -22,7 +22,7 @@
 #include <cmath>
 
 RobotController::RobotController(
-    OrientationEstimator& estimator,
+    std::shared_ptr<OrientationEstimator> estimator,
     EncoderService& encoderService,
     MotorService& motorService,
     BalancingAlgorithm& algorithm,
@@ -55,25 +55,29 @@ esp_err_t RobotController::init(EventBus& bus) {
     return ESP_OK;
 }
 
-// <<< ADDED: Event subscription logic >>>
-void RobotController::subscribeToEvents(EventBus& bus) {
-    bus.subscribe(EventType::MOTION_TARGET_SET, [this](const BaseEvent& ev) {
-        this->handleTargetMovementCommand(ev);
-    });
-    ESP_LOGI(TAG, "Subscribed to TARGET_MOVEMENT_CMD_SET events.");
+// EventHandler implementation
+void RobotController::handleEvent(const BaseEvent& event) {
+    // Central event handler that dispatches to specific handlers based on event type
+    switch (event.type) {
+        case EventType::MOTION_TARGET_SET:
+            handleTargetMovementCommand(static_cast<const MOTION_TargetMovement&>(event));
+            break;
+            
+        default:
+            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
+                     getHandlerName().c_str(), static_cast<int>(event.type));
+            break;
+    }
 }
 
 
-void RobotController::handleTargetMovementCommand(const BaseEvent& event) {
-    if (event.type == EventType::MOTION_TARGET_SET) {
-        const auto& cmd = static_cast<const MOTION_TargetMovement&>(event);
-        { // Lock scope
-            std::lock_guard<std::mutex> lock(m_target_values_mutex);
-            m_latestTargetPitchOffset_deg = cmd.targetPitchOffset_deg;
-            m_latestTargetAngVel_dps = cmd.targetAngularVelocity_dps;
-        }
-        ESP_LOGV(TAG, "RC Handler: Updated targets: PitchOffset=%.2f, AngVel=%.2f", cmd.targetPitchOffset_deg, cmd.targetAngularVelocity_dps);
+void RobotController::handleTargetMovementCommand(const MOTION_TargetMovement& event) {
+    { // Lock scope
+        std::lock_guard<std::mutex> lock(m_target_values_mutex);
+        m_latestTargetPitchOffset_deg = event.targetPitchOffset_deg;
+        m_latestTargetAngVel_dps = event.targetAngularVelocity_dps;
     }
+    ESP_LOGV(TAG, "RC Handler: Updated targets: PitchOffset=%.2f, AngVel=%.2f", event.targetPitchOffset_deg, event.targetAngularVelocity_dps);
 }
 
 void RobotController::runControlStep(float dt) {
@@ -89,9 +93,9 @@ void RobotController::runControlStep(float dt) {
     }
 
     // 1. Get Orientation Data
-    float pitch_deg = m_estimator.getPitchDeg();
-    float pitch_rate_dps = 0.0f; // Placeholder
-    float yaw_rate_dps = m_estimator.getYawRateDPS(); // <<< GET YAW RATE
+    float pitch_deg = m_estimator->getPitchDeg();
+    float pitch_rate_dps = 0.0f;
+    float yaw_rate_dps = m_estimator->getYawRateDPS(); // <<< GET YAW RATE
 
     // Publish orientation data event for auto recovery and other systems
     if (m_eventBus) {

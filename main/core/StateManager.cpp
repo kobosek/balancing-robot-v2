@@ -20,7 +20,6 @@
 #include "IMU_CommunicationError.hpp"
 #include "CONFIG_FullConfigUpdate.hpp" // Need to react to config changes
 #include "IMU_CalibrationRequestRejected.hpp"
-#include "IMU_AttemptRecovery.hpp"
 #include "IMU_RecoveryFailed.hpp"
 #include "IMU_RecoverySucceeded.hpp"
 
@@ -152,54 +151,87 @@ void StateManager::setState(SystemState newState) {
     }
 }
 
-void StateManager::subscribeToEvents(EventBus& bus) {
-    ESP_LOGI(TAG, "Subscribing StateManager to events...");
-
-    // Essential state transitions & commands
-    bus.subscribe(EventType::MOTION_FALL_DETECTED, [this](const BaseEvent& ev){ this->handleFallDetected(static_cast<const MOTION_FallDetected&>(ev)); });
-    bus.subscribe(EventType::UI_START_BALANCING, [this](const BaseEvent& ev){ this->handleStartBalancing(static_cast<const UI_StartBalancing&>(ev)); });
-    bus.subscribe(EventType::UI_STOP, [this](const BaseEvent& ev){ this->handleStop(static_cast<const UI_Stop&>(ev)); });
-    bus.subscribe(EventType::BATTERY_STATUS_UPDATE, [this](const BaseEvent& ev){ this->handleBatteryUpdate(static_cast<const BATTERY_StatusUpdate&>(ev)); });
-
-    // Auto-recovery related
-    bus.subscribe(EventType::IMU_ORIENTATION_DATA, [this](const BaseEvent& ev){ this->handleOrientationUpdate(static_cast<const IMU_OrientationData&>(ev)); });
-    bus.subscribe(EventType::UI_ENABLE_FALL_RECOVERY, [this](const BaseEvent& ev){ this->handleEnableRecovery(static_cast<const UI_EnableFallRecovery&>(ev)); });
-    bus.subscribe(EventType::UI_DISABLE_FALL_RECOVERY, [this](const BaseEvent& ev){ this->handleDisableRecovery(static_cast<const UI_DisableFallRecovery&>(ev)); });
-
-    // Fall detection enable/disable
-    bus.subscribe(EventType::UI_ENABLE_FALL_DETECTION, [this](const BaseEvent& ev){ this->handleEnableFallDetect(static_cast<const UI_EnableFallDetection&>(ev)); });
-    bus.subscribe(EventType::UI_DISABLE_FALL_DETECTION, [this](const BaseEvent& ev){ this->handleDisableFallDetect(static_cast<const UI_DisableFallDetection&>(ev)); });
-
-    // Calibration related
-    bus.subscribe(EventType::UI_CALIBRATE_IMU, [this](const BaseEvent& ev){ this->handleCalibrateCommand(static_cast<const UI_CalibrateImu&>(ev)); });
-    bus.subscribe(EventType::IMU_CALIBRATION_COMPLETED, [this](const BaseEvent& ev){ this->handleCalibrationComplete(static_cast<const IMU_CalibrationCompleted&>(ev)); });
-    bus.subscribe(EventType::IMU_CALIBRATION_REJECTED, [this](const BaseEvent& ev){ this->handleCalibrationRejected(static_cast<const IMU_CalibrationRequestRejected&>(ev)); });
-
-    // IMU health/recovery related
-    bus.subscribe(EventType::IMU_COMMUNICATION_ERROR, [this](const BaseEvent& ev){ this->handleImuCommunicationError(static_cast<const IMU_CommunicationError&>(ev)); });
-    bus.subscribe(EventType::IMU_RECOVERY_SUCCEEDED, [this](const BaseEvent& ev){ this->handleImuRecoverySucceeded(static_cast<const IMU_RecoverySucceeded&>(ev)); });
-    bus.subscribe(EventType::IMU_RECOVERY_FAILED, [this](const BaseEvent& ev){ this->handleImuRecoveryFailed(static_cast<const IMU_RecoveryFailed&>(ev)); });
-
-    // Config Updates
-    bus.subscribe(EventType::CONFIG_FULL_UPDATE, [this](const BaseEvent& ev){
-        ESP_LOGD(TAG, "Config update received, applying new parameters.");
-        this->handleConfigUpdate(ev); // Call the handler
-    });
-
-    ESP_LOGI(TAG, "StateManager Subscriptions Complete.");
+// EventHandler implementation
+void StateManager::handleEvent(const BaseEvent& event) {
+    // Central event handler that dispatches to specific handlers based on event type
+    switch (event.type) {
+        case EventType::MOTION_FALL_DETECTED:
+            handleFallDetected(static_cast<const MOTION_FallDetected&>(event));
+            break;
+            
+        case EventType::UI_START_BALANCING:
+            handleStartBalancing(static_cast<const UI_StartBalancing&>(event));
+            break;
+            
+        case EventType::UI_STOP:
+            handleStop(static_cast<const UI_Stop&>(event));
+            break;
+            
+        case EventType::BATTERY_STATUS_UPDATE:
+            handleBatteryUpdate(static_cast<const BATTERY_StatusUpdate&>(event));
+            break;
+            
+        case EventType::IMU_ORIENTATION_DATA:
+            handleOrientationUpdate(static_cast<const IMU_OrientationData&>(event));
+            break;
+            
+        case EventType::UI_ENABLE_FALL_RECOVERY:
+            handleEnableRecovery(static_cast<const UI_EnableFallRecovery&>(event));
+            break;
+            
+        case EventType::UI_DISABLE_FALL_RECOVERY:
+            handleDisableRecovery(static_cast<const UI_DisableFallRecovery&>(event));
+            break;
+            
+        case EventType::UI_ENABLE_FALL_DETECTION:
+            handleEnableFallDetect(static_cast<const UI_EnableFallDetection&>(event));
+            break;
+            
+        case EventType::UI_DISABLE_FALL_DETECTION:
+            handleDisableFallDetect(static_cast<const UI_DisableFallDetection&>(event));
+            break;
+            
+        case EventType::UI_CALIBRATE_IMU:
+            handleCalibrateCommand(static_cast<const UI_CalibrateImu&>(event));
+            break;
+            
+        case EventType::IMU_CALIBRATION_COMPLETED:
+            handleCalibrationComplete(static_cast<const IMU_CalibrationCompleted&>(event));
+            break;
+            
+        case EventType::IMU_CALIBRATION_REJECTED:
+            handleCalibrationRejected(static_cast<const IMU_CalibrationRequestRejected&>(event));
+            break;
+            
+        case EventType::IMU_RECOVERY_SUCCEEDED:
+            handleImuRecoverySucceeded(static_cast<const IMU_RecoverySucceeded&>(event));
+            break;
+            
+        case EventType::IMU_RECOVERY_FAILED:
+            handleImuRecoveryFailed(static_cast<const IMU_RecoveryFailed&>(event));
+            break;
+            
+        case EventType::CONFIG_FULL_UPDATE:
+            handleConfigUpdate(static_cast<const CONFIG_FullConfigUpdate&>(event));
+            break;
+            
+        default:
+            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
+                     getHandlerName().c_str(), static_cast<int>(event.type));
+            break;
+    }
 }
 
-// --- Event Handlers ---
+// Keep for backward compatibility during transition
+void StateManager::subscribeToEvents(EventBus& bus) {
+    ESP_LOGW(TAG, "StateManager::subscribeToEvents is deprecated. Use EventBus::subscribe with EventHandler instead.");
+}
 
-// --- ADDED Config Update Handler ---
-void StateManager::handleConfigUpdate(const BaseEvent& event) {
-    if (event.type != EventType::CONFIG_FULL_UPDATE) return;
-    const auto& configEvent = static_cast<const CONFIG_FullConfigUpdate&>(event);
+void StateManager::handleConfigUpdate(const CONFIG_FullConfigUpdate& event) {
     ESP_LOGI(TAG, "Handling config update event.");
     // Extract the relevant part and apply it
-    applyConfig(configEvent.configData.behavior);
+    applyConfig(event.configData.behavior);
 }
-// --- END ADDED ---
 
 void StateManager::handleFallDetected(const MOTION_FallDetected& event) {
     ESP_LOGW(TAG, "Fall Detected Event Received!");
@@ -304,57 +336,25 @@ void StateManager::handleCalibrationComplete(const IMU_CalibrationCompleted& eve
     setState(SystemState::IDLE);
 }
 
-void StateManager::handleImuCommunicationError(const IMU_CommunicationError& event) {
-    ESP_LOGE(TAG, "IMU Communication Error detected! Code: %s (%d).",
-             esp_err_to_name(event.errorCode), event.errorCode);
-    
-    // Store current state before recovery
-    m_preImuRecoveryState = m_currentState;
-    
-    // Initiate IMU recovery with minimal interruption if we're balancing
-    bool minimal_interruption = (m_currentState == SystemState::BALANCING);
-    initiateIMURecovery(minimal_interruption);
-}
-
 void StateManager::handleImuRecoverySucceeded(const IMU_RecoverySucceeded& event) {
-    // Just reset recovery attempts counter - no need to change system state
-    // since it wasn't changed for recovery
     ESP_LOGI(TAG, "IMU recovery succeeded!");
-    m_imu_recovery_attempts = 0;
+    // Return to previous state if needed
+    if (m_currentState == SystemState::FATAL_ERROR) {
+        ESP_LOGI(TAG, "Recovery succeeded while in FATAL_ERROR state. Returning to IDLE state.");
+        setState(SystemState::IDLE);
+    }
 }
 
 void StateManager::handleImuRecoveryFailed(const IMU_RecoveryFailed& event) {
     ESP_LOGE(TAG, "IMU recovery failed with error: %s (%d)",
              esp_err_to_name(event.errorCode), event.errorCode);
-    handleRecoveryFailure();
+    
+    // Set system to FATAL_ERROR since IMUService has exhausted its recovery attempts
+    ESP_LOGE(TAG, "IMU recovery exhausted all attempts. Setting system to FATAL_ERROR state.");
+    setState(SystemState::FATAL_ERROR);
 }
 
-void StateManager::initiateIMURecovery(bool minimal_interruption) {
-    ESP_LOGI(TAG, "Initiating IMU recovery (minimal_interruption: %s)", minimal_interruption ? "true" : "false");
-    
-    // Reset recovery attempt counter for a new recovery session
-    m_imu_recovery_attempts = 0;
-    m_preImuRecoveryState = m_currentState;
-    
-    // If we're balancing, use minimal interruption mode
-    if (m_preImuRecoveryState == SystemState::BALANCING) {
-        minimal_interruption = true;
-    }
-    
-    // Configure recovery parameters based on current state
-    int max_attempts = m_max_imu_recovery_attempts;
-    int retry_delay_ms = m_preImuRecoveryState == SystemState::BALANCING ? 200 : 500;
-    
-    // Create recovery command with appropriate parameters
-    IMU_AttemptRecovery cmd(minimal_interruption, max_attempts, retry_delay_ms);
-    m_eventBus.publish(cmd);
-    
-    // Update recovery attempt counter
-    m_imu_recovery_attempts++;
-    
-    // Start monitoring the IMU state to detect if it gets stuck
-    monitorIMUState();
-}
+// initiateIMURecovery has been removed - IMUService now fully handles recovery
 
 void StateManager::initiateCalibration(bool force) {
     ESP_LOGI(TAG, "Initiating calibration (force: %s)", force ? "true" : "false");
@@ -384,49 +384,12 @@ void StateManager::initiateCalibration(bool force) {
     }
 }
 
-void StateManager::requestImuRecovery() {
-    // Replaced by initiateIMURecovery, but kept for backward compatibility
-    initiateIMURecovery(false);
-}
-
-void StateManager::monitorIMUState() {
-    // This function would implement a watchdog to detect if IMU gets stuck in RECOVERY state
-    // Could be implemented using a timer or by checking time since recovery started
-    
-    // For now, just a placeholder - actual implementation would need a timer
-    ESP_LOGD(TAG, "IMU state monitoring started");
-    
-    // In a real implementation, we'd start a timer here that checks periodically
-    // if the IMU has been in RECOVERY state too long, and if so, forces a transition
-    // to FATAL_ERROR or another appropriate state.
-}
-
-void StateManager::handleRecoveryFailure() {
-    // Use configured max attempts
-    if (m_imu_recovery_attempts >= m_max_imu_recovery_attempts) {
-        ESP_LOGE(TAG, "Maximum IMU recovery attempts (%d) reached. Setting FATAL_ERROR state.",
-                 m_max_imu_recovery_attempts);
-        setState(SystemState::FATAL_ERROR);
-        return;
-    }
-    ESP_LOGW(TAG, "IMU recovery attempt %d failed. Will retry after delay...",
-             m_imu_recovery_attempts);
-    
-    // Request another recovery attempt with delay
-    initiateIMURecovery(m_currentState == SystemState::BALANCING);
-}
-
 void StateManager::handleEnableRecovery(const UI_EnableFallRecovery& event) {
     setAutoRecovery(true);
 }
 
 void StateManager::handleDisableRecovery(const UI_DisableFallRecovery& event) {
     setAutoRecovery(false);
-    if (m_withinRecoveryAngle) {
-        m_withinRecoveryAngle = false;
-        m_recoveryAngleStartTimeUs = 0;
-        ESP_LOGD(TAG,"Auto-recovery disabled, resetting active recovery timer.");
-    }
 }
 
 void StateManager::handleEnableFallDetect(const UI_EnableFallDetection& event) {

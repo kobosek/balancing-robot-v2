@@ -15,12 +15,13 @@
 
 // --- Include Headers for new/modified IMU components ---
 #include "mpu6050.hpp"              // Driver
-#include "IMUCalibrationService.hpp" // Calibration Service
 #include "IMUHealthMonitor.hpp"     // Health Monitor
 #include "IMUService.hpp"           // Refactored Service
 #include "OrientationEstimator.hpp" // Estimator
+#include "FIFOProcessor.hpp"        // FIFO processing
 // --- Include Task headers ---
-#include "IMUTasks.hpp"           // Includes both FIFO and Health tasks now
+#include "FIFOTask.hpp"           // FIFO processing task 
+#include "HealthMonitorTask.hpp"  // Health monitoring task
 #include "BatteryTask.hpp"
 #include "ControlTask.hpp"
 
@@ -62,7 +63,7 @@ esp_err_t Application::init()
     m_configParser = std::make_unique<JsonConfigParser>();
     ESP_LOGI(TAG, "Parser initialized");
 
-    m_configService = std::make_unique<ConfigurationService>(*m_storageService, *m_configParser, *m_eventBus);
+    m_configService = std::make_shared<ConfigurationService>(*m_storageService, *m_configParser, *m_eventBus);
     ret = m_configService->init(); ESP_RETURN_ON_ERROR(ret, TAG, "Config service init failed");
     ESP_LOGI(TAG, "ConfigService initialized");
 
@@ -82,7 +83,7 @@ esp_err_t Application::init()
     PIDConfig yawRatePidConf = m_configService->getPidYawRateConfig();
 
     // --- State Manager ---
-    m_stateManager = std::make_unique<StateManager>(*m_eventBus, behaviorConf); // Pass behavior config
+    m_stateManager = std::make_shared<StateManager>(*m_eventBus, behaviorConf); // Pass behavior config
     ret = m_stateManager->init(); ESP_RETURN_ON_ERROR(ret, TAG, "StateManager init failed");
     ESP_LOGI(TAG, "StateManager initialized");
 
@@ -90,59 +91,48 @@ esp_err_t Application::init()
     m_wifiManager = std::make_unique<WiFiManager>();
     ret = m_wifiManager->init(wifiConf); ESP_RETURN_ON_ERROR(ret, TAG, "WiFiManager init failed"); // Pass WiFi config
 
-    m_orientationEstimator = std::make_unique<OrientationEstimator>();
+    m_orientationEstimator = std::make_shared<OrientationEstimator>();
     // Estimator init happens in IMUService init
 
     m_encoderService = std::make_unique<EncoderService>(encoderConf); // Pass encoder config
     ret = m_encoderService->init(); ESP_RETURN_ON_ERROR(ret, TAG, "EncoderService init failed");
 
-    m_batteryService = std::make_unique<BatteryService>(batteryConf, behaviorConf, *m_eventBus); // Pass battery and relevant behavior config
+    m_batteryService = std::make_shared<BatteryService>(batteryConf, behaviorConf, *m_eventBus); // Pass battery and relevant behavior config
     ret = m_batteryService->init(); ESP_RETURN_ON_ERROR(ret, TAG, "BatteryService init failed");
 
-    m_motorService = std::make_unique<MotorService>(motorConf, *m_eventBus); // Pass motor config
+    m_motorService = std::make_shared<MotorService>(motorConf, *m_eventBus); // Pass motor config
     ret = m_motorService->init(); ESP_RETURN_ON_ERROR(ret, TAG, "MotorService init failed");
 
-    m_commandProcessor = std::make_unique<CommandProcessor>(*m_eventBus, controlConf, behaviorConf); // Pass control and behavior config
+    m_commandProcessor = std::make_shared<CommandProcessor>(*m_eventBus, controlConf, behaviorConf); // Pass control and behavior config
     ret = m_commandProcessor->init(); ESP_RETURN_ON_ERROR(ret, TAG, "CommandProcessor init failed");
 
-    m_balancingAlgorithm = std::make_unique<BalancingAlgorithm>(
+    m_balancingAlgorithm = std::make_shared<BalancingAlgorithm>(
         *m_eventBus,
         anglePidConf, speedLeftPidConf, speedRightPidConf, yawRatePidConf,
         encoderConf, dimensionConf
     );
     ret = m_balancingAlgorithm->init(); ESP_RETURN_ON_ERROR(ret, TAG, "BalancingAlgorithm init failed");
 
-    m_fallDetector = std::make_unique<FallDetector>(*m_eventBus, behaviorConf); // Pass behavior config
+    m_fallDetector = std::make_shared<FallDetector>(*m_eventBus, behaviorConf); // Pass behavior config
     // FallDetector constructor now loads config and resets
 
     // WebServer needs ConfigService mainly to pass to handlers that NEED it (ConfigApiHandler)
-    m_webServer = std::make_unique<WebServer>(*m_configService, *m_stateManager, *m_eventBus, webConf); // Pass web config
+    m_webServer = std::make_shared<WebServer>(*m_configService, *m_stateManager, *m_eventBus, webConf); // Pass web config
     ret = m_webServer->init(); ESP_RETURN_ON_ERROR(ret, TAG, "WebServer init failed");
 
-    // --- Instantiate IMU Components ---
-    m_mpuDriver = std::make_unique<MPU6050Driver>();
-    // Driver init happens within IMUService init
-
-    m_imuCalibrationService = std::make_unique<IMUCalibrationService>(*m_mpuDriver, imuConf, *m_eventBus); // Pass IMU config
-    // Calibration service init happens within IMUService init
-
-    m_imuHealthMonitor = std::make_unique<IMUHealthMonitor>(*m_mpuDriver, *m_eventBus, behaviorConf); // Pass behavior config
-    // Health monitor constructor now loads config
-
-    m_imuService = std::make_unique<IMUService>(
-        *m_mpuDriver,
-        *m_imuCalibrationService,
-        *m_imuHealthMonitor,
-        *m_orientationEstimator,
-        imuConf, // Pass IMU config struct
+    // Create IMUService with encapsulated components
+    m_imuService = std::make_shared<IMUService>(
+        m_orientationEstimator,
+        imuConf,         // Pass IMU config struct
+        behaviorConf,    // Pass behavior config
         *m_eventBus
     );
     ret = m_imuService->init(); ESP_RETURN_ON_ERROR(ret, TAG, "IMUService init failed");
     ESP_LOGI(TAG, "IMU Subsystem Initialized");
 
     // --- Instantiate Robot Controller (Facade) ---
-    m_robotController = std::make_unique<RobotController>(
-        *m_orientationEstimator,
+    m_robotController = std::make_shared<RobotController>(
+        m_orientationEstimator,
         *m_encoderService,
         *m_motorService,
         *m_balancingAlgorithm,
@@ -155,25 +145,75 @@ esp_err_t Application::init()
     ret = m_robotController->init(*m_eventBus); ESP_RETURN_ON_ERROR(ret, TAG, "RobotController init failed");
     ESP_LOGI(TAG, "RobotController initialized");
 
-    // --- Establish Event Subscriptions ---
-    ESP_LOGI(TAG, "Establishing event subscriptions...");
-    m_configService->subscribeToEvents(*m_eventBus); // Config service listens for offset updates
-    // Components that need config updates subscribe themselves via their subscribeToEvents method
-    m_stateManager->subscribeToEvents(*m_eventBus);
-    m_batteryService->subscribeToEvents(*m_eventBus);
-    m_imuHealthMonitor->subscribeToEvents(*m_eventBus);
-    m_commandProcessor->subscribeToEvents(*m_eventBus);
-    m_balancingAlgorithm->subscribeToEvents(*m_eventBus);
-    m_fallDetector->subscribeToEvents(*m_eventBus); // Fall detector needs to subscribe now
-    m_motorService->subscribeToEvents(*m_eventBus);
-    m_imuService->subscribeToEvents(*m_eventBus);
-    m_imuCalibrationService->subscribeToEvents(*m_eventBus);
-    // m_imuHealthMonitor->subscribeToEvents(*m_eventBus); // Already subscribed
-    m_robotController->subscribeToEvents(*m_eventBus);
-    m_webServer->subscribeToEvents(*m_eventBus); // Webserver/handlers subscribe for config updates
-
-    ESP_LOGI(TAG, "Component event subscriptions established.");
-
+    m_eventBus->subscribe(m_commandProcessor, {
+        EventType::SYSTEM_STATE_CHANGED,
+        EventType::UI_JOYSTICK_INPUT,
+        EventType::CONFIG_FULL_UPDATE
+    });
+    
+    // BalancingAlgorithm subscriptions - now using EventHandler
+    m_eventBus->subscribe(m_balancingAlgorithm, {
+        EventType::CONFIG_FULL_UPDATE,
+        EventType::CONFIG_PID_UPDATE
+    });
+    
+    // FallDetector subscriptions - now using EventHandler
+    m_eventBus->subscribe(m_fallDetector, {
+        EventType::CONFIG_FULL_UPDATE
+    });
+    
+    // MotorService subscriptions - now using EventHandler
+    m_eventBus->subscribe(m_motorService, {
+        EventType::SYSTEM_STATE_CHANGED
+    });
+    
+    // BatteryService subscriptions - now using EventHandler
+    m_eventBus->subscribe(m_batteryService, {
+        EventType::CONFIG_FULL_UPDATE
+    });
+    
+    // StateManager subscriptions - now using EventHandler
+    m_eventBus->subscribe(m_stateManager, {
+        EventType::MOTION_FALL_DETECTED,
+        EventType::UI_START_BALANCING,
+        EventType::UI_STOP,
+        EventType::BATTERY_STATUS_UPDATE,
+        EventType::IMU_ORIENTATION_DATA,
+        EventType::UI_ENABLE_FALL_RECOVERY,
+        EventType::UI_DISABLE_FALL_RECOVERY,
+        EventType::UI_ENABLE_FALL_DETECTION,
+        EventType::UI_DISABLE_FALL_DETECTION,
+        EventType::UI_CALIBRATE_IMU,
+        EventType::IMU_CALIBRATION_COMPLETED,
+        EventType::IMU_CALIBRATION_REJECTED,
+        EventType::IMU_RECOVERY_SUCCEEDED,
+        EventType::IMU_RECOVERY_FAILED,
+        EventType::CONFIG_FULL_UPDATE
+    });
+    
+    // ConfigurationService subscriptions - now using EventHandler
+    m_eventBus->subscribe(m_configService, {
+        EventType::CONFIG_GYRO_OFFSETS_UPDATE
+    });
+    
+    // IMUService subscriptions - now using EventHandler
+    m_eventBus->subscribe(m_imuService, {
+        EventType::CONFIG_FULL_UPDATE,
+        EventType::CONFIG_IMU_UPDATE,
+        EventType::IMU_COMMUNICATION_ERROR,
+        EventType::IMU_CALIBRATION_REQUEST,
+        EventType::SYSTEM_STATE_CHANGED,
+    });
+    
+    // RobotController subscriptions - now using EventHandler
+    m_eventBus->subscribe(m_robotController, {
+        EventType::MOTION_TARGET_SET
+    });
+    
+    // WebServer subscriptions - now using EventHandler
+    m_eventBus->subscribe(m_webServer, {
+        EventType::CONFIG_FULL_UPDATE
+    });
     ESP_LOGI(TAG, "Application initialization complete");
     return ESP_OK;
 }
@@ -220,24 +260,17 @@ esp_err_t Application::createAndStartTasks(int intervalMs, int batteryIntervalMs
     ESP_RETURN_ON_FALSE(m_robotController != nullptr, ESP_FAIL, TAG, "RobotController is null");
     m_controlTask = std::make_unique<ControlTask>(*m_robotController, intervalMs);
 
-    ESP_RETURN_ON_FALSE(m_imuService != nullptr, ESP_FAIL, TAG, "IMUService is null");
-    m_imuFifoTask = std::make_unique<IMUFifoTask>(*m_imuService);
-
-    ESP_RETURN_ON_FALSE(m_imuHealthMonitor != nullptr, ESP_FAIL, TAG, "IMUHealthMonitor is null");
-    m_imuHealthMonitorTask = std::make_unique<IMUHealthMonitorTask>(*m_imuHealthMonitor);
-
     ESP_RETURN_ON_FALSE(m_batteryService != nullptr, ESP_FAIL, TAG, "BatteryService is null");
     m_batteryMonitorTask = std::make_unique<BatteryMonitorTask>(*m_batteryService, batteryIntervalMs);
 
-    ESP_RETURN_ON_FALSE(m_imuCalibrationService != nullptr, ESP_FAIL, TAG, "IMUCalibrationService is null");
-    m_imuCalibrationTask = std::make_unique<IMUCalibrationTask>(*m_imuCalibrationService, *m_eventBus);
-
     // --- Start Tasks (Using hardcoded params for now, move to config later if needed) ---
     if (!m_controlTask->start(configMAX_PRIORITIES - 1, 1, 4096)) { ESP_LOGE(TAG, "Failed to start Control task!"); return ESP_FAIL; }
-    if (!m_imuFifoTask->start(configMAX_PRIORITIES - 2, 0, 6144)) { ESP_LOGE(TAG, "Failed to start IMU FIFO task!"); return ESP_FAIL; }
-    if (!m_imuHealthMonitorTask->start(5, 1, 4096)) { ESP_LOGE(TAG, "Failed to start IMU Health Monitor task!"); return ESP_FAIL; }
     if (!m_batteryMonitorTask->start(5, 0, 3072)) { ESP_LOGE(TAG, "Failed to start Battery Monitor task!"); return ESP_FAIL; }
-    if (!m_imuCalibrationTask->start(5, 1, 4096)) { ESP_LOGE(TAG, "Failed to start IMU Calibration task!"); return ESP_FAIL; }
+    
+    // Start the IMU-related tasks from the IMUService
+    ESP_RETURN_ON_FALSE(m_imuService != nullptr, ESP_FAIL, TAG, "IMUService is null");
+    if (!m_imuService->startTasks()) { ESP_LOGE(TAG, "Failed to start IMU tasks!"); return ESP_FAIL; }
+    // IMUCalibration now handled directly by IMUService, no separate task needed
 
     ESP_LOGI(TAG, "All application tasks started successfully");
     return ESP_OK;

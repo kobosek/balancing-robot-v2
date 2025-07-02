@@ -4,25 +4,26 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "ConfigData.hpp" // Need full definition
+#include "EventHandler.hpp"
 
 // Forward declare dependencies
 class ConfigurationService;
 class BaseEvent;
 class CONFIG_FullConfigUpdate;
-class EventBus; // Forward declare for subscribeToEvents
 
-class ConfigApiHandler {
-public: // <-- CHANGE: Move methods to public
+class ConfigApiHandler : public EventHandler {
+public: 
     // Still needs direct access to ConfigService
     ConfigApiHandler(ConfigurationService& configService);
     esp_err_t handleGetRequest(httpd_req_t *req);
     esp_err_t handlePostRequest(httpd_req_t *req);
 
-    // Subscribe to events to update its own config parameters if needed
-    void subscribeToEvents(EventBus& bus);
+    // EventHandler interface implementation
+    void handleEvent(const BaseEvent& event) override;
+    std::string getHandlerName() const override { return TAG; }
 
     // Handler for config updates (now public)
-    void handleConfigUpdate(const BaseEvent& event);
+    void handleConfigUpdate(const CONFIG_FullConfigUpdate& event);
 
 private:
     static constexpr const char* TAG = "ConfigApiHandler";
