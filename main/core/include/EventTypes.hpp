@@ -46,7 +46,6 @@ enum class EventType {
     IMU_RECOVERY_FAILED,             // IMU_RecoveryFailed
 
     // IMU State Management Events
-    IMU_STATE_CHANGED,               // IMU_StateChanged
     IMU_CALIBRATION_REJECTED,        // IMU_CalibrationRequestRejected
     MOTION_USING_FALLBACK_VALUES,    // MOTION_UsingFallbackValues
 

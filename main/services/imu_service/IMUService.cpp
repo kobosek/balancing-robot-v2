@@ -49,31 +49,13 @@ IMUService::IMUService(std::shared_ptr<OrientationEstimator> estimator,
     m_recovery_timeout_ms(5000), 
     m_accel_lsb_per_g(1.0f), 
     m_gyro_lsb_per_dps(1.0f),
-    m_sample_period_s(1.0f / 100.0f), // Default 100Hz
-    m_isr_handler_installed(false)
+    m_sample_period_s(1.0f / 100.0f) // Default 100Hz
 {
 
 }
 
 IMUService::~IMUService() {
-    ESP_LOGI(TAG, "Deconstructing IMUService...");
-    if (m_isr_handler_installed) { 
-        if (m_config.int_pin >= 0 && m_config.int_pin < GPIO_NUM_MAX) {
-            // Delegate interrupt unregistration to FIFOProcessor
-            esp_err_t ret = m_fifoProcessor->unregisterInterrupt(m_config.int_pin);
-            if (ret == ESP_OK) {
-                ESP_LOGI(TAG, "FIFOProcessor removed ISR handler for pin %d", (int)m_config.int_pin);
-            } else {
-                ESP_LOGE(TAG, "Error while FIFOProcessor was removing ISR handler for pin %d: %s", 
-                         (int)m_config.int_pin, esp_err_to_name(ret));
-            }
-        }
-        m_isr_handler_installed = false; 
-    } else {
-         ESP_LOGI(TAG, "ISR handler not removed (was not successfully installed or pin invalid).");
-    }
     stopTasks();
-    ESP_LOGI(TAG, "IMUService deconstructed.");
 }
 
 
@@ -83,25 +65,28 @@ void IMUService::applyConfig(const MPU6050Config& newConfig) {
     bool hardwareConfigChanged = false;
     bool gyroOffsetsChanged = false;
 
-    if (m_config.comp_filter_alpha != newConfig.comp_filter_alpha ||
-        m_config.sample_rate_divisor != newConfig.sample_rate_divisor) { // sample_rate_divisor affects m_sample_period_s
-        needsEstimatorReinit = true; // Triggers full estimator.init()
-    }
-    if (m_config.gyro_offset_x != newConfig.gyro_offset_x ||
-        m_config.gyro_offset_y != newConfig.gyro_offset_y ||
-        m_config.gyro_offset_z != newConfig.gyro_offset_z) {
-        gyroOffsetsChanged = true; // Triggers estimator.updateGyroOffsets()
-    }
+    // Thread-safe config comparison and update
+    safeConfigUpdate([&]() {
+        if (m_config.comp_filter_alpha != newConfig.comp_filter_alpha ||
+            m_config.sample_rate_divisor != newConfig.sample_rate_divisor) { // sample_rate_divisor affects m_sample_period_s
+            needsEstimatorReinit = true; // Triggers full estimator.init()
+        }
+        if (m_config.gyro_offset_x != newConfig.gyro_offset_x ||
+            m_config.gyro_offset_y != newConfig.gyro_offset_y ||
+            m_config.gyro_offset_z != newConfig.gyro_offset_z) {
+            gyroOffsetsChanged = true; // Triggers estimator.updateGyroOffsets()
+        }
 
-    if (m_config.accel_range != newConfig.accel_range ||
-        m_config.gyro_range != newConfig.gyro_range ||
-        m_config.sample_rate_divisor != newConfig.sample_rate_divisor || // Also checked for needsEstimatorReinit
-        m_config.dlpf_config != newConfig.dlpf_config) {
-        needsScalingFactorRecalc = true;
-        hardwareConfigChanged = true;
-    }
+        if (m_config.accel_range != newConfig.accel_range ||
+            m_config.gyro_range != newConfig.gyro_range ||
+            m_config.sample_rate_divisor != newConfig.sample_rate_divisor || // Also checked for needsEstimatorReinit
+            m_config.dlpf_config != newConfig.dlpf_config) {
+            needsScalingFactorRecalc = true;
+            hardwareConfigChanged = true;
+        }
 
-    m_config = newConfig;
+        m_config = newConfig;
+    });
     ESP_LOGI(TAG, "Applied new IMU config. HW changed: %s, EstimatorReinit: %s, GyroOffsetsChanged: %s",
              hardwareConfigChanged ? "Yes" : "No", needsEstimatorReinit ? "Yes" : "No", gyroOffsetsChanged ? "Yes" : "No");
 
@@ -120,12 +105,15 @@ void IMUService::applyConfig(const MPU6050Config& newConfig) {
         ESP_LOGI(TAG, "Updated OrientationEstimator gyro offsets due to config change.");
     }
 
-    if (m_current_state.load(std::memory_order_acquire) == IMUState::CALIBRATION && hardwareConfigChanged) {
+    if (getCurrentState() == IMUState::CALIBRATION && hardwareConfigChanged) {
         ESP_LOGI(TAG, "Hardware config parameters changed during CALIBRATION. Hardware will be reconfigured upon transitioning to OPERATIONAL.");
     }
 }
 
 void IMUService::applyConfig(const SystemBehaviorConfig& config) {
+    safeConfigUpdate([&]() {
+        m_behaviorConfig = config;
+    });
     m_healthMonitor->applyConfig(config);
 }
 
@@ -145,7 +133,7 @@ void IMUService::handleConfigUpdate(const CONFIG_FullConfigUpdate& event) {
                                    oldImuConfig.scl_pin != m_config.scl_pin ||
                                    oldImuConfig.int_pin != m_config.int_pin);
 
-    if (criticalHardwareChanged && m_current_state.load() != IMUState::RECOVERY) {
+    if (criticalHardwareChanged && getCurrentState() != IMUState::RECOVERY) {
         ESP_LOGW(TAG, "Critical hardware parameters changed via CONFIG_FullConfigUpdate. Transitioning to RECOVERY to apply changes.");
         transitionToState(IMUState::RECOVERY);
     }
@@ -157,7 +145,7 @@ void IMUService::handleIMUConfigUpdate(const CONFIG_ImuConfigUpdate& event) {
     
     applyConfig(event.config); 
     
-    if (event.requiresHardwareInit && m_current_state.load() != IMUState::RECOVERY) {
+    if (event.requiresHardwareInit && getCurrentState() != IMUState::RECOVERY) {
         ESP_LOGI(TAG, "Hardware parameters changed, transitioning to RECOVERY state to apply.");
         transitionToState(IMUState::RECOVERY);
     }
@@ -165,6 +153,8 @@ void IMUService::handleIMUConfigUpdate(const CONFIG_ImuConfigUpdate& event) {
 
 
 void IMUService::calculateScalingFactors() {
+    std::lock_guard<std::mutex> config_lock(m_config_mutex);
+    
     // Using the baseline calculation method (no averaging) to get the current scaling factors:
     switch(m_config.accel_range) {
         case 0: m_accel_lsb_per_g = 16384.0f; break;
@@ -400,7 +390,7 @@ void IMUService::handleSystemStateChanged(const SYSTEM_StateChanged& event) {
     
     ESP_LOGI(TAG, "System state changed from: %d to: %d", static_cast<int>(oldSystemState), static_cast<int>(event.newState));
     
-    if (m_current_state.load() == IMUState::RECOVERY && 
+    if (getCurrentState() == IMUState::RECOVERY && 
         (event.newState == SystemState::BALANCING || event.newState == SystemState::FALLEN)) {
         
         ESP_LOGW(TAG, "System state requires operational IMU (%d) while IMU is in RECOVERY.", 
@@ -475,6 +465,8 @@ bool IMUService::isValidTransition(IMUState from, IMUState to) {
 }
 
 void IMUService::transitionToState(IMUState newState) {
+    std::lock_guard<std::mutex> state_lock(m_state_mutex);
+    
     IMUState oldState = m_current_state.load(std::memory_order_relaxed);
     
     if (oldState == newState) {
@@ -553,7 +545,6 @@ esp_err_t IMUService::enterOperationalState() {
             ESP_LOGE(TAG, "Failed to enable FIFO and register ISR on enter OPERATIONAL: %s", esp_err_to_name(ret));
             return ret;
         }
-        m_isr_handler_installed = true;
         ESP_LOGI(TAG, "FIFO enabled and ISR registered for pin %d", m_config.int_pin);
     } else {
         // Basic FIFO setup without ISR if pin configuration is invalid
@@ -572,13 +563,7 @@ esp_err_t IMUService::exitOperationalState() {
     ESP_LOGI(TAG, "Exiting OPERATIONAL state");
     
     // Use the overloaded method that also unregisters the ISR if necessary
-    esp_err_t ret = m_fifoProcessor->disableFIFO(m_isr_handler_installed);
-    
-    // Mark the ISR as uninstalled if it was installed
-    if (m_isr_handler_installed) {
-        m_isr_handler_installed = false;
-        ESP_LOGI(TAG, "ISR handler marked as uninstalled during exit from OPERATIONAL state");
-    }
+    esp_err_t ret = m_fifoProcessor->disableFIFO();
     
     return ret;
 }
@@ -587,14 +572,8 @@ esp_err_t IMUService::enterCalibrationState() {
     ESP_LOGI(TAG, "Entering CALIBRATION state");
     
     // Disable FIFO with ISR unregistration if needed
-    esp_err_t ret = m_fifoProcessor->disableFIFO(m_isr_handler_installed);
-    
-    // Update ISR state
-    if (m_isr_handler_installed) {
-        m_isr_handler_installed = false;
-        ESP_LOGI(TAG, "ISR handler marked as uninstalled during enter to CALIBRATION state");
-    }
-    
+    esp_err_t ret = m_fifoProcessor->disableFIFO();
+
     return ret;
 }
 
@@ -608,13 +587,7 @@ esp_err_t IMUService::enterRecoveryState() {
     ESP_LOGI(TAG, "Entering RECOVERY state");
     
     // Disable FIFO with ISR unregistration if needed
-    esp_err_t ret = m_fifoProcessor->disableFIFO(m_isr_handler_installed);
-    
-    // Update ISR state
-    if (m_isr_handler_installed) {
-        m_isr_handler_installed = false;
-        ESP_LOGI(TAG, "ISR handler marked as uninstalled during enter to RECOVERY state");
-    }
+    esp_err_t ret = m_fifoProcessor->disableFIFO();
     
     return ret;
 }
@@ -629,7 +602,7 @@ void IMUService::handleCalibrationRequest(const IMU_CalibrationRequest& event) {
     ESP_LOGI(TAG, "Received IMU_CalibrationRequest event");
     
     // Reject calibration if we're in recovery state
-    if (m_current_state.load() == IMUState::RECOVERY) {
+    if (getCurrentState() == IMUState::RECOVERY) {
         ESP_LOGW(TAG, "Cannot calibrate while in RECOVERY state. Rejecting request.");
         m_eventBus.publish(IMU_CalibrationRequestRejected(IMU_CalibrationRequestRejected::Reason::RECOVERY_IN_PROGRESS, true)); 
         return;
@@ -655,7 +628,7 @@ void IMUService::handleCalibrationRequest(const IMU_CalibrationRequest& event) {
 }
 
 esp_err_t IMUService::performCalibration() {
-    if (m_current_state.load() != IMUState::CALIBRATION) {
+    if (getCurrentState() != IMUState::CALIBRATION) {
         ESP_LOGE(TAG, "Cannot perform calibration while not in CALIBRATION state");
         return ESP_ERR_INVALID_STATE;
     }
@@ -702,11 +675,11 @@ void IMUService::startRecoveryProcess(const IMURecoveryConfig& config) {
             config.minimal_interruption ? "true" : "false", config.max_attempts, config.retry_delay_ms);
 
     // Ensure we're in RECOVERY state before attempting recovery
-    if (m_current_state.load() != IMUState::RECOVERY) {
+    if (getCurrentState() != IMUState::RECOVERY) {
         ESP_LOGW(TAG, "Recovery requested while not in RECOVERY state (current: %s). Transitioning to RECOVERY first.",
-                stateToString(m_current_state.load()));
+                stateToString(getCurrentState()));
         transitionToState(IMUState::RECOVERY);
-        if (m_current_state.load() != IMUState::RECOVERY) {
+        if (getCurrentState() != IMUState::RECOVERY) {
             ESP_LOGE(TAG, "Failed to transition to RECOVERY state. Cannot attempt recovery.");
             m_eventBus.publish(IMU_RecoveryFailed(ESP_ERR_INVALID_STATE)); 
             return;
@@ -802,4 +775,47 @@ esp_err_t IMUService::attemptRecovery(const IMURecoveryConfig& config) {
 
     ESP_LOGE(TAG, "IMU Recovery Failed after %d attempts (Last Error: %s).", MAX_RETRIES, esp_err_to_name(status));
     return status; 
+}
+
+// Thread-safe helper methods implementation
+bool IMUService::tryLockWithTimeout(std::mutex& mutex, uint32_t timeout_ms) const {
+    // For FreeRTOS, we'll use a simple try_lock approach with delay
+    // This is a simplified timeout implementation
+    const uint32_t retry_interval_ms = 1;
+    uint32_t elapsed_ms = 0;
+    
+    while (elapsed_ms < timeout_ms) {
+        if (mutex.try_lock()) {
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(retry_interval_ms));
+        elapsed_ms += retry_interval_ms;
+    }
+    return false;
+}
+
+void IMUService::safeConfigUpdate(const std::function<void()>& updateFunc) {
+    std::lock_guard<std::mutex> config_lock(m_config_mutex);
+    updateFunc();
+}
+
+std::pair<IMUState, SystemState> IMUService::getStatesThreadSafe() const {
+    std::lock_guard<std::mutex> state_lock(m_state_mutex);
+    return std::make_pair(m_current_state.load(std::memory_order_relaxed), 
+                         m_system_state.load(std::memory_order_relaxed));
+}
+
+IMUState IMUService::getCurrentState() const {
+    std::lock_guard<std::mutex> lock(m_state_mutex);
+    return m_current_state.load(std::memory_order_relaxed);
+}
+
+SystemState IMUService::getSystemState() const {
+    std::lock_guard<std::mutex> lock(m_state_mutex);
+    return m_system_state.load(std::memory_order_relaxed);
+}
+
+void IMUService::updateSystemState(SystemState newState) {
+    std::lock_guard<std::mutex> lock(m_state_mutex);
+    m_system_state.store(newState, std::memory_order_relaxed);
 }

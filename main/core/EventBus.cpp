@@ -58,7 +58,6 @@ std::string eventTypeToString(EventType type) {
         case EventType::IMU_RECOVERY_FAILED: return "IMU_RECOVERY_FAILED";
         
         // IMU State Management Events
-        case EventType::IMU_STATE_CHANGED: return "IMU_STATE_CHANGED";
         case EventType::IMU_CALIBRATION_REJECTED: return "IMU_CALIBRATION_REJECTED";
         case EventType::MOTION_USING_FALLBACK_VALUES: return "MOTION_USING_FALLBACK_VALUES";
         

@@ -332,7 +332,7 @@ void BatteryService::updateBatteryStatus() {
                 voltage, rounded_percentage, is_low ? "LOW" : "OK");
 
         BATTERY_StatusUpdate event(new_status);
-        m_eventBus.publish(event);
+        //m_eventBus.publish(event);
     } else {
         ESP_LOGD(TAG, "Battery status unchanged: %.2fV, %d%%, %s",
                 voltage, rounded_percentage, is_low ? "LOW" : "OK");

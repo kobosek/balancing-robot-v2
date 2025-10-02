@@ -32,6 +32,9 @@ public:
     // Getters (thread-safe)
     float getPitchDeg() const;
     float getYawRateDPS() const;
+    
+    // Get both values atomically to avoid inconsistent reads
+    std::pair<float, float> getPitchAndYawRate() const;
 
     void reset(); // Reset filter state
 
@@ -54,4 +57,11 @@ private:
     float m_gyro_offset_z_dps;
 
     mutable std::mutex m_stateMutex;
+    
+    // Thread-safe mutex operations (ESP32 compatible - no exceptions)
+    template<typename Func>
+    auto safeExecute(Func&& func) const -> decltype(func());
+    
+    template<typename Func>
+    void safeExecuteVoid(Func&& func) const;
 };

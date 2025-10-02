@@ -10,7 +10,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include <atomic>
-#include <memory> 
+#include <memory>
+#include <mutex>
+#include <functional> 
 
 // Forward declarations
 class MPU6050Driver;
@@ -57,9 +59,9 @@ public:
     void handleEvent(const BaseEvent& event) override;
     std::string getHandlerName() const override { return TAG; }
     
-    IMUState getCurrentState() const { return m_current_state.load(std::memory_order_relaxed); }
-    SystemState getSystemState() const { return m_system_state.load(std::memory_order_relaxed); }
-    void updateSystemState(SystemState newState) { m_system_state.store(newState, std::memory_order_relaxed); }
+    IMUState getCurrentState() const;
+    SystemState getSystemState() const;
+    void updateSystemState(SystemState newState);
 
     // Made public static for use by other services if they log states
     static const char* stateToString(IMUState state);
@@ -96,9 +98,11 @@ private:
     float m_gyro_lsb_per_dps;
     float m_sample_period_s;
 
+    // Thread safety
+    mutable std::mutex m_state_mutex;           // Protects state variables and configuration
+    mutable std::mutex m_config_mutex;          // Protects configuration variables
+    static constexpr uint32_t MUTEX_TIMEOUT_MS = 100;  // Timeout for mutex operations
 
-    bool m_isr_handler_installed;
-    
     // State Machine Methods
     void transitionToState(IMUState newState);
     esp_err_t enterInitializedState();
@@ -132,4 +136,9 @@ private:
     
     // Calibration method called directly within IMUService
     esp_err_t performCalibration();
+
+    // Thread-safe helper methods
+    bool tryLockWithTimeout(std::mutex& mutex, uint32_t timeout_ms) const;
+    void safeConfigUpdate(const std::function<void()>& updateFunc);
+    std::pair<IMUState, SystemState> getStatesThreadSafe() const;
 };

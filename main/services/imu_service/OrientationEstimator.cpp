@@ -1,6 +1,6 @@
 #include "OrientationEstimator.hpp"
 #include <cmath>
-// #include <vector> // No longer needed
+#include <tuple>
 #include "esp_log.h"
 
 // Constructor implementation
@@ -21,60 +21,62 @@ void OrientationEstimator::init(float alpha, float sample_period_s,
                                float gyro_offset_x_dps,
                                float gyro_offset_y_dps,
                                float gyro_offset_z_dps) {
-    std::lock_guard<std::mutex> lock(m_stateMutex);
-    m_alpha = alpha;
-    m_sample_period_s = sample_period_s;
-    m_gyro_offset_x_dps = gyro_offset_x_dps;
-    m_gyro_offset_y_dps = gyro_offset_y_dps;
-    m_gyro_offset_z_dps = gyro_offset_z_dps;
-    m_pitch_deg = 0.0f; // Reset state on init
-    m_yaw_rate_dps = 0.0f; // Reset state on init
+    safeExecuteVoid([&]() {
+        m_alpha = alpha;
+        m_sample_period_s = sample_period_s;
+        m_gyro_offset_x_dps = gyro_offset_x_dps;
+        m_gyro_offset_y_dps = gyro_offset_y_dps;
+        m_gyro_offset_z_dps = gyro_offset_z_dps;
+        m_pitch_deg = 0.0f; // Reset state on init
+        m_yaw_rate_dps = 0.0f; // Reset state on init
+    });
+    
     ESP_LOGI(TAG, "Estimator init: Alpha=%.3f, dt=%.4fs, Offsets(X:%.3f Y:%.3f Z:%.3f)",
-             m_alpha, m_sample_period_s,
-             m_gyro_offset_x_dps, m_gyro_offset_y_dps, m_gyro_offset_z_dps);
+             alpha, sample_period_s, gyro_offset_x_dps, gyro_offset_y_dps, gyro_offset_z_dps);
 }
 
 void OrientationEstimator::updateGyroOffsets(float gyro_offset_x_dps,
                                              float gyro_offset_y_dps,
                                              float gyro_offset_z_dps) {
-    std::lock_guard<std::mutex> lock(m_stateMutex);
-    m_gyro_offset_x_dps = gyro_offset_x_dps;
-    m_gyro_offset_y_dps = gyro_offset_y_dps;
-    m_gyro_offset_z_dps = gyro_offset_z_dps;
+    safeExecuteVoid([&]() {
+        m_gyro_offset_x_dps = gyro_offset_x_dps;
+        m_gyro_offset_y_dps = gyro_offset_y_dps;
+        m_gyro_offset_z_dps = gyro_offset_z_dps;
+    });
+    
     ESP_LOGI(TAG, "Estimator gyro offsets updated: X:%.3f Y:%.3f Z:%.3f",
-             m_gyro_offset_x_dps, m_gyro_offset_y_dps, m_gyro_offset_z_dps);
+             gyro_offset_x_dps, gyro_offset_y_dps, gyro_offset_z_dps);
 }
 
 void OrientationEstimator::reset() {
-    std::lock_guard<std::mutex> lock(m_stateMutex); // Protect state variables
-    m_pitch_deg = 0.0f;
-    m_yaw_rate_dps = 0.0f;
-    // Gyro offsets are not reset by this method, they are part of configuration.
-    // Re-call init() if offsets need to be reset to defaults or reloaded.
+    safeExecuteVoid([this]() {
+        m_pitch_deg = 0.0f;
+        m_yaw_rate_dps = 0.0f;
+        // Gyro offsets are not reset by this method, they are part of configuration.
+        // Re-call init() if offsets need to be reset to defaults or reloaded.
+    });
+    
     ESP_LOGI(TAG, "Orientation Estimator state (pitch, yaw_rate) reset.");
 }
 
 void OrientationEstimator::processSample(float ax_g, float ay_g, float az_g,
                                         float raw_gyro_dps_x, float raw_gyro_dps_y, float raw_gyro_dps_z)
 {
-    float current_pitch_deg_local;
-    float gx_offset_local, gy_offset_local, gz_offset_local;
-    float sample_period_s_local;
-    float alpha_local;
+    // Suppress unused parameter warning for raw_gyro_dps_x (kept for interface compatibility)
+    (void)raw_gyro_dps_x;
+    // Fetch current state and parameters under lock with exception safety
+    auto state_tuple = safeExecute([this]() {
+        return std::make_tuple(m_pitch_deg, m_gyro_offset_y_dps, 
+                              m_gyro_offset_z_dps, m_sample_period_s, m_alpha);
+    });
+    
+    float current_pitch_deg_local = std::get<0>(state_tuple);
+    float gy_offset_local = std::get<1>(state_tuple);
+    float gz_offset_local = std::get<2>(state_tuple);
+    float sample_period_s_local = std::get<3>(state_tuple);
+    float alpha_local = std::get<4>(state_tuple);
 
-    // Fetch current state and parameters under lock
-    {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        current_pitch_deg_local = m_pitch_deg;
-        gx_offset_local = m_gyro_offset_x_dps;
-        gy_offset_local = m_gyro_offset_y_dps;
-        gz_offset_local = m_gyro_offset_z_dps;
-        sample_period_s_local = m_sample_period_s;
-        alpha_local = m_alpha;
-    }
-
-    // Apply gyro offsets
-    float gyro_dps_x = raw_gyro_dps_x - gx_offset_local;
+    // Apply gyro offsets (only Y and Z are used in current implementation)
     float gyro_dps_y = raw_gyro_dps_y - gy_offset_local;
     float gyro_dps_z = raw_gyro_dps_z - gz_offset_local;
 
@@ -98,23 +100,39 @@ void OrientationEstimator::processSample(float ax_g, float ay_g, float az_g,
     // We use the offset-corrected Z-axis gyro reading for yaw rate
     float latest_yaw_rate_dps = gyro_dps_z;
 
-    // Store the final updated values (thread-safe write)
-    {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
+    // Store the final updated values atomically (thread-safe write)
+    safeExecuteVoid([&]() {
         m_pitch_deg = filtered_pitch_deg;
         m_yaw_rate_dps = latest_yaw_rate_dps;
-    }
+    });
 
     ESP_LOGV(TAG, "Processed Sample: Acc(%.2f,%.2f,%.2f) RawGyro(%.2f,%.2f,%.2f) -> Filt P:%.2f CalibYawR:%.2f",
              ax_g, ay_g, az_g, raw_gyro_dps_x, raw_gyro_dps_y, raw_gyro_dps_z, filtered_pitch_deg, latest_yaw_rate_dps);
 }
 
 float OrientationEstimator::getPitchDeg() const {
-    std::lock_guard<std::mutex> lock(m_stateMutex);
-    return m_pitch_deg;
+    return safeExecute([this]() { return m_pitch_deg; });
 }
 
 float OrientationEstimator::getYawRateDPS() const {
+    return safeExecute([this]() { return m_yaw_rate_dps; });
+}
+
+std::pair<float, float> OrientationEstimator::getPitchAndYawRate() const {
+    return safeExecute([this]() {
+        return std::make_pair(m_pitch_deg, m_yaw_rate_dps);
+    });
+}
+
+// Thread-safe mutex operations implementation (ESP32 compatible - no exceptions)
+template<typename Func>
+auto OrientationEstimator::safeExecute(Func&& func) const -> decltype(func()) {
     std::lock_guard<std::mutex> lock(m_stateMutex);
-    return m_yaw_rate_dps;
+    return func();
+}
+
+template<typename Func>
+void OrientationEstimator::safeExecuteVoid(Func&& func) const {
+    std::lock_guard<std::mutex> lock(m_stateMutex);
+    func();
 }

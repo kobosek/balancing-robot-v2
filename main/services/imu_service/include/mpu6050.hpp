@@ -78,6 +78,81 @@ enum class MPU6050SampleRateDiv : uint8_t {
 };
 
 
+// I2C Configuration Structure
+struct I2CConfig {
+    uint32_t timeout_ms = 100;          // Default timeout in milliseconds
+    uint8_t max_retries = 3;            // Maximum retry attempts
+    uint32_t base_delay_ms = 10;        // Base delay for exponential backoff
+    uint32_t max_delay_ms = 1000;       // Maximum delay for exponential backoff
+    bool enable_bus_recovery = true;    // Enable I2C bus recovery on failures
+};
+
+// I2C Error Classification
+enum class I2CErrorType {
+    NONE = 0,
+    // Temporary errors (auto-recoverable)
+    TIMEOUT,
+    NACK,
+    BUS_ERROR,
+    ARBITRATION_LOST,
+    FIFO_OVERFLOW,
+    // Permanent errors (require intervention)
+    PERMANENT_FAILURE,
+    DEVICE_NOT_FOUND,
+    INVALID_RESPONSE,
+    HARDWARE_FAULT
+};
+
+// I2C Error Severity Classification
+enum class I2CErrorSeverity {
+    TEMPORARY = 0,    // Can be retried automatically
+    RECOVERABLE,      // May recover with bus reset/recovery
+    PERMANENT         // Requires manual intervention
+};
+
+// I2C Error Trend Analysis Structure
+struct I2CErrorTrend {
+    uint32_t error_count_window[10] = {0};  // Rolling window of error counts
+    uint32_t window_index = 0;              // Current window position
+    uint32_t total_window_errors = 0;       // Sum of errors in current window
+    uint64_t last_error_timestamp = 0;      // Timestamp of last error (microseconds)
+    float error_rate_per_second = 0.0f;     // Current error rate
+    bool trend_increasing = false;          // Whether error trend is increasing
+};
+
+// Enhanced I2C Statistics Structure
+struct I2CStats {
+    // Operation counters
+    uint32_t total_operations = 0;
+    uint32_t successful_operations = 0;
+    
+    // Error counters by type
+    uint32_t timeout_errors = 0;
+    uint32_t nack_errors = 0;
+    uint32_t bus_errors = 0;
+    uint32_t arbitration_lost_errors = 0;
+    uint32_t fifo_overflow_errors = 0;
+    uint32_t permanent_failure_errors = 0;
+    uint32_t device_not_found_errors = 0;
+    uint32_t invalid_response_errors = 0;
+    uint32_t hardware_fault_errors = 0;
+    
+    // Recovery statistics
+    uint32_t recovery_attempts = 0;
+    uint32_t successful_recoveries = 0;
+    
+    // Error rate and trend analysis
+    I2CErrorTrend error_trend;
+    float current_error_rate_percent = 0.0f;
+    uint32_t consecutive_failures = 0;
+    uint32_t max_consecutive_failures = 0;
+    
+    // Timing statistics
+    uint64_t last_operation_timestamp = 0;
+    uint32_t avg_operation_time_us = 0;
+    uint32_t max_operation_time_us = 0;
+};
+
 class MPU6050Driver {
 public:
     MPU6050Driver();
@@ -135,6 +210,19 @@ public:
     // --- Calibration Methods ---
     esp_err_t setGyroOffsets(float x_offset_dps, float y_offset_dps, float z_offset_dps);
 
+    // --- I2C Configuration and Statistics ---
+    void setI2CConfig(const I2CConfig& config);
+    I2CConfig getI2CConfig() const;
+    I2CStats getI2CStats() const;
+    void resetI2CStats();
+    
+    // --- Enhanced Error Classification and Analysis ---
+    I2CErrorSeverity getErrorSeverity(I2CErrorType error_type) const;
+    bool isTemporaryError(I2CErrorType error_type) const;
+    bool isPermanentError(I2CErrorType error_type) const;
+    float getCurrentErrorRate() const;
+    bool isErrorTrendIncreasing() const;
+
 private:
     static constexpr const char* TAG = "MPU6050Driver";
 
@@ -143,7 +231,24 @@ private:
     esp_err_t writeRegister(MPU6050Register reg, uint8_t data);
     esp_err_t writeRegisterMasked(MPU6050Register reg, uint8_t value, uint8_t mask);
 
+    // --- Enhanced I2C Communication with Retry Logic ---
+    esp_err_t readRegistersWithRetry(MPU6050Register reg, uint8_t* data, size_t len) const;
+    esp_err_t writeRegisterWithRetry(MPU6050Register reg, uint8_t data);
+    
+    // --- I2C Error Handling and Recovery ---
+    I2CErrorType classifyI2CError(esp_err_t error) const;
+    I2CErrorSeverity classifyErrorSeverity(I2CErrorType error_type) const;
+    esp_err_t performBusRecovery();
+    void updateI2CStats(bool success, I2CErrorType error_type) const;
+    void updateErrorTrend(I2CErrorType error_type) const;
+    uint32_t calculateBackoffDelay(uint8_t retry_count) const;
+    uint64_t getCurrentTimestampUs() const;
+
     i2c_master_bus_handle_t _bus_handle;
     i2c_master_dev_handle_t _dev_handle;
     mutable std::mutex _i2c_mutex; // Protect I2C operations
+    
+    // --- I2C Configuration and Statistics ---
+    I2CConfig _i2c_config;
+    mutable I2CStats _i2c_stats;
 };

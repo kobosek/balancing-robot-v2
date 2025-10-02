@@ -32,7 +32,6 @@ public:
     esp_err_t enableFIFO(int interruptPin, bool activeHigh); // Overload that also registers ISR
 
     esp_err_t disableFIFO();
-    esp_err_t disableFIFO(bool unregisterISR); // Overload that optionally unregisters ISR
 
     esp_err_t resetFIFO();
 
@@ -68,10 +67,14 @@ private:
     std::atomic<uint8_t> m_interrupt_counter;  // Counts interrupts to determine when to signal the task
     static constexpr uint8_t INTERRUPTS_PER_PROCESS = 5;  // Process FIFO every 5th interrupt
     
+    // ISR validation and safety
+    std::atomic<bool> m_isr_active;  // Tracks if ISR is currently active to prevent reentrancy
+    
     // ISR related members
     SemaphoreHandle_t m_dataReadySemaphore; // Semaphore for synchronization with FIFOTask
     bool m_isr_handler_installed;           // Whether the ISR handler is installed
     int m_interrupt_pin;                    // GPIO pin for the interrupt
+    bool m_interrupt_active_high;           // Whether the interrupt is active high
 
     bool validateFIFOData(const uint8_t* data, size_t length);
 };
