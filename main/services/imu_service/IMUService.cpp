@@ -537,10 +537,7 @@ esp_err_t IMUService::enterOperationalState() {
 
     // Set up ISR for in-task data processing with automatic ISR registration
     if (m_config.int_pin >= 0 && m_config.int_pin < GPIO_NUM_MAX) {
-        // Use the overloaded method that also registers the ISR
-        // Assume active high by default - most common for MPU6050
-        bool active_high = true; 
-        ret = m_fifoProcessor->enableFIFO(m_config.int_pin, active_high);
+        ret = m_fifoProcessor->enableFIFO(m_config.int_pin, m_config.interrupt_active_high);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to enable FIFO and register ISR on enter OPERATIONAL: %s", esp_err_to_name(ret));
             return ret;

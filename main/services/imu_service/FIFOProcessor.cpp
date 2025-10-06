@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <algorithm>
+#include <climits>
 
 FIFOProcessor::FIFOProcessor(MPU6050Driver& driver,
                              std::shared_ptr<OrientationEstimator> estimator,
@@ -17,8 +18,6 @@ FIFOProcessor::FIFOProcessor(MPU6050Driver& driver,
       m_eventBus(eventBus),
       m_accel_lsb_per_g(8192.0f),  // Default value, will be updated by setScalingFactors
       m_gyro_lsb_per_dps(65.5f),   // Default value, will be updated by setScalingFactors
-      m_isr_data_counter(0),
-      m_interrupt_counter(0),
       m_isr_active(false),
       m_isr_handler_installed(false),
       m_interrupt_pin(-1),
@@ -46,12 +45,6 @@ FIFOProcessor::~FIFOProcessor() {
 }
 
 bool FIFOProcessor::processFIFO() {
-    uint8_t isr_hint = getAndResetIsrDataCounter();
-    if (isr_hint > 0) {
-        ESP_LOGV(TAG, "ISR hint received (%d data-ready events), checking FIFO count.", isr_hint);
-    }
-    
-
     uint16_t fifo_count = 0;
     esp_err_t ret = m_driver.readFifoCount(fifo_count);
     if (ret != ESP_OK) {
@@ -66,8 +59,8 @@ bool FIFOProcessor::processFIFO() {
          ESP_LOGW(TAG, "Failed to check FIFO overflow status from interrupt register: %s", esp_err_to_name(ret));
     }
     if (overflow_flag || fifo_count >= MAX_FIFO_BUFFER_SIZE) { 
-         ESP_LOGW(TAG, "FIFO overflow detected (Flag: %d, Count: %u). Resetting FIFO.", overflow_flag, fifo_count);
-         resetAndReEnableFIFO(); 
+         ESP_LOGW(TAG, "FIFO overflow detected (Flag: %d, Count: %u). Performing hard recovery.", overflow_flag, fifo_count);
+         recoverFifoHard("overflow or fifo_count >= buffer"); 
          return false; 
     }
 
@@ -101,8 +94,8 @@ bool FIFOProcessor::processFIFO() {
     }
     
     if (!validateFIFOData(m_fifo_buffer, bytes_to_read)) {
-        ESP_LOGW(TAG, "FIFO data validation failed. Resetting and re-enabling FIFO.");
-        resetAndReEnableFIFO();
+        ESP_LOGW(TAG, "FIFO data validation failed. Performing hard recovery.");
+        recoverFifoHard("validation failed");
         return false; 
     }
 
@@ -267,26 +260,100 @@ bool FIFOProcessor::validateFIFOData(const uint8_t* data, size_t length) {
     const int numSamples = length / FIFO_PACKET_SIZE;
     for (int i = 0; i < numSamples; i++) {
         const uint8_t* sample = data + (i * FIFO_PACKET_SIZE);
-        int16_t accelX = (sample[0] << 8) | sample[1];
-        if ((accelX == 0 || accelX == -1) &&
-            (((sample[2] << 8) | sample[3]) == accelX) && 
-            (((sample[4] << 8) | sample[5]) == accelX)    
-           ) {
-            int16_t gyroX = (sample[6] << 8) | sample[7];
-            if ((gyroX == 0 || gyroX == -1) &&
-                (((sample[8] << 8) | sample[9]) == gyroX) && 
-                (((sample[10] << 8) | sample[11]) == gyroX)  
-               ) {
-                ESP_LOGW(TAG, "FIFO data validation: detected suspicious all-same pattern (0x%04X or 0x0000) in sample %d.", 
-                        static_cast<uint16_t>(accelX), i);
-                return false; 
-            }
+        int16_t ax = (sample[0] << 8) | sample[1];
+        int16_t ay = (sample[2] << 8) | sample[3];
+        int16_t az = (sample[4] << 8) | sample[5];
+        int16_t gx = (sample[6] << 8) | sample[7];
+        int16_t gy = (sample[8] << 8) | sample[9];
+        int16_t gz = (sample[10] << 8) | sample[11];
+
+        // All-same patterns (0x0000 or 0xFFFF) across accel and gyro
+        bool accel_all_same = (ax == ay) && (ay == az) && (ax == 0 || ax == -1);
+        bool gyro_all_same  = (gx == gy) && (gy == gz) && (gx == 0 || gx == -1);
+        if (accel_all_same && gyro_all_same) {
+            ESP_LOGW(TAG, "Validation: all-same pattern detected in sample %d.", i);
+            return false;
+        }
+
+        // Saturation/stuck bit checks
+        auto is_sat = [](int16_t v) { return v == INT16_MAX || v == INT16_MIN; };
+        if (is_sat(ax) || is_sat(ay) || is_sat(az) || is_sat(gx) || is_sat(gy) || is_sat(gz)) {
+            ESP_LOGW(TAG, "Validation: saturation detected in sample %d.", i);
+            return false;
+        }
+
+        // Accel norm sanity (use squared magnitude to avoid sqrt)
+        // Convert to g using current scale
+        float ax_g = static_cast<float>(ax) / m_accel_lsb_per_g;
+        float ay_g = static_cast<float>(ay) / m_accel_lsb_per_g;
+        float az_g = static_cast<float>(az) / m_accel_lsb_per_g;
+        float mag2 = ax_g * ax_g + ay_g * ay_g + az_g * az_g;
+        // Acceptable |a| range ~ [0.2g, 2.5g]
+        constexpr float MIN_G2 = 0.04f;  // 0.2^2
+        constexpr float MAX_G2 = 6.25f;  // 2.5^2
+        if (mag2 < MIN_G2 || mag2 > MAX_G2) {
+            ESP_LOGW(TAG, "Validation: accel magnitude out of bounds (|a|^2=%.2f) in sample %d.", mag2, i);
+            return false;
         }
     }
     return true;
 }
 
-void FIFOProcessor::incrementIsrDataCounter() {
+esp_err_t FIFOProcessor::recoverFifoHard(const char* reason) {
+    ESP_LOGW(TAG, "FIFO hard recovery: %s", reason ? reason : "unknown");
+
+    // Disable FIFO first
+    esp_err_t ret = m_driver.disableFIFO();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "disableFIFO failed: %s", esp_err_to_name(ret));
+    }
+
+    // Clear latched interrupt status by reading it once
+    uint8_t status = 0;
+    m_driver.getInterruptStatus(status); // ignore return; read clears latches
+
+    // Full reset sequence
+    esp_err_t r2 = m_driver.performFullFIFOReset();
+    if (r2 != ESP_OK) {
+        ESP_LOGE(TAG, "performFullFIFOReset failed: %s", esp_err_to_name(r2));
+    }
+    vTaskDelay(pdMS_TO_TICKS(2));
+
+    // Defensive drain (if any residuals remain)
+    for (int i = 0; i < 3; ++i) {
+        uint16_t cnt = 0;
+        if (m_driver.readFifoCount(cnt) == ESP_OK && cnt > 0) {
+            size_t toRead = std::min<size_t>(cnt, sizeof(m_fifo_buffer));
+            m_driver.readFifoBuffer(m_fifo_buffer, toRead); // discard
+        } else {
+            break;
+        }
+    }
+
+    // Re-enable FIFO with ISR if installed
+    if (m_isr_handler_installed && m_interrupt_pin >= 0 && m_interrupt_pin < GPIO_NUM_MAX) {
+        ret = enableFIFO(m_interrupt_pin, m_interrupt_active_high);
+    } else {
+        ret = enableFIFO();
+    }
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to re-enable FIFO after recovery: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Warmup: short delay then single drain
+    vTaskDelay(pdMS_TO_TICKS(2));
+    uint16_t cnt = 0;
+    if (m_driver.readFifoCount(cnt) == ESP_OK && cnt > 0) {
+        size_t toRead = std::min<size_t>(cnt, sizeof(m_fifo_buffer));
+        m_driver.readFifoBuffer(m_fifo_buffer, toRead);
+    }
+
+    ESP_LOGI(TAG, "FIFO hard recovery complete.");
+    return ESP_OK;
+}
+
+void FIFOProcessor::notifyDataReady() {
     // Prevent ISR reentrancy - if already active, just return
     bool expected = false;
     if (!m_isr_active.compare_exchange_strong(expected, true, std::memory_order_acquire)) {
@@ -294,34 +361,20 @@ void FIFOProcessor::incrementIsrDataCounter() {
         return;
     }
     
-    // Use acquire-release memory ordering for proper synchronization
-    uint8_t count = m_interrupt_counter.fetch_add(1, std::memory_order_acq_rel) + 1;
-    
-    // Only signal the semaphore every INTERRUPTS_PER_PROCESS interrupts
-    if (count >= INTERRUPTS_PER_PROCESS) {
-        // Reset the counter with proper memory ordering
-        m_interrupt_counter.store(0, std::memory_order_release);
+    // Validate semaphore before using it in ISR context
+    if (m_dataReadySemaphore != NULL) {
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        BaseType_t result = xSemaphoreGiveFromISR(m_dataReadySemaphore, &xHigherPriorityTaskWoken);
         
-        // Increment the data counter that will be read by processFIFO
-        m_isr_data_counter.fetch_add(1, std::memory_order_acq_rel);
-        
-        // Validate semaphore before using it in ISR context
-        if (m_dataReadySemaphore != NULL) {
-            BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-            BaseType_t result = xSemaphoreGiveFromISR(m_dataReadySemaphore, &xHigherPriorityTaskWoken);
-            
-            // Check if semaphore operation was successful
-            if (result == pdTRUE && xHigherPriorityTaskWoken == pdTRUE) {
-                portYIELD_FROM_ISR();
-            } else if (result != pdTRUE) {
-                // Semaphore give failed - this could indicate the semaphore is full
-                // or corrupted. We'll continue but this should be logged if possible
-                // Note: Can't use ESP_LOG in ISR context, so we'll just continue
-            }
+        // Check if semaphore operation was successful
+        if (result == pdTRUE && xHigherPriorityTaskWoken == pdTRUE) {
+            portYIELD_FROM_ISR();
+        } else if (result != pdTRUE) {
+            // Semaphore give failed - this could indicate the semaphore is full
+            // or corrupted. We'll continue but this should be logged if possible
+            // Note: Can't use ESP_LOG in ISR context, so we'll just continue
         }
     }
-    
-    // Clear the ISR active flag with release ordering
     m_isr_active.store(false, std::memory_order_release);
 }
 
@@ -332,7 +385,7 @@ void IRAM_ATTR FIFOProcessor::isrHandler(void* arg) {
         // Additional validation - check if the processor is still valid
         // by checking if the semaphore exists (basic sanity check)
         if (processor->m_dataReadySemaphore != NULL) {
-            processor->incrementIsrDataCounter();
+            processor->notifyDataReady();
         }
     }
 }
@@ -348,10 +401,7 @@ esp_err_t FIFOProcessor::registerInterrupt(int interruptPin, bool activeHigh) {
         ESP_LOGE(TAG, "Data ready semaphore not initialized, cannot register ISR");
         return ESP_ERR_INVALID_STATE;
     }
-    
-    // Reset atomic counters before registering ISR
-    m_isr_data_counter.store(0, std::memory_order_release);
-    m_interrupt_counter.store(0, std::memory_order_release);
+
     m_isr_active.store(false, std::memory_order_release);
     
     // Store interrupt pin
@@ -361,7 +411,7 @@ esp_err_t FIFOProcessor::registerInterrupt(int interruptPin, bool activeHigh) {
     gpio_config_t io_conf = {};
     io_conf.pin_bit_mask = (1ULL << interruptPin);
     io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    io_conf.pull_up_en = activeHigh ? GPIO_PULLUP_DISABLE : GPIO_PULLUP_ENABLE;
     io_conf.pull_down_en = activeHigh ? GPIO_PULLDOWN_ENABLE : GPIO_PULLDOWN_DISABLE;
     io_conf.intr_type = activeHigh ? GPIO_INTR_POSEDGE : GPIO_INTR_NEGEDGE;
     
@@ -427,17 +477,10 @@ esp_err_t FIFOProcessor::unregisterInterrupt(int interruptPin) {
         return ret;
     }
     
-    // Reset counters after unregistering ISR
-    m_isr_data_counter.store(0, std::memory_order_release);
-    m_interrupt_counter.store(0, std::memory_order_release);
     m_isr_active.store(false, std::memory_order_release);
     
     m_isr_handler_installed = false;
     ESP_LOGI(TAG, "Removed ISR handler for pin %d", interruptPin);
     
     return ESP_OK;
-}
-
-uint8_t FIFOProcessor::getAndResetIsrDataCounter() {
-    return m_isr_data_counter.exchange(0, std::memory_order_acq_rel);
 }

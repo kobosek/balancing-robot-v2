@@ -37,7 +37,7 @@ public:
 
     esp_err_t resetAndReEnableFIFO();
 
-    void incrementIsrDataCounter();
+    void notifyDataReady();
 
     esp_err_t registerInterrupt(int interruptPin, bool activeHigh);
     esp_err_t unregisterInterrupt(int interruptPin);
@@ -45,8 +45,6 @@ public:
     SemaphoreHandle_t getDataReadySemaphore() { return m_dataReadySemaphore; }
     
     static void IRAM_ATTR isrHandler(void* arg);
-
-    uint8_t getAndResetIsrDataCounter();
 
 private:
     static constexpr const char* TAG = "FIFOProcessor";
@@ -63,10 +61,7 @@ private:
     float m_gyro_lsb_per_dps;
 
     uint8_t m_fifo_buffer[MAX_FIFO_BUFFER_SIZE];
-    std::atomic<uint8_t> m_isr_data_counter;  // Counts data-ready events
-    std::atomic<uint8_t> m_interrupt_counter;  // Counts interrupts to determine when to signal the task
-    static constexpr uint8_t INTERRUPTS_PER_PROCESS = 5;  // Process FIFO every 5th interrupt
-    
+
     // ISR validation and safety
     std::atomic<bool> m_isr_active;  // Tracks if ISR is currently active to prevent reentrancy
     
@@ -77,4 +72,11 @@ private:
     bool m_interrupt_active_high;           // Whether the interrupt is active high
 
     bool validateFIFOData(const uint8_t* data, size_t length);
+
+    // Hard recovery sequence for FIFO/INT anomalies
+    esp_err_t recoverFifoHard(const char* reason);
+
+    // Soft misalignment handling
+    uint8_t m_misalignment_strikes = 0;
+    static constexpr uint8_t MISALIGNMENT_STRIKES_BEFORE_HARD_RECOVERY = 3;
 };
