@@ -404,44 +404,15 @@ esp_err_t FIFOProcessor::registerInterrupt(int interruptPin, bool activeHigh) {
 
     m_isr_active.store(false, std::memory_order_release);
     
-    // Store interrupt pin
+    // Store interrupt pin and polarity
     m_interrupt_pin = interruptPin;
-    
-    // Configure GPIO for interrupt
-    gpio_config_t io_conf = {};
-    io_conf.pin_bit_mask = (1ULL << interruptPin);
-    io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pull_up_en = activeHigh ? GPIO_PULLUP_DISABLE : GPIO_PULLUP_ENABLE;
-    io_conf.pull_down_en = activeHigh ? GPIO_PULLDOWN_ENABLE : GPIO_PULLDOWN_DISABLE;
-    io_conf.intr_type = activeHigh ? GPIO_INTR_POSEDGE : GPIO_INTR_NEGEDGE;
-    
     m_interrupt_active_high = activeHigh;
-    
-    esp_err_t ret = gpio_config(&io_conf);
+
+    esp_err_t ret = m_irqHelper.init(static_cast<gpio_num_t>(interruptPin), activeHigh, &FIFOProcessor::isrHandler, this);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to configure interrupt pin %d: %s", interruptPin, esp_err_to_name(ret));
         return ret;
     }
-    
-    // Install ISR service if not already installed
-    ret = gpio_install_isr_service(ESP_INTR_FLAG_LOWMED);
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "Failed to install ISR service: %s", esp_err_to_name(ret));
-        return ret;
-    } else if (ret == ESP_ERR_INVALID_STATE) {
-        ESP_LOGW(TAG, "ISR service already installed. Proceeding.");
-    }
-    
-    // Remove handler if already installed
-    gpio_isr_handler_remove(static_cast<gpio_num_t>(interruptPin));
-    
-    // Add handler
-    ret = gpio_isr_handler_add(static_cast<gpio_num_t>(interruptPin), isrHandler, this);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to add ISR handler for pin %d: %s", interruptPin, esp_err_to_name(ret));
-        return ret;
-    }
-    
+
     m_isr_handler_installed = true;
     ESP_LOGI(TAG, "GPIO interrupt configured and handler added for INT pin %d", interruptPin);
     
@@ -471,9 +442,8 @@ esp_err_t FIFOProcessor::unregisterInterrupt(int interruptPin) {
         ESP_LOGW(TAG, "ISR still active after timeout, proceeding with unregistration");
     }
     
-    esp_err_t ret = gpio_isr_handler_remove(static_cast<gpio_num_t>(interruptPin));
+    esp_err_t ret = m_irqHelper.deinit();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Error removing ISR handler for pin %d: %s", interruptPin, esp_err_to_name(ret));
         return ret;
     }
     

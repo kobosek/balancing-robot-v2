@@ -8,6 +8,7 @@
 #include "freertos/semphr.h"
 #include <atomic>
 #include <cstdint>
+#include "IMUDataReadyInterrupt.hpp"
 
 // Forward declarations
 class MPU6050Driver;
@@ -70,6 +71,9 @@ private:
     bool m_isr_handler_installed;           // Whether the ISR handler is installed
     int m_interrupt_pin;                    // GPIO pin for the interrupt
     bool m_interrupt_active_high;           // Whether the interrupt is active high
+
+    // Helper to manage GPIO/ISR lifecycle
+    IMUDataReadyInterrupt m_irqHelper;
 
     bool validateFIFOData(const uint8_t* data, size_t length);
 

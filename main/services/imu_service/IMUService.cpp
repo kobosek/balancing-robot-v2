@@ -31,6 +31,7 @@
 #include "FIFOTask.hpp"
 #include "HealthMonitorTask.hpp"
 #include "IMUHealthMonitor.hpp"
+#include "IMUScale.hpp"
 
 // Constructor Implementation
 IMUService::IMUService(std::shared_ptr<OrientationEstimator> estimator,
@@ -155,23 +156,10 @@ void IMUService::handleIMUConfigUpdate(const CONFIG_ImuConfigUpdate& event) {
 void IMUService::calculateScalingFactors() {
     std::lock_guard<std::mutex> config_lock(m_config_mutex);
     
-    // Using the baseline calculation method (no averaging) to get the current scaling factors:
-    switch(m_config.accel_range) {
-        case 0: m_accel_lsb_per_g = 16384.0f; break;
-        case 1: m_accel_lsb_per_g = 8192.0f;  break;
-        case 2: m_accel_lsb_per_g = 4096.0f;  break;
-        case 3: m_accel_lsb_per_g = 2048.0f;  break;
-        default: ESP_LOGW(TAG, "Unknown accel range %d, using default scale (8192 LSB/g)!", m_config.accel_range); m_accel_lsb_per_g = 8192.0f; break;
-    }
+    // Compute scaling factors via centralized utility to avoid drift
+    m_accel_lsb_per_g = IMUScale::computeAccelLSBPerG(m_config.accel_range);
+    m_gyro_lsb_per_dps = IMUScale::computeGyroLSBPerDPS(m_config.gyro_range);
     ESP_LOGD(TAG, "Accel scale set to: %.1f LSB/g for range %d", m_accel_lsb_per_g, m_config.accel_range);
-
-    switch(m_config.gyro_range) {
-        case 0: m_gyro_lsb_per_dps = 131.0f; break;
-        case 1: m_gyro_lsb_per_dps = 65.5f;  break;
-        case 2: m_gyro_lsb_per_dps = 32.8f;  break;
-        case 3: m_gyro_lsb_per_dps = 16.4f;  break;
-        default: ESP_LOGW(TAG, "Unknown gyro range %d, using default scale (65.5 LSB/dps)!", m_config.gyro_range); m_gyro_lsb_per_dps = 65.5f; break;
-    }
     ESP_LOGD(TAG, "Gyro scale set to: %.1f LSB/dps for range %d", m_gyro_lsb_per_dps, m_config.gyro_range);
 
     bool dlpf_enabled = (m_config.dlpf_config >= 1 && m_config.dlpf_config <= 6);

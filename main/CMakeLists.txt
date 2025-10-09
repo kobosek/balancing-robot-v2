@@ -20,6 +20,7 @@ idf_component_register(SRCS # --- Tasks ---
                             "services/imu_service/FIFOTask.cpp"
                             "services/imu_service/HealthMonitorTask.cpp"
                             "services/imu_service/FIFOProcessor.cpp"
+                            "services/imu_service/IMUDataReadyInterrupt.cpp"
                             # --- Battery Service 
                             "services/battery_service/BatteryService.cpp"
                             "services/battery_service/BatteryTask.cpp"

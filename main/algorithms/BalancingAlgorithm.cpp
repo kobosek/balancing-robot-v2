@@ -106,8 +106,8 @@ MotorEffort BalancingAlgorithm::update(float dt, float currentPitch_deg, float c
     float yawCorrectionDiff_dps = m_yawRatePid.compute(targetAngVel_dps, currentYawRate_dps, dt);
 
     // --- Combine Components for Wheel Speed Setpoints ---
-    float speedSetpointLeft_dps = baseSpeed_dps - commandedTurnDiff_dps - yawCorrectionDiff_dps;
-    float speedSetpointRight_dps = baseSpeed_dps + commandedTurnDiff_dps + yawCorrectionDiff_dps;
+    float speedSetpointLeft_dps = baseSpeed_dps - commandedTurnDiff_dps;// - yawCorrectionDiff_dps;
+    float speedSetpointRight_dps = baseSpeed_dps + commandedTurnDiff_dps;// + yawCorrectionDiff_dps;
 
     // --- Clamp Final Speed Setpoints ---
     speedSetpointLeft_dps = std::max(m_angle_pid_output_min, std::min(m_angle_pid_output_max, speedSetpointLeft_dps));
