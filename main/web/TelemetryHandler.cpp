@@ -1,6 +1,7 @@
 #include "TelemetryHandler.hpp"
 #include "EventBus.hpp" // Include event bus for subscription
 #include "CONFIG_FullConfigUpdate.hpp" // Include event definition
+#include "TELEMETRY_Snapshot.hpp"
 #include "BaseEvent.hpp"
 #include "EventTypes.hpp"
 #include "ConfigData.hpp" // Need full struct def for WebServerConfig
@@ -38,7 +39,11 @@ void TelemetryHandler::handleEvent(const BaseEvent& event) {
         case EventType::CONFIG_FULL_UPDATE:
             handleConfigUpdate(static_cast<const CONFIG_FullConfigUpdate&>(event));
             break;
-            
+
+        case EventType::TELEMETRY_SNAPSHOT:
+            addTelemetrySnapshot(static_cast<const TELEMETRY_Snapshot&>(event).snapshot);
+            break;
+
         default:
             ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
                      getHandlerName().c_str(), static_cast<int>(event.type));

@@ -37,9 +37,12 @@ enum class EventType {
 
     // Diagnostic/Status Events
     TELEMETRY_SNAPSHOT,              // TELEMETRY_Snapshot
-    MOTION_FALL_DETECTED,            // MOTION_FallDetected
     BATTERY_LOW_WARNING,             // BATTERY_LowWarning (not implemented yet)
     IMU_COMMUNICATION_ERROR,         // IMU_CommunicationError
+
+    //Balance Monitoring
+    BALANCE_FALL_DETECTED,            // BALANCE_FallDetected
+    BALANCE_RECOVERY_DETECTED,        // BALANCE_RecoveryDetected
 
     // IMU Recovery Events
     IMU_RECOVERY_SUCCEEDED,          // IMU_RecoverySucceeded

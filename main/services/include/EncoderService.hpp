@@ -3,7 +3,6 @@
 
 #include "ConfigData.hpp"               // Found via INCLUDE_DIRS
 #include "driver/pulse_cnt.h"
-#include "driver/gpio.h"
 // #include "esp_log.h" // Moved to .cpp
 #include <cmath>                        // For M_PI if needed
 
@@ -38,5 +37,5 @@ private:
     float m_degs_per_pulse = 0.0f; // Renamed constant
     // --- End Update ---
 
-    esp_err_t initPCNTUnit(gpio_num_t pinA, gpio_num_t pinB, pcnt_unit_handle_t* unit_handle);
+    esp_err_t initPCNTUnit(int pinA, int pinB, pcnt_unit_handle_t* unit_handle);
 };

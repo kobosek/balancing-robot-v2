@@ -3,6 +3,8 @@
 #include <algorithm>                    // For std::max, std::min
 #include <cmath>                        // For std::fabs
 #include "esp_log.h"                    // Moved from header
+#include "esp_err.h"
+
 
 // Initializer list now matches declaration order in the updated header
 PIDController::PIDController(std::string config_key) :

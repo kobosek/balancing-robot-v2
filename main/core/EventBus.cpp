@@ -49,10 +49,13 @@ std::string eventTypeToString(EventType type) {
         
         // Diagnostic/Status Events
         case EventType::TELEMETRY_SNAPSHOT: return "TELEMETRY_SNAPSHOT";
-        case EventType::MOTION_FALL_DETECTED: return "MOTION_FALL_DETECTED";
         case EventType::BATTERY_LOW_WARNING: return "BATTERY_LOW_WARNING";
         case EventType::IMU_COMMUNICATION_ERROR: return "IMU_COMMUNICATION_ERROR";
         
+        //BALANCE DETECTION
+        case EventType::BALANCE_FALL_DETECTED: return "BALANCE_FALL_DETECTED";
+        case EventType::BALANCE_RECOVERY_DETECTED: return "BALANCE_RECOVERY_DETECTED";
+
         // IMU Recovery Events
         case EventType::IMU_RECOVERY_SUCCEEDED: return "IMU_RECOVERY_SUCCEEDED";
         case EventType::IMU_RECOVERY_FAILED: return "IMU_RECOVERY_FAILED";

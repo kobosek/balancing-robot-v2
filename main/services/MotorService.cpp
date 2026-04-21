@@ -25,14 +25,24 @@ MotorService::MotorService(const MotorConfig& config, EventBus& bus) :
     ESP_LOGI(TAG, "PWM Max Duty calculated: %lu for %d bits resolution", m_pwm_max_duty, m_config.duty_resolution);
 
     m_hw_driver_left = std::make_unique<MX1616H_HWDriver>(
-        m_config.left_pin_in1, m_config.left_pin_in2,
-        m_config.left_channel_1, m_config.left_channel_2,
-        m_config.timer_num, m_config.speed_mode, m_config.duty_resolution, m_config.pwm_frequency_hz
+        static_cast<gpio_num_t>(m_config.left_pin_in1),
+        static_cast<gpio_num_t>(m_config.left_pin_in2),
+        static_cast<ledc_channel_t>(m_config.left_channel_1),
+        static_cast<ledc_channel_t>(m_config.left_channel_2),
+        static_cast<ledc_timer_t>(m_config.timer_num),
+        static_cast<ledc_mode_t>(m_config.speed_mode),
+        static_cast<ledc_timer_bit_t>(m_config.duty_resolution),
+        m_config.pwm_frequency_hz
     );
     m_hw_driver_right = std::make_unique<MX1616H_HWDriver>(
-        m_config.right_pin_in1, m_config.right_pin_in2,
-        m_config.right_channel_1, m_config.right_channel_2,
-        m_config.timer_num, m_config.speed_mode, m_config.duty_resolution, m_config.pwm_frequency_hz
+        static_cast<gpio_num_t>(m_config.right_pin_in1),
+        static_cast<gpio_num_t>(m_config.right_pin_in2),
+        static_cast<ledc_channel_t>(m_config.right_channel_1),
+        static_cast<ledc_channel_t>(m_config.right_channel_2),
+        static_cast<ledc_timer_t>(m_config.timer_num),
+        static_cast<ledc_mode_t>(m_config.speed_mode),
+        static_cast<ledc_timer_bit_t>(m_config.duty_resolution),
+        m_config.pwm_frequency_hz
     );
 }
 
@@ -91,9 +101,9 @@ esp_err_t MotorService::configureLEDCTimer() {
      }
 
      ledc_timer_config_t ledc_timer = {
-        .speed_mode       = m_config.speed_mode,
-        .duty_resolution  = m_config.duty_resolution,
-        .timer_num        = m_config.timer_num,
+        .speed_mode       = static_cast<ledc_mode_t>(m_config.speed_mode),
+        .duty_resolution  = static_cast<ledc_timer_bit_t>(m_config.duty_resolution),
+        .timer_num        = static_cast<ledc_timer_t>(m_config.timer_num),
         .freq_hz          = m_config.pwm_frequency_hz,
         .clk_cfg          = LEDC_AUTO_CLK};
 

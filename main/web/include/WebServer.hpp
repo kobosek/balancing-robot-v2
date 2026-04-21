@@ -12,8 +12,9 @@
 // Forward declare dependencies needed by constructor/members
 class ConfigurationService; // Still needed for ConfigApiHandler
 class StateManager;
+class BalanceMonitor;
 class EventBus;
-class BaseEvent; // ADD
+class BaseEvent;
 
 // Forward declare handler classes
 class StaticFileHandler;
@@ -25,8 +26,9 @@ class StateApiHandler;
 class WebServer : public EventHandler {
 public:
     // Constructor takes high-level dependencies + WebServerConfig
-    WebServer(ConfigurationService& configService, // Keep config service for handler that needs it
+    WebServer(ConfigurationService& configService,
               StateManager& stateManager,
+              BalanceMonitor& balanceMonitor,
               EventBus& eventBus,
               const WebServerConfig& initialWebConfig);
     ~WebServer();
@@ -46,8 +48,9 @@ private:
     httpd_handle_t server = nullptr;
 
     // Store references to dependencies needed by WS handler or specific handlers
-    ConfigurationService& m_configService; // Keep for ConfigApiHandler
+    ConfigurationService& m_configService;
     StateManager& m_stateManager;
+    BalanceMonitor& m_balanceMonitor;
     EventBus& m_eventBus;
 
     // Own instances of the handlers

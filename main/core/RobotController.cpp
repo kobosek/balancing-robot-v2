@@ -2,20 +2,19 @@
 
 #include "OrientationEstimator.hpp"
 #include "BalancingAlgorithm.hpp"
-#include "FallDetector.hpp"
 #include "EncoderService.hpp"
 #include "MotorService.hpp"
 #include "BatteryService.hpp"
 #include "StateManager.hpp"
 #include "SystemState.hpp"
-#include "WebServer.hpp"
-#include "TelemetryDataPoint.hpp"
-#include "BATTERY_StatusUpdate.hpp" // <<< Already Included
+#include "BATTERY_StatusUpdate.hpp"
 #include "CommandProcessor.hpp"
 #include "EventBus.hpp"
 #include "EventTypes.hpp"
 #include "MOTION_TargetMovement.hpp"
 #include "IMU_OrientationData.hpp"
+#include "TELEMETRY_Snapshot.hpp"
+#include "TelemetryDataPoint.hpp"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -27,8 +26,6 @@ RobotController::RobotController(
     MotorService& motorService,
     BalancingAlgorithm& algorithm,
     StateManager& stateManager,
-    FallDetector& fallDetector,
-    WebServer& webServer,
     BatteryService& batteryService,
     CommandProcessor& commandProcessor
 ) :
@@ -37,8 +34,6 @@ RobotController::RobotController(
     m_motorService(motorService),
     m_algorithm(algorithm),
     m_stateManager(stateManager),
-    m_fallDetector(fallDetector),
-    m_webServer(webServer),
     m_batteryService(batteryService),
     m_commandProcessor(commandProcessor),
     m_latestTargetPitchOffset_deg(0.0f),
@@ -49,8 +44,7 @@ RobotController::RobotController(
 
 esp_err_t RobotController::init(EventBus& bus) {
     ESP_LOGI(TAG, "Initializing RobotController...");
-    m_eventBus = &bus; // Still store the reference
-    // <<< REMOVED: Subscription moved >>>
+    m_eventBus = &bus;
     ESP_LOGI(TAG, "RobotController initialized.");
     return ESP_OK;
 }
@@ -95,26 +89,22 @@ void RobotController::runControlStep(float dt) {
     // 1. Get Orientation Data
     float pitch_deg = m_estimator->getPitchDeg();
     float pitch_rate_dps = 0.0f;
-    float yaw_rate_dps = m_estimator->getYawRateDPS(); // <<< GET YAW RATE
+    float yaw_rate_dps = m_estimator->getYawRateDPS();
 
-    // Publish orientation data event for auto recovery and other systems
+    // Publish orientation data — BalanceMonitor handles fall detection and recovery as an observer
     if (m_eventBus) {
         IMU_OrientationData orientation_event(pitch_deg * OrientationEstimator::DEG_TO_RAD, pitch_rate_dps * OrientationEstimator::DEG_TO_RAD);
         m_eventBus->publish(orientation_event);
     }
 
-    // 2. Check for Fall & Update State
-    if (currentState == SystemState::BALANCING && m_stateManager.isFallDetectionEnabled()) {
-         m_fallDetector.check(pitch_deg * OrientationEstimator::DEG_TO_RAD);
-    }
-    currentState = m_stateManager.getCurrentState(); // Re-fetch
+    currentState = m_stateManager.getCurrentState(); // Re-fetch after observers may have changed state
 
-    // 3. Update Encoder Speeds
+    // 2. Update Encoder Speeds
     m_encoderService.update(dt);
     float speedL_dps = m_encoderService.getLeftSpeedDegPerSec();
     float speedR_dps = m_encoderService.getRightSpeedDegPerSec();
 
-    // 4. Get Target Control Values
+    // 3. Get Target Control Values
     float currentTargetPitchOffset_deg;
     float currentTargetAngVel_dps;
     { // Lock scope
@@ -123,10 +113,9 @@ void RobotController::runControlStep(float dt) {
         currentTargetAngVel_dps = m_latestTargetAngVel_dps;
     }
 
-    // 5. Run Balancing Algorithm
+    // 4. Run Balancing Algorithm
     MotorEffort effort = {0.0f, 0.0f};
     if (currentState == SystemState::BALANCING) {
-         // <<< Pass yaw_rate_dps to algorithm >>>
          effort = m_algorithm.update(dt, pitch_deg, pitch_rate_dps, yaw_rate_dps,
                                     speedL_dps, speedR_dps,
                                     currentTargetPitchOffset_deg,
@@ -138,10 +127,10 @@ void RobotController::runControlStep(float dt) {
         currentTargetAngVel_dps = 0.0f;
     }
 
-    // 6. Set Motor Effort
+    // 5. Set Motor Effort
     m_motorService.setMotorEffort(effort.left, effort.right);
 
-    // 7. Update Telemetry Buffer
+    // 6. Update Telemetry Buffer
     TelemetryDataPoint snapshot = {};
     snapshot.timestamp_us = startTimeMicros;
     snapshot.pitch_deg = pitch_deg;
@@ -152,8 +141,9 @@ void RobotController::runControlStep(float dt) {
     snapshot.speedSetpointLeft_dps = m_algorithm.getLastSpeedSetpointLeftDPS();
     snapshot.speedSetpointRight_dps = m_algorithm.getLastSpeedSetpointRightDPS();
     snapshot.desiredAngle_deg = currentTargetPitchOffset_deg;
-    snapshot.yawRate_dps = yaw_rate_dps; // <<< ADD YAW RATE TO TELEMETRY
-    m_webServer.addTelemetrySnapshot(snapshot);
+    snapshot.yawRate_dps = yaw_rate_dps;
+
+    m_eventBus->publish(TELEMETRY_Snapshot(snapshot));
 
     // Update Log (added Yaw)
     ESP_LOGV(TAG, "Ctrl Step: dt=%.4f, P=%.1f YawR=%.1f | TgtPO=%.1f, TgtAV=%.1f | SSetL=%.1f, SSetR=%.1f | SActL=%.1f, SActR=%.1f | EffL=%.2f, EffR=%.2f",

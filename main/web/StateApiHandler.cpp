@@ -1,15 +1,17 @@
 // main/web/StateApiHandler.cpp
 #include "StateApiHandler.hpp"
-#include "StateManager.hpp" // Need full definition
-#include "SystemState.hpp"  // Need full definition
-#include "BaseEvent.hpp"    // Need for BaseEvent
+#include "StateManager.hpp"
+#include "BalanceMonitor.hpp"
+#include "SystemState.hpp"
+#include "BaseEvent.hpp"
 #include "cJSON.h"
 #include <memory>
 #include <string>
 #include "esp_log.h"
 #include "esp_http_server.h"
 
-StateApiHandler::StateApiHandler(StateManager& stateManager) : m_stateManager(stateManager) {
+StateApiHandler::StateApiHandler(StateManager& stateManager, BalanceMonitor& balanceMonitor)
+    : m_stateManager(stateManager), m_balanceMonitor(balanceMonitor) {
     ESP_LOGI(TAG, "StateApiHandler constructed.");
 }
 
@@ -37,8 +39,8 @@ static const char* stateToString(SystemState state) {
 esp_err_t StateApiHandler::handleRequest(httpd_req_t *req) {
     ESP_LOGD(TAG, "Received request for /api/state (GET)");
     SystemState currentState = m_stateManager.getCurrentState();
-    bool autoRecoveryEnabled = m_stateManager.isAutoRecoveryEnabled(); // <<< Get status
-    bool fallDetectionEnabled = m_stateManager.isFallDetectionEnabled(); // <<< Get status
+    bool autoRecoveryEnabled = m_balanceMonitor.isAutoRecoveryEnabled();
+    bool fallDetectionEnabled = m_balanceMonitor.isFallDetectionEnabled();
     const char* stateStr = stateToString(currentState);
 
     auto cjson_deleter = [](cJSON* ptr){ if(ptr) cJSON_Delete(ptr); };
@@ -51,9 +53,9 @@ esp_err_t StateApiHandler::handleRequest(httpd_req_t *req) {
 
     cJSON_AddNumberToObject(root, "state_id", static_cast<int>(currentState));
     cJSON_AddStringToObject(root, "state_name", stateStr);
-    cJSON_AddBoolToObject(root, "auto_recovery_enabled", autoRecoveryEnabled); // <<< ADDED
-    cJSON_AddBoolToObject(root, "fall_detection_enabled", fallDetectionEnabled); // <<< ADDED
-    
+    cJSON_AddBoolToObject(root, "auto_recovery_enabled", autoRecoveryEnabled);
+    cJSON_AddBoolToObject(root, "fall_detection_enabled", fallDetectionEnabled);
+
     std::unique_ptr<char, decltype(char_deleter)> json_str_ptr(cJSON_PrintUnformatted(root));
     char* json_string = json_str_ptr.get();
     if (!json_string) {

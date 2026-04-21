@@ -2,6 +2,7 @@
 
 #include "ConfigData.hpp"               // Found via INCLUDE_DIRS (Need PIDConfig struct definition)
 #include <string>
+#include "esp_err.h"
 
 class PIDController {
 public:

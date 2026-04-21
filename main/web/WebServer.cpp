@@ -10,12 +10,14 @@
 // Include necessary services/events for handler instantiation/use
 #include "ConfigurationService.hpp"
 #include "StateManager.hpp"
+#include "BalanceMonitor.hpp"
 #include "EventBus.hpp"
 #include "TelemetryDataPoint.hpp"
 #include "UI_JoystickInput.hpp"
 #include "ConfigData.hpp" // Needed for config struct
 #include "EventTypes.hpp" // Needed for subscription
 #include "CONFIG_FullConfigUpdate.hpp" // Needed for subscription
+#include "TELEMETRY_Snapshot.hpp"
 
 #include "esp_check.h"
 #include "esp_http_server.h"
@@ -25,17 +27,18 @@
 #include <algorithm>
 
 // Constructor: Instantiate handlers, injecting dependencies
-WebServer::WebServer(ConfigurationService& configService, StateManager& stateManager, EventBus& eventBus, const WebServerConfig& initialWebConfig)
+WebServer::WebServer(ConfigurationService& configService, StateManager& stateManager, BalanceMonitor& balanceMonitor, EventBus& eventBus, const WebServerConfig& initialWebConfig)
     : server(nullptr),
-      m_configService(configService), // Store reference for ConfigApiHandler
-      m_stateManager(stateManager),   // Store reference for StateApiHandler
-      m_eventBus(eventBus)            // Store EventBus reference for WS handler
+      m_configService(configService),
+      m_stateManager(stateManager),
+      m_balanceMonitor(balanceMonitor),
+      m_eventBus(eventBus)
 {
     m_staticFileHandler = std::make_unique<StaticFileHandler>("/spiffs");
-    m_telemetryHandler = std::make_unique<TelemetryHandler>(initialWebConfig); // Pass web config struct
-    m_configApiHandler = std::make_unique<ConfigApiHandler>(m_configService); // Pass config service
-    m_commandApiHandler = std::make_unique<CommandApiHandler>(m_eventBus);    // Pass eventBus
-    m_stateApiHandler = std::make_unique<StateApiHandler>(m_stateManager);    // Pass stateManager
+    m_telemetryHandler = std::make_unique<TelemetryHandler>(initialWebConfig);
+    m_configApiHandler = std::make_unique<ConfigApiHandler>(m_configService);
+    m_commandApiHandler = std::make_unique<CommandApiHandler>(m_eventBus);
+    m_stateApiHandler = std::make_unique<StateApiHandler>(m_stateManager, m_balanceMonitor);
     ESP_LOGI(TAG, "Webserver handlers created.");
 }
 
@@ -66,7 +69,12 @@ void WebServer::handleEvent(const BaseEvent& event) {
                 m_configApiHandler->handleEvent(event);
             }
             break;
-            
+        case EventType::TELEMETRY_SNAPSHOT:
+            if(m_telemetryHandler) {
+                ESP_LOGV(TAG, "Forwarding TELEMETRY_SNAPSHOT to TelemetryHandler");
+                m_telemetryHandler->handleEvent(event);
+            }
+            break;
         default:
             ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
                      getHandlerName().c_str(), static_cast<int>(event.type));

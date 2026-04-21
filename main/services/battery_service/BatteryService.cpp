@@ -108,8 +108,8 @@ esp_err_t BatteryService::init() {
 
     // 3. Configure ADC Channel (using values from m_config)
     adc_oneshot_chan_cfg_t channel_config = {
-        .atten = m_config.adc_atten,
-        .bitwidth = m_config.adc_bitwidth,
+        .atten = static_cast<adc_atten_t>(m_config.adc_atten),
+        .bitwidth = static_cast<adc_bitwidth_t>(m_config.adc_bitwidth),
     };
     ret = adc_oneshot_config_channel(m_oneshot_adc_handle, m_adc_channel, &channel_config); // Use mapped channel
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed to config ADC channel %d for GPIO %d", (int)m_adc_channel, (int)m_config.adc_pin);
@@ -144,8 +144,8 @@ bool BatteryService::adc_calibration_init(adc_channel_t channel) {
     adc_cali_curve_fitting_config_t cali_config = {
         .unit_id = ADC_UNIT_1,
         .chan = channel,
-        .atten = m_config.adc_atten,        // Use config value
-        .bitwidth = m_config.adc_bitwidth,  // Use config value
+        .atten = static_cast<adc_atten_t>(m_config.adc_atten),
+        .bitwidth = static_cast<adc_bitwidth_t>(m_config.adc_bitwidth),
     };
     ret = adc_cali_create_scheme_curve_fitting(&cali_config, &m_adc_cali_handle);
     if (ret == ESP_OK) {

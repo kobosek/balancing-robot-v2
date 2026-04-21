@@ -29,7 +29,7 @@
 #include "EncoderService.hpp"
 #include "MotorService.hpp"
 #include "BalancingAlgorithm.hpp"
-#include "FallDetector.hpp"
+#include "BalanceMonitor.hpp"
 #include "BatteryService.hpp"
 #include "CommandProcessor.hpp"
 #include "WiFiManager.hpp"
@@ -113,11 +113,10 @@ esp_err_t Application::init()
     );
     ret = m_balancingAlgorithm->init(); ESP_RETURN_ON_ERROR(ret, TAG, "BalancingAlgorithm init failed");
 
-    m_fallDetector = std::make_shared<FallDetector>(*m_eventBus, behaviorConf); // Pass behavior config
-    // FallDetector constructor now loads config and resets
+    m_balanceMonitor = std::make_shared<BalanceMonitor>(*m_eventBus, behaviorConf);
 
     // WebServer needs ConfigService mainly to pass to handlers that NEED it (ConfigApiHandler)
-    m_webServer = std::make_shared<WebServer>(*m_configService, *m_stateManager, *m_eventBus, webConf); // Pass web config
+    m_webServer = std::make_shared<WebServer>(*m_configService, *m_stateManager, *m_balanceMonitor, *m_eventBus, webConf);
     ret = m_webServer->init(); ESP_RETURN_ON_ERROR(ret, TAG, "WebServer init failed");
 
     // Create IMUService with encapsulated components
@@ -137,8 +136,6 @@ esp_err_t Application::init()
         *m_motorService,
         *m_balancingAlgorithm,
         *m_stateManager,
-        *m_fallDetector,
-        *m_webServer,
         *m_batteryService,
         *m_commandProcessor
     );
@@ -157,11 +154,17 @@ esp_err_t Application::init()
         EventType::CONFIG_PID_UPDATE
     });
     
-    // FallDetector subscriptions - now using EventHandler
-    m_eventBus->subscribe(m_fallDetector, {
-        EventType::CONFIG_FULL_UPDATE
+    // BalanceMonitor subscriptions
+    m_eventBus->subscribe(m_balanceMonitor, {
+        EventType::IMU_ORIENTATION_DATA,
+        EventType::SYSTEM_STATE_CHANGED,
+        EventType::CONFIG_FULL_UPDATE,
+        EventType::UI_ENABLE_FALL_RECOVERY,
+        EventType::UI_DISABLE_FALL_RECOVERY,
+        EventType::UI_ENABLE_FALL_DETECTION,
+        EventType::UI_DISABLE_FALL_DETECTION
     });
-    
+
     // MotorService subscriptions - now using EventHandler
     m_eventBus->subscribe(m_motorService, {
         EventType::SYSTEM_STATE_CHANGED
@@ -174,15 +177,12 @@ esp_err_t Application::init()
     
     // StateManager subscriptions - now using EventHandler
     m_eventBus->subscribe(m_stateManager, {
-        EventType::MOTION_FALL_DETECTED,
+        EventType::BALANCE_FALL_DETECTED,
+        EventType::BALANCE_RECOVERY_DETECTED,
         EventType::UI_START_BALANCING,
         EventType::UI_STOP,
         EventType::BATTERY_STATUS_UPDATE,
-        EventType::IMU_ORIENTATION_DATA,
-        EventType::UI_ENABLE_FALL_RECOVERY,
-        EventType::UI_DISABLE_FALL_RECOVERY,
-        EventType::UI_ENABLE_FALL_DETECTION,
-        EventType::UI_DISABLE_FALL_DETECTION,
+
         EventType::UI_CALIBRATE_IMU,
         EventType::IMU_CALIBRATION_COMPLETED,
         EventType::IMU_CALIBRATION_REJECTED,
@@ -212,8 +212,10 @@ esp_err_t Application::init()
     
     // WebServer subscriptions - now using EventHandler
     m_eventBus->subscribe(m_webServer, {
-        EventType::CONFIG_FULL_UPDATE
+        EventType::CONFIG_FULL_UPDATE,
+        EventType::TELEMETRY_SNAPSHOT
     });
+
     ESP_LOGI(TAG, "Application initialization complete");
     return ESP_OK;
 }

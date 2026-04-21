@@ -49,15 +49,15 @@ esp_err_t EncoderService::init() {
     esp_err_t ret;
     ret = initPCNTUnit(m_config.left_pin_a, m_config.left_pin_b, &m_unit_left);
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed init Left Encoder PCNT");
-    ESP_LOGI(TAG, "Left Encoder PCNT Initialized (Pins A:%d, B:%d)", (int)m_config.left_pin_a, (int)m_config.left_pin_b);
+    ESP_LOGI(TAG, "Left Encoder PCNT Initialized (Pins A:%d, B:%d)", m_config.left_pin_a, m_config.left_pin_b);
     ret = initPCNTUnit(m_config.right_pin_a, m_config.right_pin_b, &m_unit_right);
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed init Right Encoder PCNT");
-    ESP_LOGI(TAG, "Right Encoder PCNT Initialized (Pins A:%d, B:%d)", (int)m_config.right_pin_a, (int)m_config.right_pin_b);
+    ESP_LOGI(TAG, "Right Encoder PCNT Initialized (Pins A:%d, B:%d)", m_config.right_pin_a, m_config.right_pin_b);
     ESP_LOGI(TAG, "EncoderService Initialized Successfully.");
     return ESP_OK;
 }
 
-esp_err_t EncoderService::initPCNTUnit(gpio_num_t pinA, gpio_num_t pinB, pcnt_unit_handle_t* unit_handle) {
+esp_err_t EncoderService::initPCNTUnit(int pinA, int pinB, pcnt_unit_handle_t* unit_handle) {
     // ... (PCNT initialization remains the same) ...
      ESP_LOGD(TAG, "Init PCNT Unit for pins A:%d, B:%d", pinA, pinB);
      pcnt_unit_config_t unit_config = { .low_limit = m_config.pcnt_low_limit, .high_limit = m_config.pcnt_high_limit, .flags = { .accum_count = 1 } };

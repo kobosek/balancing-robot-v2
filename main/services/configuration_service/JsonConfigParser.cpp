@@ -1,9 +1,15 @@
 #include "JsonConfigParser.hpp"
 #include "cJSON.h"
 #include "esp_log.h"
+#include "esp_err.h"
 #include <string>
 #include <vector>
 #include <memory>
+#include "esp_adc/adc_oneshot.h"
+#include "driver/gpio.h"
+#include "driver/ledc.h"
+#include "driver/i2c_master.h"
+
 // #include "ConfigData.hpp" // Included via header
 
 // --- Fully implement helper functions ---

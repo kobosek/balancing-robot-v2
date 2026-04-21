@@ -269,7 +269,13 @@ esp_err_t IMUService::init() {
 
     ESP_LOGI(TAG, "Initializing MPU6050 hardware");
     // Initialize the actual driver now
-    esp_err_t ret = m_driver->init(m_config.i2c_port, m_config.sda_pin, m_config.scl_pin, m_config.device_address, m_config.i2c_freq_hz);
+    esp_err_t ret = m_driver->init(
+        static_cast<i2c_port_t>(m_config.i2c_port),
+        static_cast<gpio_num_t>(m_config.sda_pin),
+        static_cast<gpio_num_t>(m_config.scl_pin),
+        m_config.device_address,
+        m_config.i2c_freq_hz
+    );
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "MPU6050 init failed: %s", esp_err_to_name(ret));
         return ret;

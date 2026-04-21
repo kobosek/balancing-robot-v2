@@ -38,7 +38,7 @@ idf_component_register(SRCS # --- Tasks ---
                             # --- Algorithms ---
                             "algorithms/PIDController.cpp"
                             "algorithms/BalancingAlgorithm.cpp"
-                            "algorithms/FallDetector.cpp"
+                            "algorithms/BalanceMonitor.cpp"
                             "algorithms/CommandProcessor.cpp"
                             # --- Drivers ---
                             "drivers/MX1616H_HWDriver.cpp"

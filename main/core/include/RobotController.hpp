@@ -8,12 +8,10 @@
 // Forward Declarations
 class OrientationEstimator;
 class BalancingAlgorithm;
-class FallDetector;
 class EncoderService;
 class MotorService;
 class BatteryService;
 class StateManager;
-class WebServer;
 class CommandProcessor;
 class BaseEvent;
 class MOTION_TargetMovement;
@@ -27,8 +25,6 @@ public:
         MotorService& motorService,
         BalancingAlgorithm& algorithm,
         StateManager& stateManager,
-        FallDetector& fallDetector,
-        WebServer& webServer,
         BatteryService& batteryService,
         CommandProcessor& commandProcessor
     );
@@ -49,8 +45,6 @@ private:
     MotorService& m_motorService;
     BalancingAlgorithm& m_algorithm;
     StateManager& m_stateManager;
-    FallDetector& m_fallDetector;
-    WebServer& m_webServer;
     BatteryService& m_batteryService;
     CommandProcessor& m_commandProcessor;
 

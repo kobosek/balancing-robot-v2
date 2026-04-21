@@ -5,17 +5,16 @@
 #include "EventBus.hpp"
 #include "EventHandler.hpp"
 #include "SystemState.hpp"
-#include "SYSTEM_StateChanged.hpp"
-#include "MOTION_TargetMovement.hpp" // Output event (now contains pitch offset)
-#include "UI_JoystickInput.hpp"    // Input event
 #include "ConfigData.hpp"           // For ControlConfig & SystemBehaviorConfig
-#include "esp_log.h"
 #include <mutex>                    // For thread safety
-#include "esp_timer.h"              // For timer
+
 
 // Forward declarations
 class BaseEvent;
 class CONFIG_FullConfigUpdate;
+class SYSTEM_StateChanged;
+class MOTION_TargetMovement;
+class UI_JoystickInput;
 
 class CommandProcessor : public EventHandler {
 public:

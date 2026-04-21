@@ -23,7 +23,7 @@ class OrientationEstimator;
 class EncoderService;
 class MotorService;
 class BalancingAlgorithm;
-class FallDetector;
+class BalanceMonitor;
 class BatteryService;
 class CommandProcessor;
 
@@ -62,7 +62,7 @@ private:
     std::unique_ptr<EncoderService> m_encoderService;
     std::shared_ptr<MotorService> m_motorService;
     std::shared_ptr<BalancingAlgorithm> m_balancingAlgorithm;
-    std::shared_ptr<FallDetector> m_fallDetector;
+    std::shared_ptr<BalanceMonitor> m_balanceMonitor;
     std::shared_ptr<BatteryService> m_batteryService;
     std::shared_ptr<CommandProcessor> m_commandProcessor;
 
