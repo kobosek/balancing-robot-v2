@@ -2,7 +2,6 @@
 #include "IMUHealthMonitor.hpp"
 #include "IMUService.hpp"
 #include "esp_log.h"
-#include "esp_timer.h"
 
 // Tags for logging
 

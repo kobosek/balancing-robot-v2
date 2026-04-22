@@ -69,7 +69,8 @@ esp_err_t IMUCalibration::calibrate(const MPU6050Profile& profile,
         }
     }
 
-    if (successfulSamples < calibrationSamples / 2) {
+    const int minSuccessfulSamples = std::max(1, (calibrationSamples + 1) / 2);
+    if (successfulSamples < minSuccessfulSamples) {
         return lastReadError != ESP_OK ? lastReadError : ESP_FAIL;
     }
 

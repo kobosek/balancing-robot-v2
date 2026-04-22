@@ -63,8 +63,18 @@ esp_err_t IMUDataReadyInterrupt::init(gpio_num_t pin, bool activeHigh, gpio_isr_
         return ret;
     }
 
-    // Remove any previous handler on this pin then add new one
-    gpio_isr_handler_remove(pin);
+    if (m_handlerInstalled && m_pin != pin) {
+        const gpio_num_t previousPin = m_pin;
+        ret = gpio_isr_handler_remove(previousPin);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG_IRQ, "Failed to remove previous ISR handler from pin %d: %s", previousPin, esp_err_to_name(ret));
+            return ret;
+        }
+        m_handlerInstalled = false;
+    }
+
+    // Remove any previous handler on the target pin then add the current callback.
+    (void)gpio_isr_handler_remove(pin);
     ret = gpio_isr_handler_add(pin, cb, arg);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG_IRQ, "Failed to add ISR handler for pin %d: %s", pin, esp_err_to_name(ret));
@@ -82,12 +92,14 @@ esp_err_t IMUDataReadyInterrupt::deinit() {
     if (!m_handlerInstalled) {
         return ESP_OK;
     }
-    esp_err_t ret = gpio_isr_handler_remove(m_pin);
+    const gpio_num_t pin = m_pin;
+    esp_err_t ret = gpio_isr_handler_remove(pin);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG_IRQ, "Error removing ISR handler for pin %d: %s", m_pin, esp_err_to_name(ret));
+        ESP_LOGE(TAG_IRQ, "Error removing ISR handler for pin %d: %s", pin, esp_err_to_name(ret));
         return ret;
     }
     m_handlerInstalled = false;
-    ESP_LOGI(TAG_IRQ, "ISR handler removed from pin %d", m_pin);
+    m_pin = GPIO_NUM_MAX;
+    ESP_LOGI(TAG_IRQ, "ISR handler removed from pin %d", pin);
     return ESP_OK;
 }

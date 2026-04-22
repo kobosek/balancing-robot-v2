@@ -17,7 +17,8 @@ enum class I2CErrorType {
 };
 
 enum class I2CErrorSeverity {
-    TEMPORARY = 0,
+    NONE = 0,
+    TEMPORARY,
     RECOVERABLE,
     PERMANENT
 };

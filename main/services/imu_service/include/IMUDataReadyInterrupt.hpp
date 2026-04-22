@@ -9,7 +9,7 @@ public:
     IMUDataReadyInterrupt();
     ~IMUDataReadyInterrupt();
 
-    // Configure GPIO and register ISR handler. Safe to call multiple times; reconfigures the same pin.
+    // Configure GPIO and register ISR handler. Safe to call multiple times; reconfigures or moves the handler.
     esp_err_t init(gpio_num_t pin, bool activeHigh, gpio_isr_t cb, void* arg);
 
     // Remove ISR handler for the configured pin.

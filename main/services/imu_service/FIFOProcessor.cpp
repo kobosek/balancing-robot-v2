@@ -6,7 +6,7 @@
 #include "freertos/task.h"
 #include "mpu6050.hpp"
 #include <algorithm>
-#include <climits>
+#include <cmath>
 
 FIFOProcessor::FIFOProcessor(MPU6050Driver& driver,
                              std::shared_ptr<OrientationEstimator> estimator,
@@ -199,10 +199,12 @@ esp_err_t FIFOProcessor::resetAndReEnableFIFO() {
 }
 
 bool FIFOProcessor::validateFIFOData(const uint8_t* data, size_t length) {
-    if (data == nullptr || length == 0 || length % FIFO_PACKET_SIZE != 0) {
+    if (data == nullptr || length == 0 || length % FIFO_PACKET_SIZE != 0 || m_accel_lsb_per_g <= 0.0f) {
         return false;
     }
 
+    const float fullScaleG = 32768.0f / m_accel_lsb_per_g;
+    const float maxAllowedMag2 = 3.0f * fullScaleG * fullScaleG;
     const int numSamples = static_cast<int>(length / FIFO_PACKET_SIZE);
     for (int i = 0; i < numSamples; ++i) {
         const uint8_t* sample = data + (i * FIFO_PACKET_SIZE);
@@ -219,18 +221,11 @@ bool FIFOProcessor::validateFIFOData(const uint8_t* data, size_t length) {
             return false;
         }
 
-        const auto isSat = [](int16_t value) { return value == INT16_MAX || value == INT16_MIN; };
-        if (isSat(ax) || isSat(ay) || isSat(az) || isSat(gx) || isSat(gy) || isSat(gz)) {
-            return false;
-        }
-
         const float axG = static_cast<float>(ax) / m_accel_lsb_per_g;
         const float ayG = static_cast<float>(ay) / m_accel_lsb_per_g;
         const float azG = static_cast<float>(az) / m_accel_lsb_per_g;
-        const float fullScaleG = 32768.0f / m_accel_lsb_per_g;
-        const float maxAllowedMag2 = fullScaleG * fullScaleG;
         const float mag2 = axG * axG + ayG * ayG + azG * azG;
-        if (mag2 < 0.01f || mag2 > maxAllowedMag2) {
+        if (!std::isfinite(mag2) || mag2 > maxAllowedMag2) {
             return false;
         }
     }

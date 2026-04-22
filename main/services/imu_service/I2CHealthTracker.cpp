@@ -116,6 +116,8 @@ I2CErrorType I2CHealthTracker::classifyError(esp_err_t error) const {
 
 I2CErrorSeverity I2CHealthTracker::classifySeverity(I2CErrorType errorType) const {
     switch (errorType) {
+        case I2CErrorType::NONE:
+            return I2CErrorSeverity::NONE;
         case I2CErrorType::TIMEOUT:
         case I2CErrorType::NACK:
         case I2CErrorType::FIFO_OVERFLOW:
@@ -127,7 +129,6 @@ I2CErrorSeverity I2CHealthTracker::classifySeverity(I2CErrorType errorType) cons
         case I2CErrorType::PERMANENT_FAILURE:
         case I2CErrorType::DEVICE_NOT_FOUND:
         case I2CErrorType::HARDWARE_FAULT:
-        case I2CErrorType::NONE:
         default:
             return I2CErrorSeverity::PERMANENT;
     }
