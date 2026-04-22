@@ -1,5 +1,6 @@
 #include "HealthMonitorTask.hpp"
 #include "IMUHealthMonitor.hpp"
+#include "IMUService.hpp"
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -8,8 +9,8 @@
 static const char* TAG = "IMUHealthTask";
 
 // Constructor without taskCore parameter
-HealthMonitorTask::HealthMonitorTask(IMUHealthMonitor& healthMonitor)
-    : Task(TAG), m_healthMonitor(healthMonitor) {} // Assuming Task(name, stack, prio)
+HealthMonitorTask::HealthMonitorTask(IMUHealthMonitor& healthMonitor, IMUService& imuService)
+    : Task(TAG), m_healthMonitor(healthMonitor), m_imuService(imuService) {}
 
 void HealthMonitorTask::run() {
     ESP_LOGI(TAG, "IMU Health Monitor task started (Core Affinity set by Start method), Priority %d", 
@@ -20,6 +21,7 @@ void HealthMonitorTask::run() {
 
     while (true) {
         m_healthMonitor.checkHealth();
+        m_imuService.pollBackgroundMaintenance();
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
 }

@@ -93,7 +93,8 @@ function createGeneralConfigForm(container) {
         // --- imu ---
         { label: 'IMU Alpha', id: `imu_comp_filter_alpha`, step: '0.001', min: 0, max: 1, section: 'imu', key: 'comp_filter_alpha'},
         { label: 'IMU Cal Samp', id: `imu_calibration_samples`, step: '100', min: 10, max: 10000, section: 'imu', key: 'calibration_samples'},
-        { label: 'IMU FIFO Thr', id: `imu_fifo_read_threshold`, step: '1', min: 1, max: 1024, section: 'imu', key: 'fifo_read_threshold'},
+        { label: 'IMU I2C Hz', id: `imu_i2c_freq_hz`, step: '1000', min: 10000, max: 400000, section: 'imu', key: 'i2c_freq_hz'},
+        { label: 'IMU FIFO Thr', id: `imu_fifo_read_threshold`, step: '1', min: 1, max: 240, section: 'imu', key: 'fifo_read_threshold'},
         { label: 'IMU Gyro X Off', id: `imu_gyro_offset_x`, step: '0.001', section: 'imu', key: 'gyro_offset_x'}, // Readonly display? Needs specific handling if not editable
         { label: 'IMU Gyro Y Off', id: `imu_gyro_offset_y`, step: '0.001', section: 'imu', key: 'gyro_offset_y'},
         { label: 'IMU Gyro Z Off', id: `imu_gyro_offset_z`, step: '0.001', section: 'imu', key: 'gyro_offset_z'},
@@ -120,13 +121,11 @@ function createGeneralConfigForm(container) {
         { label: 'Fall Dura(ms)', id: `behavior_fall_threshold_duration_ms`, step: '10', min: 1, max: 10000, section: 'behavior', key: 'fall_threshold_duration_ms'},
         { label: 'Recov Thresh(deg)', id: `behavior_recovery_pitch_threshold_deg`, step: '0.1', min: 0, max: 30, section: 'behavior', key: 'recovery_pitch_threshold_deg'},
         { label: 'Recov Hold(ms)', id: `behavior_recovery_hold_duration_ms`, step: '100', min: 1, max: 60000, section: 'behavior', key: 'recovery_hold_duration_ms'},
-        { label: 'IMU Recov Try', id: `behavior_imu_recovery_max_attempts`, step: '1', min: 1, max: 10, section: 'behavior', key: 'imu_recovery_max_attempts'},
         { label: 'Batt Samples', id: `behavior_battery_oversampling_count`, step: '1', min: 1, max: 1024, section: 'behavior', key: 'battery_oversampling_count'},
         { label: 'Batt Int(ms)', id: `behavior_battery_read_interval_ms`, step: '100', min: 100, max: 60000, section: 'behavior', key: 'battery_read_interval_ms'},
         { label: 'IMU I2C Fail Thr', id: `behavior_imu_health_i2c_fail_threshold`, step: '1', min: 1, max: 100, section: 'behavior', key: 'imu_health_i2c_fail_threshold'},
         { label: 'IMU NoData Thr', id: `behavior_imu_health_no_data_threshold`, step: '1', min: 1, max: 100, section: 'behavior', key: 'imu_health_no_data_threshold'},
         { label: 'IMU Timeout(ms)', id: `behavior_imu_health_data_timeout_ms`, step: '10', min: 1, max: 10000, section: 'behavior', key: 'imu_health_data_timeout_ms'},
-        { label: 'IMU Check(ms)', id: `behavior_imu_health_proactive_check_ms`, step: '1000', min: 1000, max: 60000, section: 'behavior', key: 'imu_health_proactive_check_ms'},
         // --- web ---
         { label: 'Telem Buf Size', id: `web_telemetry_buffer_size`, step: '10', min: 1, max: 10000, section: 'web', key: 'telemetry_buffer_size'},
         { label: 'Max POST Size', id: `web_max_config_post_size`, step: '128', min: 512, max: 65536, section: 'web', key: 'max_config_post_size'},

@@ -21,14 +21,9 @@ void FIFOTask::run() {
 
     while (true) {
         if (dataReadySemaphore != NULL) {
-            // Wait for notification from ISR (with timeout as a safety measure)
-            BaseType_t waitResult = xSemaphoreTake(dataReadySemaphore, portMAX_DELAY);
-            
-            if (waitResult == pdTRUE) {
-                m_fifoProcessor.processFIFO();
-            } else {
-                ESP_LOGV(TAG, "Semaphore wait timeout, NOT checking FIFO");
-            }
+            const BaseType_t waitResult = xSemaphoreTake(dataReadySemaphore, pdMS_TO_TICKS(5));
+            (void)waitResult;
+            m_fifoProcessor.processFIFO();
         }
     }
 }   

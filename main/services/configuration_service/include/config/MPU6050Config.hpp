@@ -7,7 +7,7 @@ struct MPU6050Config {
     int sda_pin = 7;
     int scl_pin = 8;
     uint8_t device_address = 0x68;
-    uint32_t i2c_freq_hz = 400000;
+    uint32_t i2c_freq_hz = 100000;
 
     int int_pin = 9;
     bool interrupt_active_high = true;
@@ -15,11 +15,11 @@ struct MPU6050Config {
     int accel_range = 1;
     int gyro_range = 1;
     int dlpf_config = 3;
-    int sample_rate_divisor = 0;
+    int sample_rate_divisor = 3;
 
     int calibration_samples = 1000;
     float comp_filter_alpha = 0.98f;
-    int fifo_read_threshold = 10;
+    int fifo_read_threshold = 24;
 
     float gyro_offset_x = 0.0f;
     float gyro_offset_y = 0.0f;

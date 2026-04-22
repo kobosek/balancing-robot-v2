@@ -48,8 +48,8 @@ esp_err_t IMUDataReadyInterrupt::init(gpio_num_t pin, bool activeHigh, gpio_isr_
     gpio_config_t io_conf = {};
     io_conf.pin_bit_mask = (1ULL << pin);
     io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pull_up_en = activeHigh ? GPIO_PULLUP_DISABLE : GPIO_PULLUP_ENABLE;
-    io_conf.pull_down_en = activeHigh ? GPIO_PULLDOWN_ENABLE : GPIO_PULLDOWN_DISABLE;
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.intr_type = activeHigh ? GPIO_INTR_POSEDGE : GPIO_INTR_NEGEDGE;
 
     esp_err_t ret = gpio_config(&io_conf);

@@ -1,254 +1,122 @@
 #pragma once
 
-#include "driver/i2c_master.h"
-#include "esp_log.h"
-#include <stdint.h>
-#include <mutex>
-#include "esp_err.h" // Include esp_err_t
+#include "esp_err.h"
+#include <cstddef>
+#include <cstdint>
 
-// Enums remain the same...
 enum class MPU6050Register : uint8_t {
-    PWR_MGMT_1 = 0x6B, SMPLRT_DIV = 0x19, USER_CTRL = 0x6A, FIFO_EN = 0x23,
-    INT_PIN_CFG = 0x37, INTERRUPT_EN = 0x38, INTERRUPT_STATUS = 0x3A,
-    DLPF_CONFIG = 0x1A, GYRO_CONFIG = 0x1B, ACCEL_CONFIG = 0x1C,
-    FIFO_COUNT_H = 0x72, FIFO_R_W = 0x74,
-    ACCEL_XOUT_H = 0x3B, GYRO_XOUT_H = 0x43,
-    WHO_AM_I = 0x75,
-    // Gyro offset registers
-    XG_OFFS_USRH = 0x13, XG_OFFS_USRL = 0x14,
-    YG_OFFS_USRH = 0x15, YG_OFFS_USRL = 0x16,
-    ZG_OFFS_USRH = 0x17, ZG_OFFS_USRL = 0x18
+    PWR_MGMT_1 = 0x6B,
+    SMPLRT_DIV = 0x19,
+    USER_CTRL = 0x6A,
+    FIFO_EN = 0x23,
+    INT_PIN_CFG = 0x37,
+    INTERRUPT_EN = 0x38,
+    INTERRUPT_STATUS = 0x3A,
+    DLPF_CONFIG = 0x1A,
+    GYRO_CONFIG = 0x1B,
+    ACCEL_CONFIG = 0x1C,
+    FIFO_COUNT_H = 0x72,
+    FIFO_R_W = 0x74,
+    GYRO_XOUT_H = 0x43,
+    WHO_AM_I = 0x75
 };
 
 enum class MPU6050Interrupt : uint8_t {
     DATA_READY = 0x01,
     FIFO_OVERFLOW = 0x10,
-    // Add other interrupt bits if needed
 };
 
 enum class MPU6050InterruptPinConfig : uint8_t {
-    ACTIVE_HIGH = 0x00, // INT_LEVEL = 0, INT_OPEN = 0, LATCH_INT_EN = 0, INT_RD_CLEAR = 0
-    ACTIVE_LOW = 0x80   // INT_LEVEL = 1, other bits 0
-    // Add other configs like push-pull, latching if needed
+    ACTIVE_HIGH = 0x00,
+    ACTIVE_LOW = 0x80,
+    ACTIVE_HIGH_LATCH_CLEAR_ON_ANY_READ = 0x30,
+    ACTIVE_LOW_LATCH_CLEAR_ON_ANY_READ = 0xB0
 };
 
 enum class MPU6050UserControl : uint8_t {
     FIFO_RESET = 0x04,
-    I2C_MST_RESET = 0x02,
     SIG_COND_RESET = 0x01,
     FIFO_ENABLE = 0x40,
-    I2C_MST_EN = 0x20,
-    I2C_IF_DIS = 0x10,
-    FIFO_RESET_ENABLE = FIFO_RESET | FIFO_ENABLE // Combine flags
 };
 
 enum class MPU6050FIFOEnable : uint8_t {
-    TEMP_OUT = 0x80, XG_OUT = 0x40, YG_OUT = 0x20, ZG_OUT = 0x10, ACCEL_OUT = 0x08,
-    SLV2_OUT = 0x04, SLV1_OUT = 0x02, SLV0_OUT = 0x01,
-    GYRO_ACCEL = XG_OUT | YG_OUT | ZG_OUT | ACCEL_OUT,
-    ACCEL_ONLY = ACCEL_OUT,
-    GYRO_ONLY = XG_OUT | YG_OUT | ZG_OUT
+    TEMP_OUT = 0x80,
+    XG_OUT = 0x40,
+    YG_OUT = 0x20,
+    ZG_OUT = 0x10,
+    ACCEL_OUT = 0x08,
+    GYRO_ACCEL = XG_OUT | YG_OUT | ZG_OUT | ACCEL_OUT
 };
 
 enum class MPU6050PowerManagement : uint8_t {
-    RESET = 0x80, SLEEP = 0x40, CYCLE = 0x20, TEMP_DIS = 0x08,
-    CLOCK_INTERNAL = 0x00, CLOCK_PLL_XGYRO = 0x01, CLOCK_PLL_YGYRO = 0x02,
-    CLOCK_PLL_ZGYRO = 0x03, CLOCK_EXTERNAL_32KHZ = 0x04, CLOCK_EXTERNAL_19MHZ = 0x05,
-    CLOCK_STOP = 0x07
+    RESET = 0x80,
+    CLOCK_INTERNAL = 0x00,
+    CLOCK_PLL_X_GYRO = 0x01
 };
 
 enum class MPU6050AccelConfig : uint8_t {
-    RANGE_2G = 0x00, RANGE_4G = 0x08, RANGE_8G = 0x10, RANGE_16G = 0x18
+    RANGE_2G = 0x00,
+    RANGE_4G = 0x08,
+    RANGE_8G = 0x10,
+    RANGE_16G = 0x18
 };
 
 enum class MPU6050GyroConfig : uint8_t {
-    RANGE_250_DEG = 0x00, RANGE_500_DEG = 0x08, RANGE_1000_DEG = 0x10, RANGE_2000_DEG = 0x18
+    RANGE_250_DEG = 0x00,
+    RANGE_500_DEG = 0x08,
+    RANGE_1000_DEG = 0x10,
+    RANGE_2000_DEG = 0x18
 };
 
 enum class MPU6050DLPFConfig : uint8_t {
-    DLPF_BW_260HZ_ACC_256HZ_GYRO = 0x00, DLPF_BW_184HZ_ACC_188HZ_GYRO = 0x01,
-    DLPF_BW_94HZ_ACC_98HZ_GYRO = 0x02, DLPF_BW_44HZ_ACC_42HZ_GYRO = 0x03,
-    DLPF_BW_21HZ_ACC_20HZ_GYRO = 0x04, DLPF_BW_10HZ_ACC_10HZ_GYRO = 0x05,
+    DLPF_BW_260HZ_ACC_256HZ_GYRO = 0x00,
+    DLPF_BW_184HZ_ACC_188HZ_GYRO = 0x01,
+    DLPF_BW_94HZ_ACC_98HZ_GYRO = 0x02,
+    DLPF_BW_44HZ_ACC_42HZ_GYRO = 0x03,
+    DLPF_BW_21HZ_ACC_20HZ_GYRO = 0x04,
+    DLPF_BW_10HZ_ACC_10HZ_GYRO = 0x05,
     DLPF_BW_5HZ_ACC_5HZ_GYRO = 0x06
 };
 
 enum class MPU6050SampleRateDiv : uint8_t {
-    RATE_1KHZ = 0x00, RATE_500HZ = 0x01, RATE_250HZ = 0x03, RATE_200HZ = 0x04,
-    RATE_125HZ = 0x07, RATE_100HZ = 0x09
+    RATE_1KHZ = 0x00,
+    RATE_500HZ = 0x01,
+    RATE_250HZ = 0x03,
+    RATE_200HZ = 0x04,
+    RATE_125HZ = 0x07,
+    RATE_100HZ = 0x09
 };
 
-
-// I2C Configuration Structure
-struct I2CConfig {
-    uint32_t timeout_ms = 100;          // Default timeout in milliseconds
-    uint8_t max_retries = 3;            // Maximum retry attempts
-    uint32_t base_delay_ms = 10;        // Base delay for exponential backoff
-    uint32_t max_delay_ms = 1000;       // Maximum delay for exponential backoff
-    bool enable_bus_recovery = true;    // Enable I2C bus recovery on failures
-};
-
-// I2C Error Classification
-enum class I2CErrorType {
-    NONE = 0,
-    // Temporary errors (auto-recoverable)
-    TIMEOUT,
-    NACK,
-    BUS_ERROR,
-    ARBITRATION_LOST,
-    FIFO_OVERFLOW,
-    // Permanent errors (require intervention)
-    PERMANENT_FAILURE,
-    DEVICE_NOT_FOUND,
-    INVALID_RESPONSE,
-    HARDWARE_FAULT
-};
-
-// I2C Error Severity Classification
-enum class I2CErrorSeverity {
-    TEMPORARY = 0,    // Can be retried automatically
-    RECOVERABLE,      // May recover with bus reset/recovery
-    PERMANENT         // Requires manual intervention
-};
-
-// I2C Error Trend Analysis Structure
-struct I2CErrorTrend {
-    uint32_t error_count_window[10] = {0};  // Rolling window of error counts
-    uint32_t window_index = 0;              // Current window position
-    uint32_t total_window_errors = 0;       // Sum of errors in current window
-    uint64_t last_error_timestamp = 0;      // Timestamp of last error (microseconds)
-    float error_rate_per_second = 0.0f;     // Current error rate
-    bool trend_increasing = false;          // Whether error trend is increasing
-};
-
-// Enhanced I2C Statistics Structure
-struct I2CStats {
-    // Operation counters
-    uint32_t total_operations = 0;
-    uint32_t successful_operations = 0;
-    
-    // Error counters by type
-    uint32_t timeout_errors = 0;
-    uint32_t nack_errors = 0;
-    uint32_t bus_errors = 0;
-    uint32_t arbitration_lost_errors = 0;
-    uint32_t fifo_overflow_errors = 0;
-    uint32_t permanent_failure_errors = 0;
-    uint32_t device_not_found_errors = 0;
-    uint32_t invalid_response_errors = 0;
-    uint32_t hardware_fault_errors = 0;
-    
-    // Recovery statistics
-    uint32_t recovery_attempts = 0;
-    uint32_t successful_recoveries = 0;
-    
-    // Error rate and trend analysis
-    I2CErrorTrend error_trend;
-    float current_error_rate_percent = 0.0f;
-    uint32_t consecutive_failures = 0;
-    uint32_t max_consecutive_failures = 0;
-    
-    // Timing statistics
-    uint64_t last_operation_timestamp = 0;
-    uint32_t avg_operation_time_us = 0;
-    uint32_t max_operation_time_us = 0;
-};
+class I2CDevice;
 
 class MPU6050Driver {
 public:
-    MPU6050Driver();
-    ~MPU6050Driver();
+    explicit MPU6050Driver(I2CDevice& device);
 
-    // --- Initialization ---
-    esp_err_t init(i2c_port_t i2c_port, gpio_num_t sda_io, gpio_num_t scl_io,
-                   uint16_t i2c_addr = 0x68, uint32_t i2c_freq = 400000);
-
-    // --- Configuration Methods ---
+    esp_err_t setPowerManagementReg(MPU6050PowerManagement powerBits);
+    esp_err_t resetSensor();
     esp_err_t setDLPFConfigReg(MPU6050DLPFConfig config);
-    esp_err_t setSampleRateDivReg(MPU6050SampleRateDiv rate_div);
+    esp_err_t setSampleRateDivReg(MPU6050SampleRateDiv rateDiv);
     esp_err_t setAccelRangeReg(MPU6050AccelConfig range);
     esp_err_t setGyroRangeReg(MPU6050GyroConfig range);
     esp_err_t configureInterruptPinReg(MPU6050InterruptPinConfig intPinConfig, MPU6050Interrupt intEnableBits);
     esp_err_t configureFIFOReg(MPU6050UserControl userCtrlBits, MPU6050FIFOEnable fifoEnableBits);
-    esp_err_t setPowerManagementReg(MPU6050PowerManagement powerBits);
-    esp_err_t resetSensor(); // Specific method for reset sequence
-    
-    // --- Combined Configuration Method ---
-    esp_err_t configureForDataAcquisition(
-        MPU6050DLPFConfig dlpfConfig,
-        MPU6050SampleRateDiv sampleRate,
-        MPU6050AccelConfig accelRange,
-        MPU6050GyroConfig gyroRange
-    );
 
-    // --- Raw Data Reading Methods ---
-    esp_err_t readRawAccelXYZ(int16_t& ax, int16_t& ay, int16_t& az) const;
     esp_err_t readRawGyroXYZ(int16_t& gx, int16_t& gy, int16_t& gz) const;
+    esp_err_t readFifoCount(uint16_t& count) const;
+    esp_err_t readFifoBuffer(uint8_t* buffer, size_t len) const;
+    esp_err_t getInterruptStatus(uint8_t& status) const;
+    esp_err_t isFIFOOverflow(bool& isOverflow) const;
+    esp_err_t getDeviceID(uint8_t& id) const;
 
-    // --- FIFO Management Methods ---
-    esp_err_t enableFIFO(MPU6050FIFOEnable fifoEnableBits);
     esp_err_t disableFIFO();
     esp_err_t resetFIFO();
     esp_err_t resetSignalPath();
-    esp_err_t clearAllUserControlBits();
     esp_err_t performFullFIFOReset();
-    esp_err_t readFifoCount(uint16_t& count) const;
-    esp_err_t readFifoBuffer(uint8_t* buffer, size_t len) const;
-
-    // --- User Control Register Operations ---
-    esp_err_t setUserControlBits(MPU6050UserControl bits);
-    esp_err_t clearUserControlBits(MPU6050UserControl bits);
-
-    // --- Interrupt Management ---
-    esp_err_t getInterruptStatus(uint8_t& status) const;
-    esp_err_t isDataReady(bool& isDataReady) const;
-    esp_err_t isFIFOOverflow(bool& isOverflow) const;
-
-    // --- Sensor Validation Methods ---
-    esp_err_t getDeviceID(uint8_t& id);
-    esp_err_t validateSensorID(uint8_t& id_value);
-
-    // --- Calibration Methods ---
-    esp_err_t setGyroOffsets(float x_offset_dps, float y_offset_dps, float z_offset_dps);
-
-    // --- I2C Configuration and Statistics ---
-    void setI2CConfig(const I2CConfig& config);
-    I2CConfig getI2CConfig() const;
-    I2CStats getI2CStats() const;
-    void resetI2CStats();
-    
-    // --- Enhanced Error Classification and Analysis ---
-    I2CErrorSeverity getErrorSeverity(I2CErrorType error_type) const;
-    bool isTemporaryError(I2CErrorType error_type) const;
-    bool isPermanentError(I2CErrorType error_type) const;
-    float getCurrentErrorRate() const;
-    bool isErrorTrendIncreasing() const;
 
 private:
-    static constexpr const char* TAG = "MPU6050Driver";
-
-    // --- Low-level I2C Communication (moved to private) ---
     esp_err_t readRegisters(MPU6050Register reg, uint8_t* data, size_t len) const;
     esp_err_t writeRegister(MPU6050Register reg, uint8_t data);
-    esp_err_t writeRegisterMasked(MPU6050Register reg, uint8_t value, uint8_t mask);
 
-    // --- Enhanced I2C Communication with Retry Logic ---
-    esp_err_t readRegistersWithRetry(MPU6050Register reg, uint8_t* data, size_t len) const;
-    esp_err_t writeRegisterWithRetry(MPU6050Register reg, uint8_t data);
-    
-    // --- I2C Error Handling and Recovery ---
-    I2CErrorType classifyI2CError(esp_err_t error) const;
-    I2CErrorSeverity classifyErrorSeverity(I2CErrorType error_type) const;
-    esp_err_t performBusRecovery();
-    void updateI2CStats(bool success, I2CErrorType error_type) const;
-    void updateErrorTrend(I2CErrorType error_type) const;
-    uint32_t calculateBackoffDelay(uint8_t retry_count) const;
-    uint64_t getCurrentTimestampUs() const;
-
-    i2c_master_bus_handle_t _bus_handle;
-    i2c_master_dev_handle_t _dev_handle;
-    mutable std::mutex _i2c_mutex; // Protect I2C operations
-    
-    // --- I2C Configuration and Statistics ---
-    I2CConfig _i2c_config;
-    mutable I2CStats _i2c_stats;
+    I2CDevice& m_device;
 };

@@ -11,7 +11,6 @@
 #include "config/SystemBehaviorConfig.hpp"
 #include "config/RobotDimensionsConfig.hpp"
 #include "config/WebServerConfig.hpp"
-#include "config/IMURecoveryConfig.hpp"
 
 struct ConfigData {
     int config_version = 1;

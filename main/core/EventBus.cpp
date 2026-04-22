@@ -56,13 +56,10 @@ std::string eventTypeToString(EventType type) {
         case EventType::BALANCE_FALL_DETECTED: return "BALANCE_FALL_DETECTED";
         case EventType::BALANCE_RECOVERY_DETECTED: return "BALANCE_RECOVERY_DETECTED";
 
-        // IMU Recovery Events
-        case EventType::IMU_RECOVERY_SUCCEEDED: return "IMU_RECOVERY_SUCCEEDED";
-        case EventType::IMU_RECOVERY_FAILED: return "IMU_RECOVERY_FAILED";
-        
         // IMU State Management Events
         case EventType::IMU_CALIBRATION_REJECTED: return "IMU_CALIBRATION_REJECTED";
-        case EventType::MOTION_USING_FALLBACK_VALUES: return "MOTION_USING_FALLBACK_VALUES";
+        case EventType::IMU_AVAILABILITY_CHANGED: return "IMU_AVAILABILITY_CHANGED";
+        case EventType::IMU_ATTACH_REQUESTED: return "IMU_ATTACH_REQUESTED";
         
         // Error reporting
         case EventType::ERROR_REPORTED: return "ERROR_REPORTED";

@@ -2,12 +2,13 @@
 #include "Task.hpp"
 
 class IMUHealthMonitor;
+class IMUService;
 
 // Task to periodically check IMU health via IMUHealthMonitor
 class HealthMonitorTask : public Task {
 public:
     // Constructor without taskCore parameter
-    explicit HealthMonitorTask(IMUHealthMonitor& healthMonitor);
+    HealthMonitorTask(IMUHealthMonitor& healthMonitor, IMUService& imuService);
     ~HealthMonitorTask() override = default;
 
 protected:
@@ -15,4 +16,5 @@ protected:
 
 private:
     IMUHealthMonitor& m_healthMonitor;
+    IMUService& m_imuService;
 };

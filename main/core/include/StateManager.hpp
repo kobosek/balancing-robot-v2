@@ -20,11 +20,11 @@ class UI_Stop;
 class BATTERY_StatusUpdate;
 class UI_CalibrateImu;
 class IMU_CalibrationCompleted;
-class IMU_RecoverySucceeded;
-class IMU_RecoveryFailed;
 class CONFIG_FullConfigUpdate;
 class IMU_CalibrationRequest;
 class IMU_CalibrationRequestRejected;
+class IMU_CommunicationError;
+class IMU_AvailabilityChanged;
 
 struct SystemBehaviorConfig; 
 struct ConfigData; 
@@ -50,13 +50,9 @@ private:
 
     EventBus& m_eventBus;
     SystemState m_currentState;
-
-
-    SystemState m_preImuRecoveryState = SystemState::IDLE;
-    uint8_t m_imu_recovery_attempts = 0;
+    bool m_imu_available = false;
     bool m_pending_calibration = false;
-
-    uint8_t m_max_imu_recovery_attempts;
+    bool m_pending_start = false;
 
     void handleFallDetected(const BALANCE_FallDetected& event);
     void handleRecoveryDetected(const BALANCE_RecoveryDetected& event);
@@ -65,8 +61,8 @@ private:
     void handleBatteryUpdate(const BATTERY_StatusUpdate& event);
     void handleCalibrateCommand(const UI_CalibrateImu& event);
     void handleCalibrationComplete(const IMU_CalibrationCompleted& event);
-    void handleImuRecoverySucceeded(const IMU_RecoverySucceeded& event);
-    void handleImuRecoveryFailed(const IMU_RecoveryFailed& event);
+    void handleImuCommunicationError(const IMU_CommunicationError& event);
+    void handleImuAvailabilityChanged(const IMU_AvailabilityChanged& event);
     void handleCalibrationRejected(const IMU_CalibrationRequestRejected& event);
     void handleConfigUpdate(const CONFIG_FullConfigUpdate& event);
 

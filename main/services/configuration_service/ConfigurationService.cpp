@@ -318,8 +318,8 @@ bool ConfigurationService::validateConfig(const ConfigData& config, std::string&
     if (config.imu.device_address < 0x08 || config.imu.device_address > 0x77) {
         error = "imu.device_address out of range (0x08-0x77)"; return false;
     }
-    if (config.imu.i2c_freq_hz < 10000 || config.imu.i2c_freq_hz > 1000000) {
-        error = "imu.i2c_freq_hz out of range (10k-1M)"; return false;
+    if (config.imu.i2c_freq_hz < 10000 || config.imu.i2c_freq_hz > 400000) {
+        error = "imu.i2c_freq_hz out of range (10k-400k)"; return false;
     }
     if (config.imu.accel_range < 0 || config.imu.accel_range > 3) {
         error = "imu.accel_range out of range (0-3)"; return false;
@@ -339,8 +339,8 @@ bool ConfigurationService::validateConfig(const ConfigData& config, std::string&
     if (config.imu.comp_filter_alpha < 0.0f || config.imu.comp_filter_alpha > 1.0f) {
         error = "imu.comp_filter_alpha out of range (0.0-1.0)"; return false;
     }
-    if (config.imu.fifo_read_threshold < 1 || config.imu.fifo_read_threshold > 1024) {
-        error = "imu.fifo_read_threshold out of range (1-1024)"; return false;
+    if (config.imu.fifo_read_threshold < 1 || config.imu.fifo_read_threshold > 240) {
+        error = "imu.fifo_read_threshold out of range (1-240)"; return false;
     }
     // EncoderConfig
     if (!is_valid_gpio(config.encoder.left_pin_a) || !is_valid_gpio(config.encoder.left_pin_b) || !is_valid_gpio(config.encoder.right_pin_a) || !is_valid_gpio(config.encoder.right_pin_b)) {
@@ -418,14 +418,11 @@ bool ConfigurationService::validateConfig(const ConfigData& config, std::string&
     if (config.behavior.fall_threshold_duration_ms < 1 || config.behavior.fall_threshold_duration_ms > 10000) { error = "behavior.fall_threshold_duration_ms [1,10k]"; return false; }
     if (config.behavior.recovery_pitch_threshold_deg < 0.0f || config.behavior.recovery_pitch_threshold_deg > 30.0f) { error = "behavior.recovery_pitch_threshold_deg [0,30]"; return false; }
     if (config.behavior.recovery_hold_duration_ms < 1 || config.behavior.recovery_hold_duration_ms > 60000) { error = "behavior.recovery_hold_duration_ms [1,60k]"; return false; }
-    if (config.behavior.imu_recovery_max_attempts < 1 || config.behavior.imu_recovery_max_attempts > 10) { error = "behavior.imu_recovery_max_attempts [1,10]"; return false; }
-    if (config.behavior.imu_recovery_delay_ms < 1 || config.behavior.imu_recovery_delay_ms > 60000) { error = "behavior.imu_recovery_delay_ms [1,60k]"; return false; }
     if (config.behavior.battery_oversampling_count < 1 || config.behavior.battery_oversampling_count > 1024) { error = "behavior.battery_oversampling_count [1,1024]"; return false; }
     if (config.behavior.battery_read_interval_ms < 100 || config.behavior.battery_read_interval_ms > 60000) { error = "behavior.battery_read_interval_ms [100,60k]"; return false; }
     if (config.behavior.imu_health_i2c_fail_threshold < 1 || config.behavior.imu_health_i2c_fail_threshold > 100) { error = "behavior.imu_health_i2c_fail_threshold [1,100]"; return false; }
     if (config.behavior.imu_health_no_data_threshold < 1 || config.behavior.imu_health_no_data_threshold > 100) { error = "behavior.imu_health_no_data_threshold [1,100]"; return false; }
     if (config.behavior.imu_health_data_timeout_ms < 1 || config.behavior.imu_health_data_timeout_ms > 10000) { error = "behavior.imu_health_data_timeout_ms [1,10k]"; return false; }
-    if (config.behavior.imu_health_proactive_check_ms < 1 || config.behavior.imu_health_proactive_check_ms > 60000) { error = "behavior.imu_health_proactive_check_ms [1,60k]"; return false; }
     // RobotDimensionsConfig
     if (config.dimensions.wheelbase_m <= 0.01f || config.dimensions.wheelbase_m > 1.0f) { error = "dimensions.wheelbase_m [0.01, 1.0]"; return false; }
     // WebServerConfig

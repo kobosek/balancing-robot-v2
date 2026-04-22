@@ -19,6 +19,7 @@
 #include "IMUService.hpp"           // Refactored Service
 #include "OrientationEstimator.hpp" // Estimator
 #include "FIFOProcessor.hpp"        // FIFO processing
+#include "IMU_AvailabilityChanged.hpp"
 // --- Include Task headers ---
 #include "FIFOTask.hpp"           // FIFO processing task 
 #include "HealthMonitorTask.hpp"  // Health monitoring task
@@ -186,8 +187,8 @@ esp_err_t Application::init()
         EventType::UI_CALIBRATE_IMU,
         EventType::IMU_CALIBRATION_COMPLETED,
         EventType::IMU_CALIBRATION_REJECTED,
-        EventType::IMU_RECOVERY_SUCCEEDED,
-        EventType::IMU_RECOVERY_FAILED,
+        EventType::IMU_COMMUNICATION_ERROR,
+        EventType::IMU_AVAILABILITY_CHANGED,
         EventType::CONFIG_FULL_UPDATE
     });
     
@@ -200,8 +201,8 @@ esp_err_t Application::init()
     m_eventBus->subscribe(m_imuService, {
         EventType::CONFIG_FULL_UPDATE,
         EventType::CONFIG_IMU_UPDATE,
-        EventType::IMU_COMMUNICATION_ERROR,
         EventType::IMU_CALIBRATION_REQUEST,
+        EventType::IMU_ATTACH_REQUESTED,
         EventType::SYSTEM_STATE_CHANGED,
     });
     
@@ -215,6 +216,8 @@ esp_err_t Application::init()
         EventType::CONFIG_FULL_UPDATE,
         EventType::TELEMETRY_SNAPSHOT
     });
+
+    m_eventBus->publish(IMU_AvailabilityChanged(m_imuService->isAvailable()));
 
     ESP_LOGI(TAG, "Application initialization complete");
     return ESP_OK;

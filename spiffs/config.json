@@ -16,16 +16,16 @@
     "sda_pin": 7,
     "scl_pin": 8,
     "device_address": 104,
-    "i2c_freq_hz": 400000,
+    "i2c_freq_hz": 100000,
     "int_pin": 9,
     "interrupt_active_high": true,
     "accel_range": 1,
     "gyro_range": 1,
     "dlpf_config": 3,
-    "sample_rate_divisor": 0,
+    "sample_rate_divisor": 3,
     "calibration_samples": 1000,
     "comp_filter_alpha": 0.98,
-    "fifo_read_threshold": 10,
+    "fifo_read_threshold": 24,
     "gyro_offset_x": 0.0,
     "gyro_offset_y": 0.0,
     "gyro_offset_z": 0.0
@@ -111,14 +111,11 @@
     "fall_threshold_duration_ms": 500,
     "recovery_pitch_threshold_deg": 5.0,
     "recovery_hold_duration_ms": 2000,
-    "imu_recovery_max_attempts": 3,
-    "imu_recovery_delay_ms": 1000,
     "battery_oversampling_count": 64,
     "battery_read_interval_ms": 5000,
     "imu_health_i2c_fail_threshold": 5,
     "imu_health_no_data_threshold": 5,
-    "imu_health_data_timeout_ms": 500,
-    "imu_health_proactive_check_ms": 10000
+    "imu_health_data_timeout_ms": 500
   },
   "dimensions": {
     "wheelbase_m": 0.15

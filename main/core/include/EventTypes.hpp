@@ -44,13 +44,10 @@ enum class EventType {
     BALANCE_FALL_DETECTED,            // BALANCE_FallDetected
     BALANCE_RECOVERY_DETECTED,        // BALANCE_RecoveryDetected
 
-    // IMU Recovery Events
-    IMU_RECOVERY_SUCCEEDED,          // IMU_RecoverySucceeded
-    IMU_RECOVERY_FAILED,             // IMU_RecoveryFailed
-
     // IMU State Management Events
     IMU_CALIBRATION_REJECTED,        // IMU_CalibrationRequestRejected
-    MOTION_USING_FALLBACK_VALUES,    // MOTION_UsingFallbackValues
+    IMU_AVAILABILITY_CHANGED,        // IMU_AvailabilityChanged
+    IMU_ATTACH_REQUESTED,            // IMU_AttachRequested
 
     // Error reporting
     ERROR_REPORTED                   // Not implemented yet

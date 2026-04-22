@@ -24,14 +24,11 @@ cJSON* JsonConfigParser::serializeBehavior(const SystemBehaviorConfig& b) const 
     cJSON_AddNumberToObject(obj, "fall_threshold_duration_ms", b.fall_threshold_duration_ms);
     cJSON_AddNumberToObject(obj, "recovery_pitch_threshold_deg", b.recovery_pitch_threshold_deg);
     cJSON_AddNumberToObject(obj, "recovery_hold_duration_ms", b.recovery_hold_duration_ms);
-    cJSON_AddNumberToObject(obj, "imu_recovery_max_attempts", b.imu_recovery_max_attempts);
-    cJSON_AddNumberToObject(obj, "imu_recovery_delay_ms", b.imu_recovery_delay_ms);
     cJSON_AddNumberToObject(obj, "battery_oversampling_count", b.battery_oversampling_count);
     cJSON_AddNumberToObject(obj, "battery_read_interval_ms", b.battery_read_interval_ms);
     cJSON_AddNumberToObject(obj, "imu_health_i2c_fail_threshold", b.imu_health_i2c_fail_threshold);
     cJSON_AddNumberToObject(obj, "imu_health_no_data_threshold", b.imu_health_no_data_threshold);
     cJSON_AddNumberToObject(obj, "imu_health_data_timeout_ms", b.imu_health_data_timeout_ms);
-    cJSON_AddNumberToObject(obj, "imu_health_proactive_check_ms", b.imu_health_proactive_check_ms);
     return obj;
 }
 
@@ -45,14 +42,11 @@ bool JsonConfigParser::deserializeBehavior(cJSON* obj, SystemBehaviorConfig& b) 
     GET_JSON_NUMBER_INT(obj, "fall_threshold_duration_ms", b.fall_threshold_duration_ms);
     GET_JSON_NUMBER_DOUBLE(obj, "recovery_pitch_threshold_deg", b.recovery_pitch_threshold_deg);
     GET_JSON_NUMBER_INT(obj, "recovery_hold_duration_ms", b.recovery_hold_duration_ms);
-    GET_JSON_NUMBER_INT(obj, "imu_recovery_max_attempts", b.imu_recovery_max_attempts);
-    GET_JSON_NUMBER_INT(obj, "imu_recovery_delay_ms", b.imu_recovery_delay_ms);
     GET_JSON_NUMBER_INT(obj, "battery_oversampling_count", b.battery_oversampling_count);
     GET_JSON_NUMBER_INT(obj, "battery_read_interval_ms", b.battery_read_interval_ms);
     GET_JSON_NUMBER_INT(obj, "imu_health_i2c_fail_threshold", b.imu_health_i2c_fail_threshold);
     GET_JSON_NUMBER_INT(obj, "imu_health_no_data_threshold", b.imu_health_no_data_threshold);
     GET_JSON_NUMBER_INT(obj, "imu_health_data_timeout_ms", b.imu_health_data_timeout_ms);
-    GET_JSON_NUMBER_INT(obj, "imu_health_proactive_check_ms", b.imu_health_proactive_check_ms);
     return true; // Basic deserialization done, validation happens elsewhere
 }
 

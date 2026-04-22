@@ -15,7 +15,10 @@ idf_component_register(SRCS # --- Tasks ---
                             "services/imu_service/IMUService.cpp"
                             "services/imu_service/IMUCalibration.cpp"
                             "services/imu_service/IMUHealthMonitor.cpp"
+                            "services/imu_service/I2CHealthTracker.cpp"
+                            "services/imu_service/I2CDevice.cpp"
                             "services/imu_service/OrientationEstimator.cpp" # Refactored Estimator
+                            "services/imu_service/MPU6050HardwareController.cpp"
                             "services/imu_service/mpu6050.cpp"
                             "services/imu_service/FIFOTask.cpp"
                             "services/imu_service/HealthMonitorTask.cpp"
