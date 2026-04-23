@@ -157,9 +157,88 @@ button:disabled { /* Style for disabled buttons */
 .command-section button.stop:hover:not(:disabled) { background-color: #c82333; }
 .command-section button.calibrate { background-color: #ffc107; color: #212529; }
 .command-section button.calibrate:hover:not(:disabled) { background-color: #e0a800; }
+.command-section button.tune { background-color: #0d6efd; }
+.command-section button.tune:hover:not(:disabled) { background-color: #0b5ed7; }
+.command-section button.tune-cancel { background-color: #fd7e14; color: #212529; }
+.command-section button.tune-save { background-color: #198754; }
+.command-section button.tune-discard { background-color: #6c757d; }
 .command-section .toggle-button { background-color: #6c757d; }
 .command-section .toggle-button.enabled { background-color: #198754; }
 .command-section .toggle-button:hover:not(:disabled) { opacity: 0.8; }
+.ota-panel {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+.ota-panel select,
+.ota-panel input[type="file"] {
+    max-width: 100%;
+    padding: 7px 8px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    background: #ffffff;
+    font-size: 0.85rem;
+    box-sizing: border-box;
+}
+.ota-panel button {
+    margin: 0;
+}
+
+.pid-tuning-panel {
+    width: 100%;
+    margin: 0 auto 12px;
+    padding: 12px;
+    background: #ffffff;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    box-sizing: border-box;
+    text-align: left;
+}
+.config-pid-tuning-panel {
+    margin-top: 14px;
+}
+.pid-tuning-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.pid-tuning-controls button {
+    margin: 0;
+    flex: 1 1 120px;
+}
+.status-config-section #configMenu .pid-tuning-controls button.tune { background-color: #0d6efd; }
+.status-config-section #configMenu .pid-tuning-controls button.tune:hover:not(:disabled) { background-color: #0b5ed7; }
+.status-config-section #configMenu .pid-tuning-controls button.tune-cancel { background-color: #fd7e14; color: #212529; }
+.status-config-section #configMenu .pid-tuning-controls button.tune-save { background-color: #198754; }
+.status-config-section #configMenu .pid-tuning-controls button.tune-discard { background-color: #6c757d; }
+.pid-tuning-progress {
+    height: 8px;
+    margin: 8px 0;
+    border-radius: 999px;
+    background: #e9ecef;
+    overflow: hidden;
+    border: 1px solid #d6dbe0;
+}
+.pid-tuning-progress-fill {
+    height: 100%;
+    width: 0;
+    background: #0d6efd;
+    transition: width 0.2s ease;
+}
+.pid-tuning-message,
+.pid-tuning-gains {
+    font-size: 0.78rem;
+    color: #495057;
+    margin-top: 4px;
+    overflow-wrap: anywhere;
+}
+.pid-tuning-gains span {
+    font-family: 'Courier New', Courier, monospace;
+    font-weight: 600;
+}
 
 
 /* --- Form Styles --- */

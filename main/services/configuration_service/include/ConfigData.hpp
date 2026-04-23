@@ -11,6 +11,7 @@
 #include "config/SystemBehaviorConfig.hpp"
 #include "config/RobotDimensionsConfig.hpp"
 #include "config/WebServerConfig.hpp"
+#include "config/PidTuningConfig.hpp"
 
 struct ConfigData {
     int config_version = 1;
@@ -25,6 +26,7 @@ struct ConfigData {
     PIDConfig pid_speed_left;
     PIDConfig pid_speed_right;
     PIDConfig pid_yaw_rate;
+    PidTuningConfig pid_tuning;
     SystemBehaviorConfig behavior;
     RobotDimensionsConfig dimensions;
     WebServerConfig web;

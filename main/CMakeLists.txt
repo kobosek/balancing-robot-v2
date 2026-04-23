@@ -4,6 +4,7 @@ idf_component_register(SRCS # --- Tasks ---
                             "tasks/ControlTask.cpp"
                             # --- Core ---
                             "core/EventBus.cpp"
+                            "core/ControlEventDispatcher.cpp"
                             "core/StateManager.cpp"
                             "core/RobotController.cpp" 
                             "core/Application.cpp"
@@ -31,6 +32,9 @@ idf_component_register(SRCS # --- Tasks ---
                             "services/WiFiManager.cpp"
                             "services/EncoderService.cpp"
                             "services/MotorService.cpp"
+                            "services/PidTuningService.cpp"
+                            "services/OTAService.cpp"
+                            "services/GuidedCalibrationService.cpp"
                             # --- Web ---
                             "web/WebServer.cpp"
                             "web/StaticFileHandler.cpp"
@@ -38,6 +42,7 @@ idf_component_register(SRCS # --- Tasks ---
                             "web/ConfigApiHandler.cpp"
                             "web/CommandApiHandler.cpp"
                             "web/StateApiHandler.cpp"
+                            "web/OTAApiHandler.cpp"
                             # --- Algorithms ---
                             "algorithms/PIDController.cpp"
                             "algorithms/BalancingAlgorithm.cpp"
@@ -58,7 +63,7 @@ idf_component_register(SRCS # --- Tasks ---
                                     "tasks/include"
                                     "drivers/include"
                                     "algorithms/include"
-                       REQUIRES esp_wifi esp_event esp_netif esp_http_server nvs_flash
+                       REQUIRES esp_wifi esp_event esp_netif esp_http_server nvs_flash app_update
                                 esp_timer spiffs driver json pthread esp_adc 
                        PRIV_REQUIRES json
                       )

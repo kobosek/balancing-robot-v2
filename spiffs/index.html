@@ -14,7 +14,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>ESP32 Balancing Robot</h1>
+        <h1>ESP32 Balancing Robot Menu</h1>
 
         <!-- Top Row: Status/Config and Commands/Joystick -->
         <div class="top-row">
@@ -47,7 +47,10 @@
                 </div>
                 <div class="status-item"><span class="status-label">Auto Balancing:</span> <span id="autoBalancingStatus" class="status-value">UNKNOWN</span></div>
                 <div class="status-item"><span class="status-label">Fall Detect:</span> <span id="fallDetectStatus" class="status-value">UNKNOWN</span></div>
+                <div class="status-item"><span class="status-label">Yaw Control:</span> <span id="yawControlStatus" class="status-value">UNKNOWN</span></div>
                 <div class="status-item"><span class="status-label">Crit Batt Shutdown:</span> <span id="criticalBatteryShutdownStatus" class="status-value">UNKNOWN</span></div>
+                <div class="status-item"><span class="status-label">Guided Cal:</span> <span id="guidedCalibrationStatus" class="status-value">IDLE</span></div>
+                <div class="status-item"><span class="status-label">OTA:</span> <span id="otaStatusValue" class="status-value">UNKNOWN</span></div>
                 <div class="status-item"><span class="status-label">Control Conn:</span> <span id="wsStatus" class="status-value" style="font-weight: bold;">INIT</span></div>
 
                 <!-- Configuration Section -->
@@ -78,7 +81,18 @@
                     <button id="calibrateBtn" class="calibrate">Calibrate IMU</button>
                     <button id="toggleFallDetectBtn" class="toggle-button">Enable Fall Detect</button> <!-- Class used by JS -->
                     <button id="toggleAutoBalancingBtn" class="toggle-button">Enable Auto Balancing</button>
+                    <button id="toggleYawControlBtn" class="toggle-button">Enable Yaw Control</button>
                     <button id="toggleCriticalBatteryShutdownBtn" class="toggle-button">Critical Battery Shutdown</button>
+                    <button id="startGuidedCalibrationBtn" class="calibrate">Guided Calibration</button>
+                    <button id="cancelGuidedCalibrationBtn" class="stop">Cancel Guided Cal</button>
+                </div>
+                <div class="ota-panel">
+                    <select id="otaTargetSelect">
+                        <option value="app">App firmware</option>
+                        <option value="spiffs">SPIFFS image</option>
+                    </select>
+                    <input id="otaFileInput" type="file" accept=".bin,application/octet-stream">
+                    <button id="otaUploadBtn" class="toggle-button">Upload OTA</button>
                 </div>
                 <!-- Joystick Zone -->
                 <div id="joystickZone"></div> <!-- NippleJS target -->

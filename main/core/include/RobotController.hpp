@@ -13,6 +13,9 @@ class MotorService;
 class BatteryService;
 class StateManager;
 class CommandProcessor;
+class PidTuningService;
+class GuidedCalibrationService;
+class ControlEventDispatcher;
 class BaseEvent;
 class MOTION_TargetMovement;
 class EventBus;
@@ -26,7 +29,10 @@ public:
         BalancingAlgorithm& algorithm,
         StateManager& stateManager,
         BatteryService& batteryService,
-        CommandProcessor& commandProcessor
+        CommandProcessor& commandProcessor,
+        PidTuningService& pidTuningService,
+        GuidedCalibrationService& guidedCalibrationService,
+        ControlEventDispatcher& controlEventDispatcher
     );
 
     esp_err_t init(EventBus& bus);
@@ -47,6 +53,9 @@ private:
     StateManager& m_stateManager;
     BatteryService& m_batteryService;
     CommandProcessor& m_commandProcessor;
+    PidTuningService& m_pidTuningService;
+    GuidedCalibrationService& m_guidedCalibrationService;
+    ControlEventDispatcher& m_controlEventDispatcher;
 
     // Latest command values (thread-safe)
     float m_latestTargetPitchOffset_deg = 0.0f;

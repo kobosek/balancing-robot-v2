@@ -8,6 +8,7 @@ export const API_COMMAND_URL = '/api/command';
 export const API_CONFIG_URL = '/api/config';
 export const API_STATE_URL = '/api/state';
 export const API_DATA_URL = '/data';
+export const API_OTA_URL = '/api/ota';
 
 // Function to get WebSocket URL dynamically
 export function getWsUrl() {

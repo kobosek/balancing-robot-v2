@@ -41,11 +41,19 @@ std::string eventTypeToString(EventType type) {
         case EventType::UI_ENABLE_FALL_DETECTION: return "UI_ENABLE_FALL_DETECTION";
         case EventType::UI_DISABLE_FALL_DETECTION: return "UI_DISABLE_FALL_DETECTION";
         case EventType::UI_JOYSTICK_INPUT: return "UI_JOYSTICK_INPUT";
+        case EventType::UI_START_PID_TUNING: return "UI_START_PID_TUNING";
+        case EventType::UI_CANCEL_PID_TUNING: return "UI_CANCEL_PID_TUNING";
+        case EventType::UI_SAVE_PID_TUNING: return "UI_SAVE_PID_TUNING";
+        case EventType::UI_DISCARD_PID_TUNING: return "UI_DISCARD_PID_TUNING";
+        case EventType::UI_START_GUIDED_CALIBRATION: return "UI_START_GUIDED_CALIBRATION";
+        case EventType::UI_CANCEL_GUIDED_CALIBRATION: return "UI_CANCEL_GUIDED_CALIBRATION";
         
         // Internal Requests / Notifications
         case EventType::IMU_CALIBRATION_REQUEST: return "IMU_CALIBRATION_REQUEST";
         case EventType::IMU_CALIBRATION_COMPLETED: return "IMU_CALIBRATION_COMPLETED";
         case EventType::MOTION_TARGET_SET: return "MOTION_TARGET_SET";
+        case EventType::PID_TUNING_FINISHED: return "PID_TUNING_FINISHED";
+        case EventType::GUIDED_CALIBRATION_FINISHED: return "GUIDED_CALIBRATION_FINISHED";
         
         // Diagnostic/Status Events
         case EventType::TELEMETRY_SNAPSHOT: return "TELEMETRY_SNAPSHOT";

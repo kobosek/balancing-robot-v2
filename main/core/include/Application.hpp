@@ -11,6 +11,7 @@ class JsonConfigParser;
 class ConfigurationService;
 class StateManager;
 class RobotController;
+class ControlEventDispatcher;
 class WiFiManager;
 class WebServer;
 
@@ -26,6 +27,9 @@ class BalancingAlgorithm;
 class BalanceMonitor;
 class BatteryService;
 class CommandProcessor;
+class PidTuningService;
+class OTAService;
+class GuidedCalibrationService;
 
 // Task class forward declarations
 class Task; // Base task class
@@ -49,6 +53,7 @@ private:
     std::unique_ptr<JsonConfigParser> m_configParser;
     std::shared_ptr<ConfigurationService> m_configService;
     std::shared_ptr<StateManager> m_stateManager;
+    std::shared_ptr<ControlEventDispatcher> m_controlEventDispatcher;
     std::shared_ptr<RobotController> m_robotController;
     std::unique_ptr<WiFiManager> m_wifiManager;
     std::shared_ptr<WebServer> m_webServer;
@@ -65,6 +70,9 @@ private:
     std::shared_ptr<BalanceMonitor> m_balanceMonitor;
     std::shared_ptr<BatteryService> m_batteryService;
     std::shared_ptr<CommandProcessor> m_commandProcessor;
+    std::shared_ptr<PidTuningService> m_pidTuningService;
+    std::shared_ptr<OTAService> m_otaService;
+    std::shared_ptr<GuidedCalibrationService> m_guidedCalibrationService;
 
     // Application tasks (using unique_ptr)
     std::unique_ptr<ControlTask> m_controlTask;

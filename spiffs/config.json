@@ -9,7 +9,8 @@
   },
   "control": {
     "joystick_exponent": 1.5,
-    "max_target_pitch_offset_deg": 5.0
+    "max_target_pitch_offset_deg": 5.0,
+    "yaw_control_enabled": false
   },
   "imu": {
     "i2c_port": 0,
@@ -102,6 +103,16 @@
     "output_max": 100.0,
     "iterm_min": -50.0,
     "iterm_max": 50.0
+  },
+  "pid_tuning": {
+    "step_effort": 0.35,
+    "max_effort": 0.45,
+    "step_duration_ms": 1500,
+    "rest_duration_ms": 500,
+    "min_response_dps": 30.0,
+    "max_speed_dps": 1200.0,
+    "validation_target_dps": 360.0,
+    "gain_scale": 0.5
   },
   "behavior": {
     "joystick_deadzone": 0.10,

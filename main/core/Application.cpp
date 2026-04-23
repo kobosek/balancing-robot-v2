@@ -9,6 +9,7 @@
 #include "ConfigurationService.hpp"
 #include "StateManager.hpp"
 #include "RobotController.hpp"
+#include "ControlEventDispatcher.hpp"
 #include "SystemState.hpp"
 #include "esp_log.h"
 #include "esp_check.h"
@@ -33,6 +34,9 @@
 #include "BalanceMonitor.hpp"
 #include "BatteryService.hpp"
 #include "CommandProcessor.hpp"
+#include "PidTuningService.hpp"
+#include "OTAService.hpp"
+#include "GuidedCalibrationService.hpp"
 #include "WiFiManager.hpp"
 #include "WebServer.hpp"
 #include "ConfigData.hpp" // Needed for config struct types
@@ -82,11 +86,16 @@ esp_err_t Application::init()
     PIDConfig speedLeftPidConf = m_configService->getPidSpeedLeftConfig();
     PIDConfig speedRightPidConf = m_configService->getPidSpeedRightConfig();
     PIDConfig yawRatePidConf = m_configService->getPidYawRateConfig();
+    PidTuningConfig pidTuningConf = m_configService->getPidTuningConfig();
 
     // --- State Manager ---
     m_stateManager = std::make_shared<StateManager>(*m_eventBus, behaviorConf, batteryConf);
     ret = m_stateManager->init(); ESP_RETURN_ON_ERROR(ret, TAG, "StateManager init failed");
     ESP_LOGI(TAG, "StateManager initialized");
+
+    m_controlEventDispatcher = std::make_shared<ControlEventDispatcher>(*m_eventBus);
+    ret = m_controlEventDispatcher->init(); ESP_RETURN_ON_ERROR(ret, TAG, "ControlEventDispatcher init failed");
+    ESP_LOGI(TAG, "ControlEventDispatcher initialized");
 
     // --- Instantiate Non-IMU Components ---
     m_wifiManager = std::make_unique<WiFiManager>();
@@ -110,14 +119,24 @@ esp_err_t Application::init()
     m_balancingAlgorithm = std::make_shared<BalancingAlgorithm>(
         *m_eventBus,
         anglePidConf, speedLeftPidConf, speedRightPidConf, yawRatePidConf,
+        controlConf,
         encoderConf, dimensionConf
     );
     ret = m_balancingAlgorithm->init(); ESP_RETURN_ON_ERROR(ret, TAG, "BalancingAlgorithm init failed");
 
     m_balanceMonitor = std::make_shared<BalanceMonitor>(*m_eventBus, behaviorConf);
 
+    m_pidTuningService = std::make_shared<PidTuningService>(*m_eventBus, *m_configService, *m_encoderService, pidTuningConf);
+    ret = m_pidTuningService->init(); ESP_RETURN_ON_ERROR(ret, TAG, "PidTuningService init failed");
+
+    m_guidedCalibrationService = std::make_shared<GuidedCalibrationService>(*m_eventBus, pidTuningConf, motorConf);
+    ret = m_guidedCalibrationService->init(); ESP_RETURN_ON_ERROR(ret, TAG, "GuidedCalibrationService init failed");
+
+    m_otaService = std::make_shared<OTAService>();
+    ret = m_otaService->init(); ESP_RETURN_ON_ERROR(ret, TAG, "OTAService init failed");
+
     // WebServer needs ConfigService mainly to pass to handlers that NEED it (ConfigApiHandler)
-    m_webServer = std::make_shared<WebServer>(*m_configService, *m_stateManager, *m_balanceMonitor, *m_batteryService, *m_eventBus, webConf);
+    m_webServer = std::make_shared<WebServer>(*m_configService, *m_stateManager, *m_balanceMonitor, *m_batteryService, *m_pidTuningService, *m_guidedCalibrationService, *m_otaService, *m_eventBus, webConf);
     ret = m_webServer->init(); ESP_RETURN_ON_ERROR(ret, TAG, "WebServer init failed");
 
     // Create IMUService with encapsulated components
@@ -138,7 +157,10 @@ esp_err_t Application::init()
         *m_balancingAlgorithm,
         *m_stateManager,
         *m_batteryService,
-        *m_commandProcessor
+        *m_commandProcessor,
+        *m_pidTuningService,
+        *m_guidedCalibrationService,
+        *m_controlEventDispatcher
     );
     ret = m_robotController->init(*m_eventBus); ESP_RETURN_ON_ERROR(ret, TAG, "RobotController init failed");
     ESP_LOGI(TAG, "RobotController initialized");
@@ -170,6 +192,22 @@ esp_err_t Application::init()
     m_eventBus->subscribe(m_motorService, {
         EventType::SYSTEM_STATE_CHANGED
     });
+
+    // PID tuning subscriptions. This service owns the tuning routine; StateManager owns state transitions.
+    m_eventBus->subscribe(m_pidTuningService, {
+        EventType::UI_START_PID_TUNING,
+        EventType::UI_CANCEL_PID_TUNING,
+        EventType::UI_SAVE_PID_TUNING,
+        EventType::UI_DISCARD_PID_TUNING,
+        EventType::SYSTEM_STATE_CHANGED
+    });
+
+    m_eventBus->subscribe(m_guidedCalibrationService, {
+        EventType::UI_START_GUIDED_CALIBRATION,
+        EventType::UI_CANCEL_GUIDED_CALIBRATION,
+        EventType::SYSTEM_STATE_CHANGED,
+        EventType::CONFIG_FULL_UPDATE
+    });
     
     // BatteryService subscriptions - now using EventHandler
     m_eventBus->subscribe(m_batteryService, {
@@ -185,6 +223,12 @@ esp_err_t Application::init()
         EventType::BATTERY_STATUS_UPDATE,
 
         EventType::UI_CALIBRATE_IMU,
+        EventType::UI_START_PID_TUNING,
+        EventType::UI_CANCEL_PID_TUNING,
+        EventType::PID_TUNING_FINISHED,
+        EventType::UI_START_GUIDED_CALIBRATION,
+        EventType::UI_CANCEL_GUIDED_CALIBRATION,
+        EventType::GUIDED_CALIBRATION_FINISHED,
         EventType::IMU_CALIBRATION_COMPLETED,
         EventType::IMU_CALIBRATION_REJECTED,
         EventType::IMU_COMMUNICATION_ERROR,
@@ -269,6 +313,9 @@ esp_err_t Application::createAndStartTasks(int intervalMs, int batteryIntervalMs
     m_batteryMonitorTask = std::make_unique<BatteryMonitorTask>(*m_batteryService, batteryIntervalMs);
 
     // --- Start Tasks (Using hardcoded params for now, move to config later if needed) ---
+    ESP_RETURN_ON_FALSE(m_controlEventDispatcher != nullptr, ESP_FAIL, TAG, "ControlEventDispatcher is null");
+    if (!m_controlEventDispatcher->start(6, 0, 4096)) { ESP_LOGE(TAG, "Failed to start Control Event Dispatcher task!"); return ESP_FAIL; }
+
     if (!m_controlTask->start(configMAX_PRIORITIES - 1, 1, 4096)) { ESP_LOGE(TAG, "Failed to start Control task!"); return ESP_FAIL; }
     if (!m_batteryMonitorTask->start(5, 0, 3072)) { ESP_LOGE(TAG, "Failed to start Battery Monitor task!"); return ESP_FAIL; }
     

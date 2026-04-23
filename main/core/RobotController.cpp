@@ -7,13 +7,14 @@
 #include "BatteryService.hpp"
 #include "StateManager.hpp"
 #include "SystemState.hpp"
+#include "PidTuningService.hpp"
+#include "GuidedCalibrationService.hpp"
+#include "ControlEventDispatcher.hpp"
 #include "BATTERY_StatusUpdate.hpp"
 #include "CommandProcessor.hpp"
 #include "EventBus.hpp"
 #include "EventTypes.hpp"
 #include "MOTION_TargetMovement.hpp"
-#include "IMU_OrientationData.hpp"
-#include "TELEMETRY_Snapshot.hpp"
 #include "TelemetryDataPoint.hpp"
 
 #include "esp_log.h"
@@ -27,7 +28,10 @@ RobotController::RobotController(
     BalancingAlgorithm& algorithm,
     StateManager& stateManager,
     BatteryService& batteryService,
-    CommandProcessor& commandProcessor
+    CommandProcessor& commandProcessor,
+    PidTuningService& pidTuningService,
+    GuidedCalibrationService& guidedCalibrationService,
+    ControlEventDispatcher& controlEventDispatcher
 ) :
     m_estimator(estimator),
     m_encoderService(encoderService),
@@ -36,6 +40,9 @@ RobotController::RobotController(
     m_stateManager(stateManager),
     m_batteryService(batteryService),
     m_commandProcessor(commandProcessor),
+    m_pidTuningService(pidTuningService),
+    m_guidedCalibrationService(guidedCalibrationService),
+    m_controlEventDispatcher(controlEventDispatcher),
     m_latestTargetPitchOffset_deg(0.0f),
     m_latestTargetAngVel_dps(0.0f)
 {
@@ -92,13 +99,10 @@ void RobotController::runControlStep(float dt) {
     float pitch_rate_dps = 0.0f;
     float yaw_rate_dps = orientation.second;
 
-    // Publish orientation data — BalanceMonitor handles fall detection and recovery as an observer
-    if (m_eventBus) {
-        IMU_OrientationData orientation_event(pitch_deg * OrientationEstimator::DEG_TO_RAD, pitch_rate_dps * OrientationEstimator::DEG_TO_RAD);
-        m_eventBus->publish(orientation_event);
-    }
-
-    currentState = m_stateManager.getCurrentState(); // Re-fetch after observers may have changed state
+    // BalanceMonitor and telemetry observers run from a lower-priority dispatcher task.
+    m_controlEventDispatcher.enqueueOrientation(
+        pitch_deg * OrientationEstimator::DEG_TO_RAD,
+        pitch_rate_dps * OrientationEstimator::DEG_TO_RAD);
 
     // 2. Update Encoder Speeds
     m_encoderService.update(dt);
@@ -121,6 +125,20 @@ void RobotController::runControlStep(float dt) {
                                     speedL_dps, speedR_dps,
                                     currentTargetPitchOffset_deg,
                                     currentTargetAngVel_dps);
+    } else if (currentState == SystemState::PID_TUNING) {
+        m_algorithm.resetState();
+        effort = m_pidTuningService.update(dt, speedL_dps, speedR_dps);
+        currentTargetPitchOffset_deg = 0.0f;
+        currentTargetAngVel_dps = 0.0f;
+    } else if (currentState == SystemState::GUIDED_CALIBRATION) {
+        m_algorithm.resetState();
+        GuidedCalibrationSample guidedSample = {};
+        guidedSample.pitch_deg = pitch_deg;
+        guidedSample.speedLeft_dps = speedL_dps;
+        guidedSample.speedRight_dps = speedR_dps;
+        effort = m_guidedCalibrationService.update(dt, guidedSample);
+        currentTargetPitchOffset_deg = 0.0f;
+        currentTargetAngVel_dps = 0.0f;
     } else {
         m_algorithm.resetState();
         effort = {0.0f, 0.0f};
@@ -139,12 +157,20 @@ void RobotController::runControlStep(float dt) {
     snapshot.speedRight_dps = speedR_dps;
     snapshot.batteryVoltage = m_batteryService.getLatestStatus().voltage;
     snapshot.systemState = static_cast<int>(currentState);
-    snapshot.speedSetpointLeft_dps = m_algorithm.getLastSpeedSetpointLeftDPS();
-    snapshot.speedSetpointRight_dps = m_algorithm.getLastSpeedSetpointRightDPS();
+    if (currentState == SystemState::PID_TUNING) {
+        snapshot.speedSetpointLeft_dps = m_pidTuningService.getLastSpeedSetpointLeftDPS();
+        snapshot.speedSetpointRight_dps = m_pidTuningService.getLastSpeedSetpointRightDPS();
+    } else if (currentState == SystemState::GUIDED_CALIBRATION) {
+        snapshot.speedSetpointLeft_dps = 0.0f;
+        snapshot.speedSetpointRight_dps = 0.0f;
+    } else {
+        snapshot.speedSetpointLeft_dps = m_algorithm.getLastSpeedSetpointLeftDPS();
+        snapshot.speedSetpointRight_dps = m_algorithm.getLastSpeedSetpointRightDPS();
+    }
     snapshot.desiredAngle_deg = currentTargetPitchOffset_deg;
     snapshot.yawRate_dps = yaw_rate_dps;
 
-    m_eventBus->publish(TELEMETRY_Snapshot(snapshot));
+    m_controlEventDispatcher.enqueueTelemetry(snapshot);
 
     // Update Log (added Yaw)
     ESP_LOGV(TAG, "Ctrl Step: dt=%.4f, P=%.1f YawR=%.1f | TgtPO=%.1f, TgtAV=%.1f | SSetL=%.1f, SSetR=%.1f | SActL=%.1f, SActR=%.1f | EffL=%.2f, EffR=%.2f",

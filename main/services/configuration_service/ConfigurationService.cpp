@@ -136,6 +136,56 @@ esp_err_t ConfigurationService::updateConfigFromJson(const std::string& json) {
     return ret; // Return the result of the save operation
 }
 
+esp_err_t ConfigurationService::applyPidConfig(const std::string& pidName, const PIDConfig& config, bool persist) {
+    ConfigData oldConfig;
+    ConfigData newConfig;
+    esp_err_t ret = ESP_OK;
+
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        oldConfig = m_configData;
+        newConfig = m_configData;
+
+        if (pidName == "angle") {
+            newConfig.pid_angle = config;
+        } else if (pidName == "speed_left") {
+            newConfig.pid_speed_left = config;
+        } else if (pidName == "speed_right") {
+            newConfig.pid_speed_right = config;
+        } else if (pidName == "yaw_rate") {
+            newConfig.pid_yaw_rate = config;
+        } else {
+            ESP_LOGE(TAG, "Unknown PID name for applyPidConfig: %s", pidName.c_str());
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        std::string validationError;
+        if (!validateConfig(newConfig, validationError)) {
+            ESP_LOGE(TAG, "Rejected PID update for '%s': %s", pidName.c_str(), validationError.c_str());
+            return ESP_FAIL;
+        }
+
+        m_configData = newConfig;
+        if (persist) {
+            ret = saveInternal();
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to persist PID config '%s'", pidName.c_str());
+            }
+        }
+    }
+
+    if (oldConfig.pid_angle != newConfig.pid_angle ||
+        oldConfig.pid_speed_left != newConfig.pid_speed_left ||
+        oldConfig.pid_speed_right != newConfig.pid_speed_right ||
+        oldConfig.pid_yaw_rate != newConfig.pid_yaw_rate) {
+        publishGranularConfigEvents(oldConfig, newConfig);
+        CONFIG_FullConfigUpdate event(newConfig);
+        m_eventBus.publish(event);
+    }
+
+    return ret;
+}
+
 void ConfigurationService::updateImuGyroOffsets(float x, float y, float z) {
     ESP_LOGI(TAG, "Updating IMU gyro offsets: x=%.2f, y=%.2f, z=%.2f", x, y, z);
     
@@ -408,6 +458,32 @@ bool ConfigurationService::validateConfig(const ConfigData& config, std::string&
     if (!validatePID(config.pid_speed_left, "pid_speed_left")) return false;
     if (!validatePID(config.pid_speed_right, "pid_speed_right")) return false;
     if (!validatePID(config.pid_yaw_rate, "pid_yaw_rate")) return false;
+
+    // PID tuning defaults are intentionally conservative; these ranges catch unsafe edits.
+    if (config.pid_tuning.step_effort <= 0.0f || config.pid_tuning.step_effort > 1.0f) {
+        error = "pid_tuning.step_effort out of range (0,1]"; return false;
+    }
+    if (config.pid_tuning.max_effort < config.pid_tuning.step_effort || config.pid_tuning.max_effort > 1.0f) {
+        error = "pid_tuning.max_effort must be >= step_effort and <= 1"; return false;
+    }
+    if (config.pid_tuning.step_duration_ms < 100 || config.pid_tuning.step_duration_ms > 10000) {
+        error = "pid_tuning.step_duration_ms [100,10000]"; return false;
+    }
+    if (config.pid_tuning.rest_duration_ms < 0 || config.pid_tuning.rest_duration_ms > 10000) {
+        error = "pid_tuning.rest_duration_ms [0,10000]"; return false;
+    }
+    if (config.pid_tuning.min_response_dps <= 0.0f || config.pid_tuning.min_response_dps > 5000.0f) {
+        error = "pid_tuning.min_response_dps (0,5000]"; return false;
+    }
+    if (config.pid_tuning.max_speed_dps < config.pid_tuning.min_response_dps || config.pid_tuning.max_speed_dps > 10000.0f) {
+        error = "pid_tuning.max_speed_dps must be >= min_response_dps and <= 10000"; return false;
+    }
+    if (config.pid_tuning.validation_target_dps <= 0.0f || config.pid_tuning.validation_target_dps > config.pid_tuning.max_speed_dps) {
+        error = "pid_tuning.validation_target_dps must be >0 and <= max_speed_dps"; return false;
+    }
+    if (config.pid_tuning.gain_scale <= 0.0f || config.pid_tuning.gain_scale > 1.0f) {
+        error = "pid_tuning.gain_scale (0,1]"; return false;
+    }
 
     // SystemBehaviorConfig
     if (config.behavior.joystick_deadzone < 0.0f || config.behavior.joystick_deadzone > 1.0f) { error = "behavior.joystick_deadzone [0,1]"; return false; }

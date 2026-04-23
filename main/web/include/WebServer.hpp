@@ -14,6 +14,9 @@ class ConfigurationService; // Still needed for ConfigApiHandler
 class StateManager;
 class BalanceMonitor;
 class BatteryService;
+class PidTuningService;
+class GuidedCalibrationService;
+class OTAService;
 class EventBus;
 class BaseEvent;
 
@@ -23,6 +26,7 @@ class TelemetryHandler;
 class ConfigApiHandler;
 class CommandApiHandler;
 class StateApiHandler;
+class OTAApiHandler;
 
 class WebServer : public EventHandler {
 public:
@@ -31,6 +35,9 @@ public:
               StateManager& stateManager,
               BalanceMonitor& balanceMonitor,
               BatteryService& batteryService,
+              PidTuningService& pidTuningService,
+              GuidedCalibrationService& guidedCalibrationService,
+              OTAService& otaService,
               EventBus& eventBus,
               const WebServerConfig& initialWebConfig);
     ~WebServer();
@@ -54,6 +61,9 @@ private:
     StateManager& m_stateManager;
     BalanceMonitor& m_balanceMonitor;
     BatteryService& m_batteryService;
+    PidTuningService& m_pidTuningService;
+    GuidedCalibrationService& m_guidedCalibrationService;
+    OTAService& m_otaService;
     EventBus& m_eventBus;
 
     // Own instances of the handlers
@@ -62,6 +72,7 @@ private:
     std::unique_ptr<ConfigApiHandler> m_configApiHandler;
     std::unique_ptr<CommandApiHandler> m_commandApiHandler;
     std::unique_ptr<StateApiHandler> m_stateApiHandler;
+    std::unique_ptr<OTAApiHandler> m_otaApiHandler;
 
     // Static callback functions (HTTP)
     static esp_err_t static_get_handler(httpd_req_t* req);
@@ -70,6 +81,8 @@ private:
     static esp_err_t set_config_handler(httpd_req_t* req);
     static esp_err_t command_handler(httpd_req_t* req);
     static esp_err_t get_state_handler(httpd_req_t* req);
+    static esp_err_t get_ota_status_handler(httpd_req_t* req);
+    static esp_err_t ota_upload_handler(httpd_req_t* req);
 
     // WebSocket Handling
     static esp_err_t websocket_handler(httpd_req_t *req);

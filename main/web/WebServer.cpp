@@ -6,11 +6,13 @@
 #include "ConfigApiHandler.hpp"
 #include "CommandApiHandler.hpp"
 #include "StateApiHandler.hpp"
+#include "OTAApiHandler.hpp"
 
 // Include necessary services/events for handler instantiation/use
 #include "ConfigurationService.hpp"
 #include "StateManager.hpp"
 #include "BalanceMonitor.hpp"
+#include "PidTuningService.hpp"
 #include "EventBus.hpp"
 #include "TelemetryDataPoint.hpp"
 #include "UI_JoystickInput.hpp"
@@ -27,19 +29,31 @@
 #include <algorithm>
 
 // Constructor: Instantiate handlers, injecting dependencies
-WebServer::WebServer(ConfigurationService& configService, StateManager& stateManager, BalanceMonitor& balanceMonitor, BatteryService& batteryService, EventBus& eventBus, const WebServerConfig& initialWebConfig)
+WebServer::WebServer(ConfigurationService& configService,
+                     StateManager& stateManager,
+                     BalanceMonitor& balanceMonitor,
+                     BatteryService& batteryService,
+                     PidTuningService& pidTuningService,
+                     GuidedCalibrationService& guidedCalibrationService,
+                     OTAService& otaService,
+                     EventBus& eventBus,
+                     const WebServerConfig& initialWebConfig)
     : server(nullptr),
       m_configService(configService),
       m_stateManager(stateManager),
       m_balanceMonitor(balanceMonitor),
       m_batteryService(batteryService),
+      m_pidTuningService(pidTuningService),
+      m_guidedCalibrationService(guidedCalibrationService),
+      m_otaService(otaService),
       m_eventBus(eventBus)
 {
     m_staticFileHandler = std::make_unique<StaticFileHandler>("/spiffs");
     m_telemetryHandler = std::make_unique<TelemetryHandler>(initialWebConfig);
     m_configApiHandler = std::make_unique<ConfigApiHandler>(m_configService);
     m_commandApiHandler = std::make_unique<CommandApiHandler>(m_eventBus);
-    m_stateApiHandler = std::make_unique<StateApiHandler>(m_stateManager, m_balanceMonitor, m_batteryService);
+    m_stateApiHandler = std::make_unique<StateApiHandler>(m_stateManager, m_balanceMonitor, m_batteryService, m_pidTuningService, m_guidedCalibrationService, m_configService, m_otaService);
+    m_otaApiHandler = std::make_unique<OTAApiHandler>(m_otaService);
     ESP_LOGI(TAG, "Webserver handlers created.");
 }
 
@@ -143,6 +157,16 @@ esp_err_t WebServer::init() {
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed register get_state URI");
     ESP_LOGI(TAG, "Registered handler for: /api/state (GET)");
 
+    const httpd_uri_t get_ota_status_uri = { "/api/ota", HTTP_GET, get_ota_status_handler, nullptr };
+    ret = httpd_register_uri_handler(server, &get_ota_status_uri);
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register get_ota_status URI");
+    ESP_LOGI(TAG, "Registered handler for: /api/ota (GET)");
+
+    const httpd_uri_t ota_upload_uri = { "/api/ota", HTTP_POST, ota_upload_handler, nullptr };
+    ret = httpd_register_uri_handler(server, &ota_upload_uri);
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register ota_upload URI");
+    ESP_LOGI(TAG, "Registered handler for: /api/ota (POST)");
+
     // --- Register WebSocket URI Handler ---
     const httpd_uri_t ws_uri = { "/ws", HTTP_GET, websocket_handler, nullptr, true };
     ret = httpd_register_uri_handler(server, &ws_uri);
@@ -190,6 +214,16 @@ esp_err_t WebServer::get_state_handler(httpd_req_t *req) {
      httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
      if (!instance || !instance->m_stateApiHandler) { ESP_LOGE(TAG, "State API handler ctx invalid!"); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); return ESP_FAIL; }
     return instance->m_stateApiHandler->handleRequest(req);
+}
+esp_err_t WebServer::get_ota_status_handler(httpd_req_t *req) {
+     httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
+     if (!instance || !instance->m_otaApiHandler) { ESP_LOGE(TAG, "OTA API handler ctx invalid!"); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); return ESP_FAIL; }
+    return instance->m_otaApiHandler->handleStatusRequest(req);
+}
+esp_err_t WebServer::ota_upload_handler(httpd_req_t *req) {
+     httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
+     if (!instance || !instance->m_otaApiHandler) { ESP_LOGE(TAG, "OTA API handler ctx invalid!"); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); return ESP_FAIL; }
+    return instance->m_otaApiHandler->handleUploadRequest(req);
 }
 
 // --- WebSocket Static Handler ---

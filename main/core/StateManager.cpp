@@ -18,8 +18,14 @@
 #include "IMU_CommunicationError.hpp"
 #include "SYSTEM_StateChanged.hpp"
 #include "UI_CalibrateImu.hpp"
+#include "UI_CancelPidTuning.hpp"
+#include "UI_StartPidTuning.hpp"
+#include "UI_CancelGuidedCalibration.hpp"
+#include "UI_StartGuidedCalibration.hpp"
 #include "UI_StartBalancing.hpp"
 #include "UI_Stop.hpp"
+#include "PID_TuningFinished.hpp"
+#include "GUIDED_CalibrationFinished.hpp"
 #include "esp_err.h"
 #include "esp_log.h"
 
@@ -52,6 +58,10 @@ std::string StateManager::stateToString(SystemState state) const {
             return "IDLE";
         case SystemState::BALANCING:
             return "BALANCING";
+        case SystemState::PID_TUNING:
+            return "PID_TUNING";
+        case SystemState::GUIDED_CALIBRATION:
+            return "GUIDED_CALIBRATION";
         case SystemState::FALLEN:
             return "FALLEN";
         case SystemState::SHUTDOWN:
@@ -104,6 +114,24 @@ void StateManager::handleEvent(const BaseEvent& event) {
             break;
         case EventType::UI_CALIBRATE_IMU:
             handleCalibrateCommand(static_cast<const UI_CalibrateImu&>(event));
+            break;
+        case EventType::UI_START_PID_TUNING:
+            handleStartPidTuning(static_cast<const UI_StartPidTuning&>(event));
+            break;
+        case EventType::UI_CANCEL_PID_TUNING:
+            handleCancelPidTuning(static_cast<const UI_CancelPidTuning&>(event));
+            break;
+        case EventType::PID_TUNING_FINISHED:
+            handlePidTuningFinished(static_cast<const PID_TuningFinished&>(event));
+            break;
+        case EventType::UI_START_GUIDED_CALIBRATION:
+            handleStartGuidedCalibration(static_cast<const UI_StartGuidedCalibration&>(event));
+            break;
+        case EventType::UI_CANCEL_GUIDED_CALIBRATION:
+            handleCancelGuidedCalibration(static_cast<const UI_CancelGuidedCalibration&>(event));
+            break;
+        case EventType::GUIDED_CALIBRATION_FINISHED:
+            handleGuidedCalibrationFinished(static_cast<const GUIDED_CalibrationFinished&>(event));
             break;
         case EventType::IMU_CALIBRATION_COMPLETED:
             handleCalibrationComplete(static_cast<const IMU_CalibrationCompleted&>(event));
@@ -213,8 +241,10 @@ void StateManager::handleBatteryUpdate(const BATTERY_StatusUpdate& event) {
 
     if (m_criticalBatteryMotorShutdownEnabled && event.status.isCritical) {
         m_pending_start = false;
-        if (m_currentState == SystemState::BALANCING) {
-            ESP_LOGW(TAG, "Battery level CRITICAL while balancing. Transitioning to IDLE.");
+        if (m_currentState == SystemState::BALANCING ||
+            m_currentState == SystemState::PID_TUNING ||
+            m_currentState == SystemState::GUIDED_CALIBRATION) {
+            ESP_LOGW(TAG, "Battery level CRITICAL while motors active. Transitioning to IDLE.");
             setState(SystemState::IDLE);
         }
     }
@@ -226,6 +256,79 @@ void StateManager::handleCalibrateCommand(const UI_CalibrateImu& event) {
     initiateCalibration(false);
 }
 
+void StateManager::handleStartPidTuning(const UI_StartPidTuning& event) {
+    (void)event;
+    ESP_LOGI(TAG, "PID tuning command received.");
+
+    if (m_currentState != SystemState::IDLE) {
+        ESP_LOGW(TAG, "Cannot start PID tuning from current state: %s", stateToString(m_currentState).c_str());
+        return;
+    }
+
+    if (m_criticalBatteryMotorShutdownEnabled && m_battery_critical) {
+        ESP_LOGW(TAG, "Cannot start PID tuning because battery is critical and motor shutdown is enabled.");
+        return;
+    }
+
+    setState(SystemState::PID_TUNING);
+}
+
+void StateManager::handleCancelPidTuning(const UI_CancelPidTuning& event) {
+    (void)event;
+    if (m_currentState == SystemState::PID_TUNING) {
+        ESP_LOGI(TAG, "Canceling PID tuning.");
+        setState(SystemState::IDLE);
+    }
+}
+
+void StateManager::handlePidTuningFinished(const PID_TuningFinished& event) {
+    ESP_LOGI(TAG, "PID tuning finished with state %d: %s",
+             static_cast<int>(event.resultState),
+             event.message.c_str());
+    if (m_currentState == SystemState::PID_TUNING) {
+        setState(SystemState::IDLE);
+    }
+}
+
+void StateManager::handleStartGuidedCalibration(const UI_StartGuidedCalibration& event) {
+    (void)event;
+    ESP_LOGI(TAG, "Guided calibration command received.");
+
+    if (m_currentState != SystemState::IDLE) {
+        ESP_LOGW(TAG, "Cannot start guided calibration from current state: %s", stateToString(m_currentState).c_str());
+        return;
+    }
+
+    if (!m_imu_available) {
+        ESP_LOGW(TAG, "Cannot start guided calibration because IMU is unavailable.");
+        m_eventBus.publish(IMU_AttachRequested());
+        return;
+    }
+
+    if (m_criticalBatteryMotorShutdownEnabled && m_battery_critical) {
+        ESP_LOGW(TAG, "Cannot start guided calibration because battery is critical and shutdown is enabled.");
+        return;
+    }
+
+    setState(SystemState::GUIDED_CALIBRATION);
+}
+
+void StateManager::handleCancelGuidedCalibration(const UI_CancelGuidedCalibration& event) {
+    (void)event;
+    if (m_currentState == SystemState::GUIDED_CALIBRATION) {
+        setState(SystemState::IDLE);
+    }
+}
+
+void StateManager::handleGuidedCalibrationFinished(const GUIDED_CalibrationFinished& event) {
+    ESP_LOGI(TAG, "Guided calibration finished: success=%s message=%s",
+             event.success ? "true" : "false",
+             event.message.c_str());
+    if (m_currentState == SystemState::GUIDED_CALIBRATION) {
+        setState(SystemState::IDLE);
+    }
+}
+
 void StateManager::handleCalibrationComplete(const IMU_CalibrationCompleted& event) {
     ESP_LOGI(TAG, "Calibration Complete Event Received (Status: %s).", esp_err_to_name(event.status));
     setState(SystemState::IDLE);
@@ -235,7 +338,7 @@ void StateManager::handleImuCommunicationError(const IMU_CommunicationError& eve
     ESP_LOGE(TAG, "IMU communication error: %s (%d)", esp_err_to_name(event.errorCode), event.errorCode);
     m_pending_start = false;
 
-    if (m_currentState == SystemState::BALANCING || m_currentState == SystemState::FALLEN) {
+    if (m_currentState == SystemState::BALANCING || m_currentState == SystemState::FALLEN || m_currentState == SystemState::PID_TUNING) {
         setState(SystemState::IDLE);
     }
 }
@@ -263,7 +366,9 @@ void StateManager::initiateCalibration(bool force) {
         return;
     }
 
-    if (m_currentState == SystemState::BALANCING && !force) {
+    if ((m_currentState == SystemState::BALANCING ||
+         m_currentState == SystemState::PID_TUNING ||
+         m_currentState == SystemState::GUIDED_CALIBRATION) && !force) {
         m_pending_calibration = true;
         IMU_CalibrationRequestRejected rejectEvent(IMU_CalibrationRequestRejected::Reason::NOT_IDLE, true);
         m_eventBus.publish(rejectEvent);

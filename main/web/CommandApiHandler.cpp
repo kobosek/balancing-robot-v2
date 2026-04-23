@@ -9,6 +9,13 @@
 #include "UI_DisableAutoBalancing.hpp"
 #include "UI_EnableFallDetection.hpp"  // <<< ADDED
 #include "UI_DisableFallDetection.hpp" // <<< ADDED
+#include "UI_StartPidTuning.hpp"
+#include "UI_CancelPidTuning.hpp"
+#include "UI_SavePidTuning.hpp"
+#include "UI_DiscardPidTuning.hpp"
+#include "UI_StartGuidedCalibration.hpp"
+#include "UI_CancelGuidedCalibration.hpp"
+#include "PidTuningTypes.hpp"
 #include "BaseEvent.hpp"           // Need for BaseEvent
 #include "cJSON.h"
 #include <memory>                   // For unique_ptr
@@ -30,7 +37,7 @@ void CommandApiHandler::handleEvent(const BaseEvent& event) {
 
 esp_err_t CommandApiHandler::handleRequest(httpd_req_t *req) {
     ESP_LOGD(TAG, "Received request for /api/command (POST)");
-    char buf[128]; // Slightly larger buffer just in case
+    char buf[256]; // Allows command plus optional tuning target
     esp_err_t ret = ESP_FAIL;
     size_t content_len = req->content_len;
 
@@ -99,11 +106,60 @@ esp_err_t CommandApiHandler::handleRequest(httpd_req_t *req) {
         m_eventBus.publish(cmd_event);
         message = "Enable fall detect command sent";
         ret = ESP_OK;
-     } else if (command_str == "disable_fall_detect") {
+    } else if (command_str == "disable_fall_detect") {
         ESP_LOGI(TAG, "Publishing DISABLE_FALL_DETECT_COMMAND_RECEIVED");
         UI_DisableFallDetection cmd_event;
         m_eventBus.publish(cmd_event);
         message = "Disable fall detect command sent";
+        ret = ESP_OK;
+    } else if (command_str == "start_pid_tuning") {
+        PidTuningTarget target = PidTuningTarget::MOTOR_SPEED_LEFT;
+        cJSON *target_item = cJSON_GetObjectItemCaseSensitive(root, "target");
+        if (target_item && cJSON_IsString(target_item) && target_item->valuestring) {
+            std::string target_str = target_item->valuestring;
+            if (target_str == "motor_speed_left" || target_str == "speed_left" || target_str == "pid_speed_left") {
+                target = PidTuningTarget::MOTOR_SPEED_LEFT;
+            } else if (target_str == "motor_speed_right" || target_str == "speed_right" || target_str == "pid_speed_right") {
+                target = PidTuningTarget::MOTOR_SPEED_RIGHT;
+            } else {
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Unknown PID tuning target");
+                return ESP_FAIL;
+            }
+        }
+        ESP_LOGI(TAG, "Publishing START_PID_TUNING_COMMAND_RECEIVED");
+        UI_StartPidTuning cmd_event(target);
+        m_eventBus.publish(cmd_event);
+        message = "PID tuning start command sent";
+        ret = ESP_OK;
+    } else if (command_str == "cancel_pid_tuning") {
+        ESP_LOGI(TAG, "Publishing CANCEL_PID_TUNING_COMMAND_RECEIVED");
+        UI_CancelPidTuning cmd_event;
+        m_eventBus.publish(cmd_event);
+        message = "PID tuning cancel command sent";
+        ret = ESP_OK;
+    } else if (command_str == "save_pid_tuning") {
+        ESP_LOGI(TAG, "Publishing SAVE_PID_TUNING_COMMAND_RECEIVED");
+        UI_SavePidTuning cmd_event;
+        m_eventBus.publish(cmd_event);
+        message = "PID tuning save command sent";
+        ret = ESP_OK;
+    } else if (command_str == "discard_pid_tuning") {
+        ESP_LOGI(TAG, "Publishing DISCARD_PID_TUNING_COMMAND_RECEIVED");
+        UI_DiscardPidTuning cmd_event;
+        m_eventBus.publish(cmd_event);
+        message = "PID tuning discard command sent";
+        ret = ESP_OK;
+    } else if (command_str == "start_guided_calibration") {
+        ESP_LOGI(TAG, "Publishing START_GUIDED_CALIBRATION_COMMAND_RECEIVED");
+        UI_StartGuidedCalibration cmd_event;
+        m_eventBus.publish(cmd_event);
+        message = "Guided calibration start command sent";
+        ret = ESP_OK;
+    } else if (command_str == "cancel_guided_calibration") {
+        ESP_LOGI(TAG, "Publishing CANCEL_GUIDED_CALIBRATION_COMMAND_RECEIVED");
+        UI_CancelGuidedCalibration cmd_event;
+        m_eventBus.publish(cmd_event);
+        message = "Guided calibration cancel command sent";
         ret = ESP_OK;
     // <<< END Added >>>
     } else {

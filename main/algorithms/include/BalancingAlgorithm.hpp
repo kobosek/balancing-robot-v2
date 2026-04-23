@@ -24,6 +24,7 @@ public:
                        const PIDConfig& initialSpeedLeftPid,
                        const PIDConfig& initialSpeedRightPid,
                        const PIDConfig& initialYawRatePid,
+                       const ControlConfig& initialControl,
                        const EncoderConfig& initialEncoder,
                        const RobotDimensionsConfig& initialDimensions);
 
@@ -41,6 +42,7 @@ public:
     // --- Getters for Telemetry ---
     float getLastSpeedSetpointLeftDPS() const { return m_last_speed_setpoint_left_dps; }
     float getLastSpeedSetpointRightDPS() const { return m_last_speed_setpoint_right_dps; }
+    bool isYawControlEnabled() const { return m_yaw_control_enabled; }
     // --- End Getters ---
 
 private:
@@ -59,6 +61,7 @@ private:
     float m_robot_wheelbase_m;
     float m_angle_pid_output_min;
     float m_angle_pid_output_max;
+    bool m_yaw_control_enabled = false;
 
     // --- Members for Telemetry ---
     float m_last_speed_setpoint_left_dps = 0.0f;

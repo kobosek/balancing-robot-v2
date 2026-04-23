@@ -1,4 +1,4 @@
-import { API_CONFIG_URL, API_COMMAND_URL, API_STATE_URL, API_DATA_URL } from './constants.js';
+import { API_CONFIG_URL, API_COMMAND_URL, API_STATE_URL, API_DATA_URL, API_OTA_URL } from './constants.js';
 import { updateConfigCache, invalidateConfigCache, appState, updateCurrentSystemState } from './state.js';
 import { updateStatusSectionUI } from './ui.js'; // For state updates
 
@@ -39,17 +39,26 @@ export async function postConfigApi(configData) {
 }
 
 // --- Command API ---
-export async function sendCommandApi(commandName) {
+export async function sendCommandApi(commandName, extraPayload = {}) {
     console.log(`Sending HTTP command: ${commandName}`);
+    const configChangingCommands = new Set([
+        'start_pid_tuning',
+        'cancel_pid_tuning',
+        'save_pid_tuning',
+        'discard_pid_tuning'
+    ]);
     try {
         const response = await fetch(API_COMMAND_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: commandName })
+            body: JSON.stringify({ command: commandName, ...extraPayload })
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.message || `HTTP error ${response.status}`);
         console.log('HTTP Command response:', result);
+        if (configChangingCommands.has(commandName)) {
+            invalidateConfigCache();
+        }
         // Optionally provide feedback based on commandName
         // Fetch state soon after sending a command to update UI faster
         setTimeout(fetchStateApi, 300);
@@ -81,13 +90,36 @@ export async function fetchStateApi() {
             state_name: 'ERROR',
             auto_balancing_enabled: false,
             fall_detection_enabled: false,
+            yaw_control_enabled: false,
             critical_battery_motor_shutdown_enabled: false,
             battery_voltage: 0,
             battery_adc_pin_voltage: 0,
             battery_percentage: 0,
             battery_is_low: false,
             battery_is_critical: false,
-            battery_adc_calibrated: false
+            battery_adc_calibrated: false,
+            pid_tuning: {
+                state: 'IDLE',
+                target: 'motor_speed_left',
+                phase: 'IDLE',
+                progress: 0,
+                message: 'State unavailable',
+                has_candidate: false
+            },
+            guided_calibration: {
+                state: 'IDLE',
+                phase: 'IDLE',
+                progress: 0,
+                message: 'State unavailable'
+            },
+            ota: {
+                available: false,
+                spiffs_available: false,
+                update_in_progress: false,
+                reboot_required: false,
+                active_target: 'none',
+                message: 'State unavailable'
+            }
         });
         updateStatusSectionUI(); // Update UI to show error
     }
@@ -104,3 +136,39 @@ export async function fetchDataApi() {
         return null; // Indicate failure
     }
 }
+
+async function parseJsonOrText(response) {
+    const text = await response.text();
+    if (!text) return {};
+    try {
+        return JSON.parse(text);
+    } catch (error) {
+        return { message: text };
+    }
+}
+
+export async function uploadOtaImage(file, target = 'app') {
+    if (!file) {
+        alert("Select a .bin file first.");
+        return null;
+    }
+
+    try {
+        const uploadUrl = `${API_OTA_URL}?target=${encodeURIComponent(target)}`;
+        const response = await fetch(uploadUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/octet-stream' },
+            body: file
+        });
+        const result = await parseJsonOrText(response);
+        if (!response.ok) throw new Error(result.message || `HTTP error ${response.status}`);
+        setTimeout(fetchStateApi, 300);
+        return result;
+    } catch (error) {
+        console.error("OTA upload failed:", error);
+        alert(`OTA upload failed: ${error.message || 'Unknown error'}`);
+        return null;
+    }
+}
+
+export const uploadOtaFirmware = uploadOtaImage;

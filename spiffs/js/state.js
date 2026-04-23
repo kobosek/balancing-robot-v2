@@ -38,13 +38,46 @@ export const appState = {
         state_name: 'UNKNOWN',
         auto_balancing_enabled: true,
         fall_detection_enabled: false,
+        yaw_control_enabled: false,
         critical_battery_motor_shutdown_enabled: false,
         battery_voltage: 0,
         battery_adc_pin_voltage: 0,
         battery_percentage: 0,
         battery_is_low: false,
         battery_is_critical: false,
-        battery_adc_calibrated: false
+        battery_adc_calibrated: false,
+        pid_tuning: {
+            state: 'IDLE',
+            target: 'motor_speed_left',
+            phase: 'IDLE',
+            progress: 0,
+            message: 'Idle',
+            has_candidate: false,
+            candidate: null,
+            metrics: null
+        },
+        guided_calibration: {
+            state: 'IDLE',
+            phase: 'IDLE',
+            progress: 0,
+            message: 'Idle',
+            left_direction_ok: false,
+            right_direction_ok: false,
+            left_deadzone_effort: 0,
+            right_deadzone_effort: 0
+        },
+        ota: {
+            available: false,
+            spiffs_available: false,
+            update_in_progress: false,
+            reboot_required: false,
+            bytes_written: 0,
+            expected_size: 0,
+            spiffs_partition_size: 0,
+            app_version: 'unknown',
+            active_target: 'none',
+            message: 'Unknown'
+        }
     },
     currentBattery: { voltage: 0, percentage: 0 },
 
@@ -83,7 +116,14 @@ export function updateCurrentSystemState(newStateData) {
         previousState.state_name !== appState.currentSystemState.state_name ||
         previousState.auto_balancing_enabled !== appState.currentSystemState.auto_balancing_enabled ||
         previousState.fall_detection_enabled !== appState.currentSystemState.fall_detection_enabled ||
-        previousState.critical_battery_motor_shutdown_enabled !== appState.currentSystemState.critical_battery_motor_shutdown_enabled)
+        previousState.yaw_control_enabled !== appState.currentSystemState.yaw_control_enabled ||
+        previousState.critical_battery_motor_shutdown_enabled !== appState.currentSystemState.critical_battery_motor_shutdown_enabled ||
+        previousState.pid_tuning?.state !== appState.currentSystemState.pid_tuning?.state ||
+        previousState.pid_tuning?.phase !== appState.currentSystemState.pid_tuning?.phase ||
+        previousState.guided_calibration?.state !== appState.currentSystemState.guided_calibration?.state ||
+        previousState.guided_calibration?.phase !== appState.currentSystemState.guided_calibration?.phase ||
+        previousState.ota?.message !== appState.currentSystemState.ota?.message ||
+        previousState.ota?.reboot_required !== appState.currentSystemState.ota?.reboot_required)
     { console.log("State Update:", appState.currentSystemState); return true; }
     return false;
 }

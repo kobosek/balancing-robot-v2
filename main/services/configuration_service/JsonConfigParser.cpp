@@ -87,6 +87,32 @@ bool JsonConfigParser::deserializeWeb(cJSON* obj, WebServerConfig& w) const {
     return true;
 }
 
+cJSON* JsonConfigParser::serializePidTuning(const PidTuningConfig& t) const {
+    cJSON *obj = cJSON_CreateObject(); if (!obj) return nullptr;
+    cJSON_AddNumberToObject(obj, "step_effort", t.step_effort);
+    cJSON_AddNumberToObject(obj, "max_effort", t.max_effort);
+    cJSON_AddNumberToObject(obj, "step_duration_ms", t.step_duration_ms);
+    cJSON_AddNumberToObject(obj, "rest_duration_ms", t.rest_duration_ms);
+    cJSON_AddNumberToObject(obj, "min_response_dps", t.min_response_dps);
+    cJSON_AddNumberToObject(obj, "max_speed_dps", t.max_speed_dps);
+    cJSON_AddNumberToObject(obj, "validation_target_dps", t.validation_target_dps);
+    cJSON_AddNumberToObject(obj, "gain_scale", t.gain_scale);
+    return obj;
+}
+
+bool JsonConfigParser::deserializePidTuning(cJSON* obj, PidTuningConfig& t) const {
+    if (!obj) return false;
+    GET_JSON_NUMBER_DOUBLE(obj, "step_effort", t.step_effort);
+    GET_JSON_NUMBER_DOUBLE(obj, "max_effort", t.max_effort);
+    GET_JSON_NUMBER_INT(obj, "step_duration_ms", t.step_duration_ms);
+    GET_JSON_NUMBER_INT(obj, "rest_duration_ms", t.rest_duration_ms);
+    GET_JSON_NUMBER_DOUBLE(obj, "min_response_dps", t.min_response_dps);
+    GET_JSON_NUMBER_DOUBLE(obj, "max_speed_dps", t.max_speed_dps);
+    GET_JSON_NUMBER_DOUBLE(obj, "validation_target_dps", t.validation_target_dps);
+    GET_JSON_NUMBER_DOUBLE(obj, "gain_scale", t.gain_scale);
+    return true;
+}
+
 // --- Main Serialize/Deserialize Functions (Updated) ---
 
 esp_err_t JsonConfigParser::serialize(const ConfigData& config, std::string& output) const {
@@ -218,6 +244,7 @@ esp_err_t JsonConfigParser::serialize(const ConfigData& config, std::string& out
     ADD_SECTION("pid_speed_left", serializePid(config.pid_speed_left));
     ADD_SECTION("pid_speed_right", serializePid(config.pid_speed_right));
     ADD_SECTION("pid_yaw_rate", serializePid(config.pid_yaw_rate));
+    ADD_SECTION("pid_tuning", serializePidTuning(config.pid_tuning));
 
     // Clean up the macro definition
     #undef ADD_SECTION
@@ -380,6 +407,13 @@ esp_err_t JsonConfigParser::deserialize(const std::string& input, ConfigData& co
     pid_section = cJSON_GetObjectItem(root, "pid_yaw_rate");
     if (pid_section && !deserializePid(pid_section, tempConfig.pid_yaw_rate)) pid_success = false; else if (!pid_section) { ESP_LOGW(TAG, "'pid_yaw_rate' missing."); pid_success = false; }
 
+    cJSON *pid_tuning_section = cJSON_GetObjectItem(root, "pid_tuning");
+    if (pid_tuning_section) {
+        deserializePidTuning(pid_tuning_section, tempConfig.pid_tuning);
+    } else {
+        ESP_LOGW(TAG, "'pid_tuning' missing. Using defaults.");
+    }
+
     // Cleanup macros
     #undef GET_JSON_STRING
     #undef GET_JSON_NUMBER_INT
@@ -437,6 +471,7 @@ cJSON* JsonConfigParser::serializeControl(const ControlConfig& controlConfig) co
     if (!control_obj) return nullptr;
     cJSON_AddNumberToObject(control_obj, "joystick_exponent", controlConfig.joystick_exponent);
     cJSON_AddNumberToObject(control_obj, "max_target_pitch_offset_deg", controlConfig.max_target_pitch_offset_deg);
+    cJSON_AddBoolToObject(control_obj, "yaw_control_enabled", controlConfig.yaw_control_enabled);
     return control_obj;
 }
 
@@ -451,6 +486,11 @@ bool JsonConfigParser::deserializeControl(cJSON* control_obj, ControlConfig& con
     if (item && cJSON_IsNumber(item)) {
         controlConfigOutput.max_target_pitch_offset_deg = item->valuedouble;
     } else { ok = false; ESP_LOGW(TAG, "Missing/invalid 'max_target_pitch_offset_deg'"); }
+
+    item = cJSON_GetObjectItem(control_obj, "yaw_control_enabled");
+    if (item && cJSON_IsBool(item)) {
+        controlConfigOutput.yaw_control_enabled = cJSON_IsTrue(item);
+    }
     if (!ok) { ESP_LOGW(TAG, "Error(s) parsing Control config."); }
     return ok;
 }

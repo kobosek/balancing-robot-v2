@@ -9,10 +9,20 @@
 class StateManager;
 class BalanceMonitor;
 class BatteryService;
+class PidTuningService;
+class GuidedCalibrationService;
+class ConfigurationService;
+class OTAService;
 
 class StateApiHandler : public EventHandler {
 public:
-    StateApiHandler(StateManager& stateManager, BalanceMonitor& balanceMonitor, BatteryService& batteryService);
+    StateApiHandler(StateManager& stateManager,
+                    BalanceMonitor& balanceMonitor,
+                    BatteryService& batteryService,
+                    PidTuningService& pidTuningService,
+                    GuidedCalibrationService& guidedCalibrationService,
+                    ConfigurationService& configService,
+                    OTAService& otaService);
     esp_err_t handleRequest(httpd_req_t *req);
 
     // EventHandler interface implementation
@@ -24,4 +34,8 @@ private:
     StateManager& m_stateManager;
     BalanceMonitor& m_balanceMonitor;
     BatteryService& m_batteryService;
+    PidTuningService& m_pidTuningService;
+    GuidedCalibrationService& m_guidedCalibrationService;
+    ConfigurationService& m_configService;
+    OTAService& m_otaService;
 };

@@ -13,9 +13,9 @@ export function assignElements() {
         'angleConfigBtn', 'speedLeftConfigBtn', 'speedRightConfigBtn', 'yawRateConfigBtn', 'generalConfigBtn',
         'angleConfigFormContainer', 'speedLeftConfigFormContainer', 'speedRightConfigFormContainer', 'yawRateConfigFormContainer', 'generalConfigFormContainer',
         // Status Display
-        'systemStateValue', 'systemStateId', 'batteryVoltageValue', 'batteryPercentValue', 'batteryStateValue', 'batteryBarFill', 'batteryAdcPinVoltageValue', 'batteryAdcCalibrationValue', 'autoBalancingStatus', 'fallDetectStatus', 'criticalBatteryShutdownStatus', 'wsStatus',
+        'systemStateValue', 'systemStateId', 'batteryVoltageValue', 'batteryPercentValue', 'batteryStateValue', 'batteryBarFill', 'batteryAdcPinVoltageValue', 'batteryAdcCalibrationValue', 'autoBalancingStatus', 'fallDetectStatus', 'yawControlStatus', 'criticalBatteryShutdownStatus', 'guidedCalibrationStatus', 'otaStatusValue', 'wsStatus',
         // Command Buttons
-        'startBtn', 'stopBtn', 'calibrateBtn', 'toggleAutoBalancingBtn', 'toggleFallDetectBtn', 'toggleCriticalBatteryShutdownBtn',
+        'startBtn', 'stopBtn', 'calibrateBtn', 'toggleAutoBalancingBtn', 'toggleFallDetectBtn', 'toggleYawControlBtn', 'toggleCriticalBatteryShutdownBtn', 'startGuidedCalibrationBtn', 'cancelGuidedCalibrationBtn', 'otaTargetSelect', 'otaFileInput', 'otaUploadBtn',
         // Joystick
         'joystickZone',
         // Graphs & Legends
@@ -74,9 +74,10 @@ export function assignElements() {
 // --- UI Update Functions ---
 // (No changes needed in update functions, they should already check if elements exist)
 export function updateWsStatusUI(text, color) { if (uiElements.wsStatus) { uiElements.wsStatus.textContent = text; uiElements.wsStatus.style.color = color; } }
-export function updateStatusSectionUI() { const state = appState.currentSystemState; if (uiElements.systemStateValue) uiElements.systemStateValue.textContent = state.state_name || 'UNKNOWN'; if (uiElements.systemStateId) uiElements.systemStateId.textContent = (state.state_id !== undefined && state.state_id !== null) ? state.state_id : '?'; updateAutoBalancingButtonUI(); updateFallDetectButtonUI(); updateCriticalBatteryShutdownButtonUI(); const batt = appState.currentBattery; updateBatteryUI(batt.voltage, batt.percentage); }
+export function updateStatusSectionUI() { const state = appState.currentSystemState; if (uiElements.systemStateValue) uiElements.systemStateValue.textContent = state.state_name || 'UNKNOWN'; if (uiElements.systemStateId) uiElements.systemStateId.textContent = (state.state_id !== undefined && state.state_id !== null) ? state.state_id : '?'; updateAutoBalancingButtonUI(); updateFallDetectButtonUI(); updateYawControlButtonUI(); updateCriticalBatteryShutdownButtonUI(); updateGuidedCalibrationUI(); updateOtaUI(); updatePidTuningUI(); const batt = appState.currentBattery; updateBatteryUI(batt.voltage, batt.percentage); }
 export function updateAutoBalancingButtonUI() { const button = uiElements.toggleAutoBalancingBtn; const statusEl = uiElements.autoBalancingStatus; const isEnabled = !!(appState.currentSystemState?.auto_balancing_enabled); if (button) { button.textContent = isEnabled ? 'Disable Auto Balancing' : 'Enable Auto Balancing'; button.classList.toggle('enabled', isEnabled); button.disabled = false; } if (statusEl) statusEl.textContent = isEnabled ? 'ENABLED' : 'DISABLED'; }
 export function updateFallDetectButtonUI() { const button = uiElements.toggleFallDetectBtn; const statusEl = uiElements.fallDetectStatus; const isEnabled = !!(appState.currentSystemState?.fall_detection_enabled); if (button) { button.textContent = isEnabled ? 'Disable Fall Detect' : 'Enable Fall Detect'; button.classList.toggle('enabled', isEnabled); button.disabled = false; } if (statusEl) statusEl.textContent = isEnabled ? 'ENABLED' : 'DISABLED'; }
+export function updateYawControlButtonUI() { const button = uiElements.toggleYawControlBtn; const statusEl = uiElements.yawControlStatus; const hasStateValue = typeof appState.currentSystemState?.yaw_control_enabled === 'boolean'; const isEnabled = !!appState.currentSystemState?.yaw_control_enabled; if (button) { button.textContent = isEnabled ? 'Disable Yaw Control' : 'Enable Yaw Control'; button.classList.toggle('enabled', isEnabled); button.disabled = !hasStateValue; } if (statusEl) statusEl.textContent = hasStateValue ? (isEnabled ? 'ENABLED' : 'DISABLED') : 'UNKNOWN'; }
 export function updateCriticalBatteryShutdownButtonUI() {
     const button = uiElements.toggleCriticalBatteryShutdownBtn;
     const statusEl = uiElements.criticalBatteryShutdownStatus;
@@ -95,6 +96,37 @@ export function updateCriticalBatteryShutdownButtonUI() {
     if (statusEl) {
         statusEl.textContent = hasStateValue ? (isEnabled ? 'ENABLED' : 'DISABLED') : 'UNKNOWN';
     }
+}
+export function updateOtaUI() {
+    const ota = appState.currentSystemState?.ota || {};
+    const statusEl = uiElements.otaStatusValue;
+    const uploadBtn = uiElements.otaUploadBtn;
+    const targetSelect = uiElements.otaTargetSelect;
+    const target = targetSelect?.value || 'app';
+    const targetAvailable = target === 'spiffs' ? !!ota.spiffs_available : !!ota.available;
+    const text = ota.reboot_required
+        ? 'REBOOT REQUIRED'
+        : (ota.update_in_progress ? `UPLOADING ${String(ota.active_target || '').toUpperCase()}` : (targetAvailable ? (ota.message || 'READY') : 'UNAVAILABLE'));
+    if (statusEl) statusEl.textContent = text;
+    if (uploadBtn) {
+        uploadBtn.textContent = target === 'spiffs' ? 'Upload SPIFFS' : 'Upload App';
+        uploadBtn.disabled = !targetAvailable || !!ota.update_in_progress;
+    }
+    if (targetSelect) targetSelect.disabled = !!ota.update_in_progress;
+}
+export function updateGuidedCalibrationUI() {
+    const guided = appState.currentSystemState?.guided_calibration || {};
+    const state = guided.state || 'IDLE';
+    const phase = guided.phase || 'IDLE';
+    const progress = Math.round(Math.max(0, Math.min(1, Number(guided.progress || 0))) * 100);
+    const statusText = state === 'RUNNING'
+        ? `${phase} ${progress}%`
+        : (guided.message || state);
+    if (uiElements.guidedCalibrationStatus) uiElements.guidedCalibrationStatus.textContent = statusText;
+    const isIdle = appState.currentSystemState?.state_name === 'IDLE';
+    const isRunning = state === 'RUNNING' || appState.currentSystemState?.state_name === 'GUIDED_CALIBRATION';
+    if (uiElements.startGuidedCalibrationBtn) uiElements.startGuidedCalibrationBtn.disabled = !isIdle || isRunning;
+    if (uiElements.cancelGuidedCalibrationBtn) uiElements.cancelGuidedCalibrationBtn.disabled = !isRunning;
 }
 export function updateBatteryUI(voltage, percentage) {
     const stateBatteryVoltage = parseFloat(appState.currentSystemState?.battery_voltage);
@@ -147,6 +179,55 @@ export function updateBatteryUI(voltage, percentage) {
         uiElements.batteryBarFill.style.width = `${hasValidVoltage ? clampedPercentage : 0}%`;
         uiElements.batteryBarFill.className = `battery-bar-fill ${batteryStateClass}`;
     }
+}
+export function updatePidTuningUI() {
+    const tuning = appState.currentSystemState?.pid_tuning || {};
+    const state = tuning.state || 'IDLE';
+    const phase = tuning.phase || 'IDLE';
+    const target = tuning.target || 'motor_speed_left';
+    const progress = Math.max(0, Math.min(1, Number(tuning.progress || 0)));
+    const hasCandidate = !!tuning.has_candidate;
+    const isRunning = state === 'RUNNING';
+    const isPreviewReady = state === 'PREVIEW_READY' && hasCandidate;
+    const canStart = !isRunning && !isPreviewReady && appState.currentSystemState?.state_name === 'IDLE';
+    const canCommit = state === 'PREVIEW_READY' && hasCandidate;
+    const fmtGains = (pid) => pid
+        ? `Kp ${Number(pid.kp || 0).toFixed(4)} / Ki ${Number(pid.ki || 0).toFixed(4)} / Kd ${Number(pid.kd || 0).toFixed(4)}`
+        : 'N/A';
+    const getEl = (id) => uiElements[id] || document.getElementById(id);
+    const updateWheel = (side, label, candidateKey) => {
+        const activeTarget = target === `motor_speed_${side}`;
+        const prefix = side === 'left' ? 'leftPidTuning' : 'rightPidTuning';
+        const buttonPrefix = side === 'left' ? 'Left' : 'Right';
+        const displayedState = activeTarget || state === 'IDLE' ? state : `${label.toUpperCase()} INACTIVE`;
+        const displayedPhase = activeTarget ? phase : 'IDLE';
+        const displayedMessage = activeTarget ? (tuning.message || 'Idle') :
+            (isRunning || isPreviewReady ? `${label} wheel tuning is not active` : 'Idle');
+        const candidate = tuning.candidate?.[candidateKey];
+
+        const stateEl = getEl(`${prefix}State`);
+        const phaseEl = getEl(`${prefix}Phase`);
+        const progressEl = getEl(`${prefix}ProgressBar`);
+        const messageEl = getEl(`${prefix}Message`);
+        const gainsEl = getEl(`${prefix}Gains`);
+        if (stateEl) stateEl.textContent = displayedState;
+        if (phaseEl) phaseEl.textContent = displayedPhase;
+        if (progressEl) progressEl.style.width = `${activeTarget ? Math.round(progress * 100) : 0}%`;
+        if (messageEl) messageEl.textContent = displayedMessage;
+        if (gainsEl) gainsEl.textContent = activeTarget && hasCandidate ? fmtGains(candidate) : 'N/A';
+
+        const tuneBtn = getEl(`tune${buttonPrefix}PidBtn`);
+        const cancelBtn = getEl(`cancel${buttonPrefix}PidTuningBtn`);
+        const saveBtn = getEl(`save${buttonPrefix}PidTuningBtn`);
+        const discardBtn = getEl(`discard${buttonPrefix}PidTuningBtn`);
+        if (tuneBtn) tuneBtn.disabled = !canStart;
+        if (cancelBtn) cancelBtn.disabled = !(isRunning && activeTarget);
+        if (saveBtn) saveBtn.disabled = !(canCommit && activeTarget);
+        if (discardBtn) discardBtn.disabled = !(canCommit && activeTarget);
+    };
+
+    updateWheel('left', 'Left', 'speed_left');
+    updateWheel('right', 'Right', 'speed_right');
 }
 export function disableCommandButton(buttonElement, disable = true) { if (buttonElement) buttonElement.disabled = disable; }
 export function updateLegendUI(latestPointMap) {

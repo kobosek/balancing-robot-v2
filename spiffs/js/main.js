@@ -7,7 +7,7 @@ import { setupWebSocket } from './websocket.js';
 import { setupJoystick, stopJoystickSendInterval } from './joystick.js'; // Import stop function
 import { setupGraphs, drawAllGraphs } from './graph.js'; // Use new names
 import { createConfigForms, toggleConfigMenu, showConfigForm, showGeneralConfigForm } from './configUI.js'; // Import showGeneralConfigForm
-import { sendCommandApi, fetchConfigApi, fetchStateApi, postConfigApi } from './api.js';
+import { sendCommandApi, fetchConfigApi, fetchStateApi, postConfigApi, uploadOtaFirmware } from './api.js';
 import { updateTelemetryData } from './telemetry.js';
 import { DATA_FETCH_INTERVAL_MS, STATE_FETCH_INTERVAL_MS } from './constants.js';
 
@@ -28,9 +28,9 @@ function initialize() {
              appState.telemetryKeys = []; // Initialize empty to prevent errors later
         }
 
-        assignElements(); // Assign DOM elements to uiElements cache
+        assignElements(); // Assign static DOM elements to uiElements cache
+        createConfigForms(); // Create config forms and their dynamic controls
         setupEventListeners(); // Set up basic UI event listeners
-        createConfigForms(); // Create the structure for config forms
         setupWebSocket();    // Establish WebSocket connection
         setupJoystick();     // Initialize the joystick controller
         setupGraphs();     // Setup multiple graphs
@@ -58,18 +58,31 @@ function setupEventListeners() {
     uiElements.startBtn?.addEventListener('click', () => handleCommandClick('start', uiElements.startBtn));
     uiElements.stopBtn?.addEventListener('click', () => handleCommandClick('stop', uiElements.stopBtn));
     uiElements.calibrateBtn?.addEventListener('click', () => handleCommandClick('calibrate', uiElements.calibrateBtn));
+    uiElements.tuneLeftPidBtn?.addEventListener('click', () => handleCommandClick('start_pid_tuning', uiElements.tuneLeftPidBtn, { target: 'motor_speed_left' }));
+    uiElements.cancelLeftPidTuningBtn?.addEventListener('click', () => handleCommandClick('cancel_pid_tuning', uiElements.cancelLeftPidTuningBtn, { target: 'motor_speed_left' }));
+    uiElements.saveLeftPidTuningBtn?.addEventListener('click', () => handleCommandClick('save_pid_tuning', uiElements.saveLeftPidTuningBtn, { target: 'motor_speed_left' }));
+    uiElements.discardLeftPidTuningBtn?.addEventListener('click', () => handleCommandClick('discard_pid_tuning', uiElements.discardLeftPidTuningBtn, { target: 'motor_speed_left' }));
+    uiElements.tuneRightPidBtn?.addEventListener('click', () => handleCommandClick('start_pid_tuning', uiElements.tuneRightPidBtn, { target: 'motor_speed_right' }));
+    uiElements.cancelRightPidTuningBtn?.addEventListener('click', () => handleCommandClick('cancel_pid_tuning', uiElements.cancelRightPidTuningBtn, { target: 'motor_speed_right' }));
+    uiElements.saveRightPidTuningBtn?.addEventListener('click', () => handleCommandClick('save_pid_tuning', uiElements.saveRightPidTuningBtn, { target: 'motor_speed_right' }));
+    uiElements.discardRightPidTuningBtn?.addEventListener('click', () => handleCommandClick('discard_pid_tuning', uiElements.discardRightPidTuningBtn, { target: 'motor_speed_right' }));
 
     // Toggle Buttons
     uiElements.toggleFallDetectBtn?.addEventListener('click', handleToggleFallDetect);
     uiElements.toggleAutoBalancingBtn?.addEventListener('click', handleToggleAutoBalancing);
+    uiElements.toggleYawControlBtn?.addEventListener('click', handleToggleYawControl);
     uiElements.toggleCriticalBatteryShutdownBtn?.addEventListener('click', handleToggleCriticalBatteryShutdown);
+    uiElements.startGuidedCalibrationBtn?.addEventListener('click', () => handleCommandClick('start_guided_calibration', uiElements.startGuidedCalibrationBtn));
+    uiElements.cancelGuidedCalibrationBtn?.addEventListener('click', () => handleCommandClick('cancel_guided_calibration', uiElements.cancelGuidedCalibrationBtn));
+    uiElements.otaTargetSelect?.addEventListener('change', updateStatusSectionUI);
+    uiElements.otaUploadBtn?.addEventListener('click', handleOtaUpload);
 
     console.log("Event listeners setup complete.");
 }
 
 
 // --- Command Handling Wrappers ---
-async function handleCommandClick(command, buttonElement) {
+async function handleCommandClick(command, buttonElement, extraPayload = {}) {
     console.log(`--- handleCommandClick called for: ${command} ---`);
     if (!buttonElement) {
         console.error(`Button element for command '${command}' is null!`);
@@ -78,7 +91,7 @@ async function handleCommandClick(command, buttonElement) {
     disableCommandButton(buttonElement, true);
     let success = false; // Default to false
     try {
-        success = await sendCommandApi(command); // Await the API call result
+        success = await sendCommandApi(command, extraPayload); // Await the API call result
         if (!success) {
              console.warn(`Command '${command}' failed or API returned false.`);
         }
@@ -144,6 +157,43 @@ async function handleToggleFallDetect() {
     // UI update will be handled by the next state fetch
 }
 
+async function handleToggleYawControl() {
+    console.log("--- handleToggleYawControl called ---");
+
+    if (!uiElements.toggleYawControlBtn) {
+        console.error("Cannot toggle yaw control: button is null.");
+        return;
+    }
+
+    disableCommandButton(uiElements.toggleYawControlBtn, true);
+
+    try {
+        const currentConfig = appState.configDataCache || await fetchConfigApi();
+        if (!currentConfig?.control) {
+            alert("Cannot change yaw control because control config is unavailable.");
+            return;
+        }
+
+        const isEnabled = !!currentConfig.control.yaw_control_enabled;
+        const configToSend = JSON.parse(JSON.stringify(currentConfig));
+        configToSend.control.yaw_control_enabled = !isEnabled;
+
+        const saveResult = await postConfigApi(configToSend);
+        if (!saveResult) {
+            return;
+        }
+
+        await fetchConfigApi();
+        await fetchStateApi();
+        updateStatusSectionUI();
+    } catch (error) {
+        console.error("Error toggling yaw control:", error);
+        alert(`Error toggling yaw control: ${error.message || 'Unknown error'}`);
+    } finally {
+        disableCommandButton(uiElements.toggleYawControlBtn, false);
+    }
+}
+
 async function handleToggleCriticalBatteryShutdown() {
     console.log("--- handleToggleCriticalBatteryShutdown called ---");
 
@@ -180,6 +230,37 @@ async function handleToggleCriticalBatteryShutdown() {
         alert(`Error toggling critical battery shutdown: ${error.message || 'Unknown error'}`);
     } finally {
         disableCommandButton(uiElements.toggleCriticalBatteryShutdownBtn, false);
+    }
+}
+
+async function handleOtaUpload() {
+    const file = uiElements.otaFileInput?.files?.[0];
+    const target = uiElements.otaTargetSelect?.value || 'app';
+    if (!file) {
+        alert("Select a .bin file first.");
+        return;
+    }
+    if (target === 'spiffs' && file.name && file.name.toLowerCase() !== 'storage.bin') {
+        const proceed = confirm("SPIFFS OTA expects build/storage.bin. Continue with the selected file?");
+        if (!proceed) {
+            return;
+        }
+    }
+
+    disableCommandButton(uiElements.otaUploadBtn, true);
+    try {
+        const result = await uploadOtaFirmware(file, target);
+        if (result) {
+            await fetchStateApi();
+            updateStatusSectionUI();
+            if (target === 'spiffs') {
+                alert(result.reboot_required ? "SPIFFS image uploaded. Reboot the robot to mount the new files." : "SPIFFS image uploaded.");
+            } else {
+                alert(result.reboot_required ? "Firmware uploaded. Reboot the robot to boot the new image." : "Firmware uploaded.");
+            }
+        }
+    } finally {
+        disableCommandButton(uiElements.otaUploadBtn, false);
     }
 }
 

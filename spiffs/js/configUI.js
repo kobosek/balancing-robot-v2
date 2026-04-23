@@ -29,12 +29,19 @@ export function createConfigForms() {
     // Create PID forms
     uiElements.angleConfigFormContainer.appendChild(createPIDFormDiv('pid_angle', 'Angle PID'));
     uiElements.speedLeftConfigFormContainer.appendChild(createPIDFormDiv('pid_speed_left', 'Speed L PID'));
+    uiElements.speedLeftConfigFormContainer.appendChild(createPidTuningPanel('left', 'Left Motor PID Tuning'));
     uiElements.speedRightConfigFormContainer.appendChild(createPIDFormDiv('pid_speed_right', 'Speed R PID'));
+    uiElements.speedRightConfigFormContainer.appendChild(createPidTuningPanel('right', 'Right Motor PID Tuning'));
     uiElements.yawRateConfigFormContainer.appendChild(createPIDFormDiv('pid_yaw_rate', 'Yaw Rate PID'));
 
     // Create General settings form
     createGeneralConfigForm(uiElements.generalConfigFormContainer);
     console.log("Config forms created.");
+}
+
+function registerDynamicElement(id, element) {
+    uiElements[id] = element;
+    return element;
 }
 
 /**
@@ -56,6 +63,8 @@ function addFormField(parent, fieldConfig) {
     inp.type = isCheckbox ? 'checkbox' : 'number';
     inp.id = fieldConfig.id;
     inp.name = fieldConfig.id;
+    if (fieldConfig.section) inp.dataset.section = fieldConfig.section;
+    if (fieldConfig.key) inp.dataset.key = fieldConfig.key;
 
     if (!isCheckbox) {
         if (fieldConfig.step) inp.step = fieldConfig.step;
@@ -100,6 +109,80 @@ function createPIDFormDiv(idPrefix, saveButtonSuffix = 'PID') {
     return formDiv;
 }
 
+function createPidTuningPanel(side, title) {
+    const prefix = side === 'left' ? 'leftPidTuning' : 'rightPidTuning';
+    const buttonPrefix = side === 'left' ? 'Left' : 'Right';
+    const panel = document.createElement('div');
+    panel.className = 'pid-tuning-panel config-pid-tuning-panel';
+
+    const heading = document.createElement('h3');
+    heading.textContent = title;
+    panel.appendChild(heading);
+
+    const controls = document.createElement('div');
+    controls.className = 'pid-tuning-controls';
+
+    const tuneBtn = document.createElement('button');
+    tuneBtn.id = `tune${buttonPrefix}PidBtn`;
+    tuneBtn.className = 'tune';
+    tuneBtn.textContent = `Tune ${buttonPrefix}`;
+    controls.appendChild(registerDynamicElement(tuneBtn.id, tuneBtn));
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.id = `cancel${buttonPrefix}PidTuningBtn`;
+    cancelBtn.className = 'tune-cancel';
+    cancelBtn.textContent = 'Cancel';
+    controls.appendChild(registerDynamicElement(cancelBtn.id, cancelBtn));
+
+    const saveBtn = document.createElement('button');
+    saveBtn.id = `save${buttonPrefix}PidTuningBtn`;
+    saveBtn.className = 'tune-save';
+    saveBtn.textContent = 'Save Tuned PID';
+    controls.appendChild(registerDynamicElement(saveBtn.id, saveBtn));
+
+    const discardBtn = document.createElement('button');
+    discardBtn.id = `discard${buttonPrefix}PidTuningBtn`;
+    discardBtn.className = 'tune-discard';
+    discardBtn.textContent = 'Discard';
+    controls.appendChild(registerDynamicElement(discardBtn.id, discardBtn));
+
+    panel.appendChild(controls);
+
+    const stateItem = document.createElement('div');
+    stateItem.className = 'status-item';
+    stateItem.innerHTML = `<span class="status-label">Tuning:</span> <span id="${prefix}State" class="status-value">IDLE</span>`;
+    panel.appendChild(stateItem);
+
+    const phaseItem = document.createElement('div');
+    phaseItem.className = 'status-item';
+    phaseItem.innerHTML = `<span class="status-label">Phase:</span> <span id="${prefix}Phase" class="status-value">IDLE</span>`;
+    panel.appendChild(phaseItem);
+
+    const progress = document.createElement('div');
+    progress.className = 'pid-tuning-progress';
+    progress.setAttribute('aria-hidden', 'true');
+    progress.innerHTML = `<div id="${prefix}ProgressBar" class="pid-tuning-progress-fill"></div>`;
+    panel.appendChild(progress);
+
+    const message = document.createElement('div');
+    message.id = `${prefix}Message`;
+    message.className = 'pid-tuning-message';
+    message.textContent = 'Idle';
+    panel.appendChild(registerDynamicElement(message.id, message));
+
+    const gains = document.createElement('div');
+    gains.className = 'pid-tuning-gains';
+    gains.innerHTML = `Candidate: <span id="${prefix}Gains">N/A</span>`;
+    panel.appendChild(gains);
+
+    registerDynamicElement(`${prefix}State`, stateItem.querySelector(`#${prefix}State`));
+    registerDynamicElement(`${prefix}Phase`, phaseItem.querySelector(`#${prefix}Phase`));
+    registerDynamicElement(`${prefix}ProgressBar`, progress.querySelector(`#${prefix}ProgressBar`));
+    registerDynamicElement(`${prefix}Gains`, gains.querySelector(`#${prefix}Gains`));
+
+    return panel;
+}
+
 /**
  * Creates the form section for general configuration settings.
  * @param {HTMLElement} container - The parent element to append the form to.
@@ -121,12 +204,22 @@ function createGeneralConfigForm(container) {
         // --- control ---
         { label: 'Joy Exp', id: `control_joystick_exponent`, step: '0.1', min: 0.1, max: 5.0, section: 'control', key: 'joystick_exponent'},
         { label: 'Max Tilt (deg)', id: `control_max_target_pitch_offset_deg`, step: '0.1', min: 0, max: 90, section: 'control', key: 'max_target_pitch_offset_deg'},
+        { label: 'Yaw Control', id: `control_yaw_control_enabled`, type: 'checkbox', section: 'control', key: 'yaw_control_enabled'},
         // --- motor ---
         { label: 'M Deadzone', id: `motor_deadzone_duty`, step: '1', min: 0, section: 'motor', key: 'deadzone_duty'}, // Max depends on resolution, maybe validate on save
         // --- encoder ---
         { label: 'Enc Gear Ratio', id: `encoder_gear_ratio`, step: '0.1', min: 0.1, max: 1000, section: 'encoder', key: 'gear_ratio'},
         { label: 'Enc Whl Diam mm', id: `encoder_wheel_diameter_mm`, step: '0.1', min: 1, max: 1000, section: 'encoder', key: 'wheel_diameter_mm'},
         { label: 'Enc Filter Alpha', id: `encoder_speed_filter_alpha`, step: '0.01', min: 0, max: 1, section: 'encoder', key: 'speed_filter_alpha'},
+        // --- pid_tuning ---
+        { label: 'Tune Step Effort', id: `pid_tuning_step_effort`, step: '0.01', min: 0.01, max: 1, section: 'pid_tuning', key: 'step_effort'},
+        { label: 'Tune Agg Effort', id: `pid_tuning_max_effort`, step: '0.01', min: 0.01, max: 1, section: 'pid_tuning', key: 'max_effort'},
+        { label: 'Tune Step(ms)', id: `pid_tuning_step_duration_ms`, step: '100', min: 100, max: 10000, section: 'pid_tuning', key: 'step_duration_ms'},
+        { label: 'Tune Rest(ms)', id: `pid_tuning_rest_duration_ms`, step: '100', min: 0, max: 10000, section: 'pid_tuning', key: 'rest_duration_ms'},
+        { label: 'Tune Min Resp', id: `pid_tuning_min_response_dps`, step: '10', min: 1, max: 5000, section: 'pid_tuning', key: 'min_response_dps'},
+        { label: 'Tune Max Speed', id: `pid_tuning_max_speed_dps`, step: '10', min: 1, max: 10000, section: 'pid_tuning', key: 'max_speed_dps'},
+        { label: 'Tune Val Target', id: `pid_tuning_validation_target_dps`, step: '10', min: 1, max: 10000, section: 'pid_tuning', key: 'validation_target_dps'},
+        { label: 'Tune Gain Scale', id: `pid_tuning_gain_scale`, step: '0.05', min: 0.05, max: 1, section: 'pid_tuning', key: 'gain_scale'},
         // --- battery ---
         { label: 'Batt Max V', id: `battery_voltage_max`, step: '0.01', min: 0.1, max: 100, section: 'battery', key: 'voltage_max'},
         { label: 'Batt Min V', id: `battery_voltage_min`, step: '0.01', min: 0.1, section: 'battery', key: 'voltage_min'},
@@ -203,7 +296,7 @@ export async function showGeneralConfigForm(container) {
 
 async function loadPIDConfigSection(sectionKey, formElement) {
     if (!formElement) { console.warn(`Form element for ${sectionKey} not found.`); return; }
-    const fullConfig = appState.configDataCache || await fetchConfigApi();
+    const fullConfig = await fetchConfigApi();
     if (!fullConfig || !fullConfig[sectionKey]) {
         console.warn(`Config data for section ${sectionKey} not available.`);
         alert(`Failed to load config for ${sectionKey}. Please refresh or check connection.`);
@@ -220,7 +313,7 @@ async function loadPIDConfigSection(sectionKey, formElement) {
 
 async function loadGeneralConfig(formElement) {
     if (!formElement) { console.warn("General config form element not found."); return; }
-    const fullConfig = appState.configDataCache || await fetchConfigApi();
+    const fullConfig = await fetchConfigApi();
     if (!fullConfig) {
         console.warn("Full config data not available.");
         alert("Failed to load general config. Please refresh or check connection.");
@@ -229,9 +322,9 @@ async function loadGeneralConfig(formElement) {
 
     formElement.querySelectorAll('input').forEach(input => {
         const idParts = input.id.split('_');
-        if (idParts.length < 2) { console.warn(`Could not parse section/key from input ID: ${input.id}`); return; }
-        const sectionKey = idParts[0];
-        const valueKey = idParts.slice(1).join('_');
+        if (idParts.length < 2 && (!input.dataset.section || !input.dataset.key)) { console.warn(`Could not parse section/key from input ID: ${input.id}`); return; }
+        const sectionKey = input.dataset.section || idParts[0];
+        const valueKey = input.dataset.key || idParts.slice(1).join('_');
 
         // Traverse the config object using the keys
         let value = fullConfig;

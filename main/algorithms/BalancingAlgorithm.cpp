@@ -22,6 +22,7 @@ BalancingAlgorithm::BalancingAlgorithm(EventBus& eventBus,
                                        const PIDConfig& initialSpeedLeftPid,
                                        const PIDConfig& initialSpeedRightPid,
                                        const PIDConfig& initialYawRatePid,
+                                       const ControlConfig& initialControl,
                                        const EncoderConfig& initialEncoder,
                                        const RobotDimensionsConfig& initialDimensions) :
     m_eventBus(eventBus),
@@ -42,6 +43,7 @@ BalancingAlgorithm::BalancingAlgorithm(EventBus& eventBus,
      initial_config_data.pid_speed_left = initialSpeedLeftPid;
      initial_config_data.pid_speed_right = initialSpeedRightPid;
      initial_config_data.pid_yaw_rate = initialYawRatePid;
+     initial_config_data.control = initialControl;
      initial_config_data.encoder = initialEncoder;
      initial_config_data.dimensions = initialDimensions;
 
@@ -103,11 +105,20 @@ MotorEffort BalancingAlgorithm::update(float dt, float currentPitch_deg, float c
 
     // --- Yaw Rate Stabilization Correction ---
     float yawRateError_dps = targetAngVel_dps - currentYawRate_dps;
-    float yawCorrectionDiff_dps = m_yawRatePid.compute(targetAngVel_dps, currentYawRate_dps, dt);
+    float yawCorrectionDiff_dps = 0.0f;
+    if (m_yaw_control_enabled) {
+        yawCorrectionDiff_dps = m_yawRatePid.compute(targetAngVel_dps, currentYawRate_dps, dt);
+    } else {
+        m_yawRatePid.reset();
+    }
 
     // --- Combine Components for Wheel Speed Setpoints ---
-    float speedSetpointLeft_dps = baseSpeed_dps - commandedTurnDiff_dps;// - yawCorrectionDiff_dps;
-    float speedSetpointRight_dps = baseSpeed_dps + commandedTurnDiff_dps;// + yawCorrectionDiff_dps;
+    float speedSetpointLeft_dps = baseSpeed_dps - commandedTurnDiff_dps;
+    float speedSetpointRight_dps = baseSpeed_dps + commandedTurnDiff_dps;
+    if (m_yaw_control_enabled) {
+        speedSetpointLeft_dps -= yawCorrectionDiff_dps;
+        speedSetpointRight_dps += yawCorrectionDiff_dps;
+    }
 
     // --- Clamp Final Speed Setpoints ---
     speedSetpointLeft_dps = std::max(m_angle_pid_output_min, std::min(m_angle_pid_output_max, speedSetpointLeft_dps));
@@ -140,6 +151,11 @@ void BalancingAlgorithm::applyConfig(const ConfigData& config) {
      m_speedPidLeft.updateParams(config.pid_speed_left);
      m_speedPidRight.updateParams(config.pid_speed_right);
      m_yawRatePid.updateParams(config.pid_yaw_rate);
+     const bool previousYawControlEnabled = m_yaw_control_enabled;
+     m_yaw_control_enabled = config.control.yaw_control_enabled;
+     if (previousYawControlEnabled != m_yaw_control_enabled) {
+         m_yawRatePid.reset();
+     }
 
      m_angle_pid_output_min = config.pid_angle.getOutputMin();
      m_angle_pid_output_max = config.pid_angle.getOutputMax();

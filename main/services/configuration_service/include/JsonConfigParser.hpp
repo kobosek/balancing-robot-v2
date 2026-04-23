@@ -11,6 +11,7 @@ struct ControlConfig;
 struct SystemBehaviorConfig;
 struct RobotDimensionsConfig;
 struct WebServerConfig;
+struct PidTuningConfig;
 
 class IConfigParser {
 public:
@@ -73,4 +74,6 @@ private:
     bool deserializeDimensions(cJSON* obj, RobotDimensionsConfig& d) const;
     cJSON* serializeWeb(const WebServerConfig& w) const;
     bool deserializeWeb(cJSON* obj, WebServerConfig& w) const;
+    cJSON* serializePidTuning(const PidTuningConfig& t) const;
+    bool deserializePidTuning(cJSON* obj, PidTuningConfig& t) const;
 };

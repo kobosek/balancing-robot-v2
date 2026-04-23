@@ -157,7 +157,9 @@ void MotorService::handleSystemStateChange(const SYSTEM_StateChanged& event) {
     m_current_system_state = event.newState;
     ESP_LOGI(TAG, "Received State Change event: %d", static_cast<int>(m_current_system_state));
     
-    bool should_be_enabled = (m_current_system_state == SystemState::BALANCING);
+    bool should_be_enabled = (m_current_system_state == SystemState::BALANCING ||
+                              m_current_system_state == SystemState::PID_TUNING ||
+                              m_current_system_state == SystemState::GUIDED_CALIBRATION);
     
     if (should_be_enabled && !m_enabled) { 
         ESP_LOGI(TAG, "Enabling motors."); 
