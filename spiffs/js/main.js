@@ -253,10 +253,17 @@ async function handleOtaUpload() {
         if (result) {
             await fetchStateApi();
             updateStatusSectionUI();
+            
+            // --- NEW: Clear the file input from the UI ---
+            if (uiElements.otaFileInput) {
+                uiElements.otaFileInput.value = '';
+            }
+
+            // --- MODIFIED: Inform the user of the automatic restart ---
             if (target === 'spiffs') {
-                alert(result.reboot_required ? "SPIFFS image uploaded. Reboot the robot to mount the new files." : "SPIFFS image uploaded.");
+                alert(result.reboot_required ? "SPIFFS image uploaded successfully! The robot will now restart automatically." : "SPIFFS image uploaded.");
             } else {
-                alert(result.reboot_required ? "Firmware uploaded. Reboot the robot to boot the new image." : "Firmware uploaded.");
+                alert(result.reboot_required ? "Firmware uploaded successfully! The robot will now restart automatically." : "Firmware uploaded.");
             }
         }
     } finally {

@@ -7,6 +7,18 @@
 #include <new>
 #include <string>
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_system.h"
+
+namespace {
+    void delayed_reboot_task(void* arg) {
+        // Wait 1.5 seconds to ensure the HTTP response is fully sent to the browser
+        vTaskDelay(pdMS_TO_TICKS(1500)); 
+        esp_restart();
+    }
+}
+
 OTAApiHandler::OTAApiHandler(OTAService& otaService)
     : m_otaService(otaService) {}
 
@@ -126,5 +138,13 @@ esp_err_t OTAApiHandler::handleUploadRequest(httpd_req_t* req) {
         return ESP_FAIL;
     }
 
-    return sendStatusJson(req);
+    esp_err_t sendRet = sendStatusJson(req);
+
+    // If the OTA service flagged that a reboot is required, spawn the delayed restart task
+    if (m_otaService.getStatus().rebootRequired) {
+        ESP_LOGI(TAG, "OTA successful. Scheduling automatic reboot in 1.5 seconds...");
+        xTaskCreate(delayed_reboot_task, "reboot_task", 2048, nullptr, 5, nullptr);
+    }
+
+    return sendRet;
 }
