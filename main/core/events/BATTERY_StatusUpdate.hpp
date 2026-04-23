@@ -13,9 +13,11 @@ struct BatteryStatus {
 
 class BATTERY_StatusUpdate : public BaseEvent {
 public:
+    DECLARE_EVENT_IDENTITY(BATTERY_StatusUpdate)
     const BatteryStatus status;
 
     BATTERY_StatusUpdate(const BatteryStatus& battStatus) :
-        BaseEvent(EventType::BATTERY_STATUS_UPDATE), // EventTypes included via BaseEvent
+        BaseEvent(), // EventTypes included via BaseEvent
         status(battStatus) {}
 };
+

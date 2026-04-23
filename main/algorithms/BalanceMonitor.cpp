@@ -10,7 +10,6 @@
 #include "UI_DisableAutoBalancing.hpp"
 #include "UI_EnableAutoBalancing.hpp"
 #include "BaseEvent.hpp"
-#include "EventTypes.hpp"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <cmath>
@@ -36,34 +35,20 @@ BalanceMonitor::BalanceMonitor(EventBus& bus, const SystemBehaviorConfig& config
 }
 
 void BalanceMonitor::handleEvent(const BaseEvent& event) {
-    switch (event.type) {
-        case EventType::IMU_ORIENTATION_DATA:
-            handleOrientationData(static_cast<const IMU_OrientationData&>(event));
-            break;
-        case EventType::SYSTEM_STATE_CHANGED:
-            handleStateChanged(static_cast<const SYSTEM_StateChanged&>(event));
-            break;
-        case EventType::CONFIG_FULL_UPDATE:
-            handleConfigUpdate(static_cast<const CONFIG_FullConfigUpdate&>(event));
-            break;
-
-        case EventType::UI_ENABLE_AUTO_BALANCING:
-            handleEnableAutoBalancing(static_cast<const UI_EnableAutoBalancing&>(event));
-            break;
-
-        case EventType::UI_DISABLE_AUTO_BALANCING:
-            handleDisableAutoBalancing(static_cast<const UI_DisableAutoBalancing&>(event));
-            break;
-
-        case EventType::UI_ENABLE_FALL_DETECTION:
-            handleEnableFallDetect(static_cast<const UI_EnableFallDetection&>(event));
-            break;
-
-        case EventType::UI_DISABLE_FALL_DETECTION:
-            handleDisableFallDetect(static_cast<const UI_DisableFallDetection&>(event));
-            break;
-        default:
-            break;
+    if (event.is<IMU_OrientationData>()) {
+        handleOrientationData(event.as<IMU_OrientationData>());
+    } else if (event.is<SYSTEM_StateChanged>()) {
+        handleStateChanged(event.as<SYSTEM_StateChanged>());
+    } else if (event.is<CONFIG_FullConfigUpdate>()) {
+        handleConfigUpdate(event.as<CONFIG_FullConfigUpdate>());
+    } else if (event.is<UI_EnableAutoBalancing>()) {
+        handleEnableAutoBalancing(event.as<UI_EnableAutoBalancing>());
+    } else if (event.is<UI_DisableAutoBalancing>()) {
+        handleDisableAutoBalancing(event.as<UI_DisableAutoBalancing>());
+    } else if (event.is<UI_EnableFallDetection>()) {
+        handleEnableFallDetect(event.as<UI_EnableFallDetection>());
+    } else if (event.is<UI_DisableFallDetection>()) {
+        handleDisableFallDetect(event.as<UI_DisableFallDetection>());
     }
 }
 

@@ -1,13 +1,14 @@
 #pragma once
 
 #include "BaseEvent.hpp"
-#include "EventTypes.hpp"
 
 class IMU_AvailabilityChanged : public BaseEvent {
 public:
+    DECLARE_EVENT_IDENTITY(IMU_AvailabilityChanged)
     explicit IMU_AvailabilityChanged(bool imuAvailable)
-        : BaseEvent(EventType::IMU_AVAILABILITY_CHANGED),
+        : BaseEvent(),
           available(imuAvailable) {}
 
     bool available;
 };
+

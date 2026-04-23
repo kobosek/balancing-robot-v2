@@ -4,7 +4,6 @@
 #include "EventBus.hpp" // Include event bus
 #include "CONFIG_FullConfigUpdate.hpp" // Include event definition
 #include "BaseEvent.hpp"
-#include "EventTypes.hpp"
 #include <memory>
 #include <string>
 #include <new>
@@ -26,15 +25,11 @@ void ConfigApiHandler::applyConfig(const WebServerConfig& config) {
 
 // EventHandler implementation
 void ConfigApiHandler::handleEvent(const BaseEvent& event) {
-    switch (event.type) {
-        case EventType::CONFIG_FULL_UPDATE:
-            handleConfigUpdate(static_cast<const CONFIG_FullConfigUpdate&>(event));
-            break;
-            
-        default:
-            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
-                     getHandlerName().c_str(), static_cast<int>(event.type));
-            break;
+    if (event.is<CONFIG_FullConfigUpdate>()) {
+        handleConfigUpdate(event.as<CONFIG_FullConfigUpdate>());
+    } else {
+        ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
+                 getHandlerName().c_str(), event.eventName());
     }
 }
 

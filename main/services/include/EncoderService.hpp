@@ -1,7 +1,7 @@
 // main/include/EncoderService.hpp
 #pragma once
 
-#include "ConfigData.hpp"               // Found via INCLUDE_DIRS
+#include "config/EncoderConfig.hpp"
 #include "driver/pulse_cnt.h"
 // #include "esp_log.h" // Moved to .cpp
 #include <cmath>                        // For M_PI if needed

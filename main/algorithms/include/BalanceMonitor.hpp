@@ -2,7 +2,7 @@
 
 #include "EventBus.hpp"
 #include "EventHandler.hpp"
-#include "ConfigData.hpp"
+#include "config/SystemBehaviorConfig.hpp"
 #include "SystemState.hpp"
 #include "esp_log.h"
 #include "esp_timer.h"

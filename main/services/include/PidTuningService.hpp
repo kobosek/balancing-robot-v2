@@ -1,10 +1,10 @@
 #pragma once
 
 #include "BalancingAlgorithm.hpp"
-#include "ConfigData.hpp"
 #include "EventHandler.hpp"
 #include "PIDController.hpp"
 #include "PidTuningTypes.hpp"
+#include "config/PidTuningConfig.hpp"
 #include "esp_err.h"
 #include <mutex>
 #include <string>

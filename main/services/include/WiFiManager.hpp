@@ -7,10 +7,7 @@
 #include "freertos/event_groups.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
-#include "ConfigData.hpp" // Include config struct definition
-
-// Forward declare services/data it needs
-// struct WiFiConfig; // Included via ConfigData.hpp
+#include "config/WiFiConfig.hpp"
 
 class WiFiManager {
 public:

@@ -5,5 +5,7 @@
 // Command event from Web UI/API to disable auto balancing.
 class UI_DisableAutoBalancing : public BaseEvent {
 public:
-    UI_DisableAutoBalancing() : BaseEvent(EventType::UI_DISABLE_AUTO_BALANCING) {}
+    DECLARE_EVENT_IDENTITY(UI_DisableAutoBalancing)
+    UI_DisableAutoBalancing() : BaseEvent() {}
 };
+

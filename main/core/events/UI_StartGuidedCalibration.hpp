@@ -4,5 +4,7 @@
 
 class UI_StartGuidedCalibration : public BaseEvent {
 public:
-    UI_StartGuidedCalibration() : BaseEvent(EventType::UI_START_GUIDED_CALIBRATION) {}
+    DECLARE_EVENT_IDENTITY(UI_StartGuidedCalibration)
+    UI_StartGuidedCalibration() : BaseEvent() {}
 };
+

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "BaseEvent.hpp"
-#include "EventTypes.hpp"
 #include <string>
 
 class EventHandler {

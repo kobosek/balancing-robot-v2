@@ -1,12 +1,12 @@
 #pragma once
 
 #include "BaseEvent.hpp"
-#include "EventTypes.hpp"
 
 class IMU_GyroOffsetsUpdated : public BaseEvent {
-    public:
+public:
+    DECLARE_EVENT_IDENTITY(IMU_GyroOffsetsUpdated)
         IMU_GyroOffsetsUpdated(float x_offset_dps, float y_offset_dps, float z_offset_dps)
-            : BaseEvent(EventType::CONFIG_GYRO_OFFSETS_UPDATE),
+            : BaseEvent(),
               x_dps(x_offset_dps),
               y_dps(y_offset_dps),
               z_dps(z_offset_dps)
@@ -16,3 +16,4 @@ class IMU_GyroOffsetsUpdated : public BaseEvent {
         const float y_dps;
         const float z_dps;
 };
+

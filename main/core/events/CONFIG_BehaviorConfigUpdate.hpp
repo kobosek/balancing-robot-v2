@@ -4,9 +4,11 @@
 
 class CONFIG_BehaviorConfigUpdate : public BaseEvent {
 public:
+    DECLARE_EVENT_IDENTITY(CONFIG_BehaviorConfigUpdate)
     const SystemBehaviorConfig& config;
 
     CONFIG_BehaviorConfigUpdate(const SystemBehaviorConfig& data) :
-        BaseEvent(EventType::CONFIG_BEHAVIOR_UPDATE),
+        BaseEvent(),
         config(data) {}
 };
+

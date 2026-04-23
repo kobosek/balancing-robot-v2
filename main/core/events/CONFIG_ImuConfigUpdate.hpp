@@ -4,11 +4,13 @@
 
 class CONFIG_ImuConfigUpdate : public BaseEvent {
 public:
+    DECLARE_EVENT_IDENTITY(CONFIG_ImuConfigUpdate)
     const MPU6050Config& config;
     const bool requiresHardwareInit;
 
     CONFIG_ImuConfigUpdate(const MPU6050Config& data, bool hardwareInit) :
-        BaseEvent(EventType::CONFIG_IMU_UPDATE),
+        BaseEvent(),
         config(data),
         requiresHardwareInit(hardwareInit) {}
 };
+

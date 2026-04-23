@@ -5,11 +5,13 @@
 
 class GUIDED_CalibrationFinished : public BaseEvent {
 public:
+    DECLARE_EVENT_IDENTITY(GUIDED_CalibrationFinished)
     GUIDED_CalibrationFinished(bool success, std::string message)
-        : BaseEvent(EventType::GUIDED_CALIBRATION_FINISHED),
+        : BaseEvent(),
           success(success),
           message(std::move(message)) {}
 
     bool success;
     std::string message;
 };
+

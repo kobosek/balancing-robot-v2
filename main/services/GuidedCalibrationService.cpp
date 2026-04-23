@@ -41,21 +41,14 @@ GuidedCalibrationStatus GuidedCalibrationService::getStatus() const {
 }
 
 void GuidedCalibrationService::handleEvent(const BaseEvent& event) {
-    switch (event.type) {
-        case EventType::UI_START_GUIDED_CALIBRATION:
-            handleStartCommand(static_cast<const UI_StartGuidedCalibration&>(event));
-            break;
-        case EventType::UI_CANCEL_GUIDED_CALIBRATION:
-            handleCancelCommand(static_cast<const UI_CancelGuidedCalibration&>(event));
-            break;
-        case EventType::SYSTEM_STATE_CHANGED:
-            handleSystemStateChanged(static_cast<const SYSTEM_StateChanged&>(event));
-            break;
-        case EventType::CONFIG_FULL_UPDATE:
-            handleConfigUpdate(static_cast<const CONFIG_FullConfigUpdate&>(event));
-            break;
-        default:
-            break;
+    if (event.is<UI_StartGuidedCalibration>()) {
+        handleStartCommand(event.as<UI_StartGuidedCalibration>());
+    } else if (event.is<UI_CancelGuidedCalibration>()) {
+        handleCancelCommand(event.as<UI_CancelGuidedCalibration>());
+    } else if (event.is<SYSTEM_StateChanged>()) {
+        handleSystemStateChanged(event.as<SYSTEM_StateChanged>());
+    } else if (event.is<CONFIG_FullConfigUpdate>()) {
+        handleConfigUpdate(event.as<CONFIG_FullConfigUpdate>());
     }
 }
 

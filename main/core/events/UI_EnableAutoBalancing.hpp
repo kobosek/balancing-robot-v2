@@ -5,5 +5,7 @@
 // Command event from Web UI/API to enable auto balancing.
 class UI_EnableAutoBalancing : public BaseEvent {
 public:
-    UI_EnableAutoBalancing() : BaseEvent(EventType::UI_ENABLE_AUTO_BALANCING) {}
+    DECLARE_EVENT_IDENTITY(UI_EnableAutoBalancing)
+    UI_EnableAutoBalancing() : BaseEvent() {}
 };
+

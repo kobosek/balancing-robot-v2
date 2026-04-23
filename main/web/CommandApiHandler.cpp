@@ -1,7 +1,6 @@
 // main/web/CommandApiHandler.cpp
 #include "CommandApiHandler.hpp"
 #include "EventBus.hpp"             // Need full definition
-#include "EventTypes.hpp"           // Need full definition
 #include "UI_StartBalancing.hpp"// Need full definition
 #include "UI_Stop.hpp"          // Need full definition
 #include "UI_CalibrateImu.hpp"        // <<< ADDED
@@ -19,6 +18,7 @@
 #include "BaseEvent.hpp"           // Need for BaseEvent
 #include "cJSON.h"
 #include <memory>                   // For unique_ptr
+#include <array>
 #include <string>
 #include "esp_http_server.h" // <<< ADDED for httpd_resp_* functions
 #include "esp_log.h"         // <<< ADDED for logging
@@ -29,10 +29,8 @@ CommandApiHandler::CommandApiHandler(EventBus& eventBus) : m_eventBus(eventBus) 
 
 // EventHandler implementation
 void CommandApiHandler::handleEvent(const BaseEvent& event) {
-    // Currently this handler doesn't need to process any events
-    // Just log unhandled events at verbose level
-    ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
-             getHandlerName().c_str(), static_cast<int>(event.type));
+    ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
+             getHandlerName().c_str(), event.eventName());
 }
 
 esp_err_t CommandApiHandler::handleRequest(httpd_req_t *req) {
@@ -68,51 +66,46 @@ esp_err_t CommandApiHandler::handleRequest(httpd_req_t *req) {
         return ESP_FAIL;
     }
     std::string command_str = cmd_item->valuestring;
-    std::string message = "Unknown command";
+    std::string message;
 
-    if (command_str == "start") {
-        ESP_LOGI(TAG, "Publishing START_COMMAND_RECEIVED");
-        UI_StartBalancing cmd_event;
-        m_eventBus.publish(cmd_event);
-        message = "Start command sent";
+    const auto publishCommand = [&](const char* logName, auto&& event, const char* successMessage) {
+        ESP_LOGI(TAG, "Publishing %s", logName);
+        m_eventBus.publish(event);
+        message = successMessage;
         ret = ESP_OK;
-    } else if (command_str == "stop") {
-        ESP_LOGI(TAG, "Publishing STOP_COMMAND_RECEIVED");
-        UI_Stop cmd_event;
-        m_eventBus.publish(cmd_event);
-        message = "Stop command sent";
-        ret = ESP_OK;
-    } else if (command_str == "calibrate") { // <<< ADDED
-        ESP_LOGI(TAG, "Publishing CALIBRATE_COMMAND_RECEIVED");
-        UI_CalibrateImu cmd_event;
-        m_eventBus.publish(cmd_event);
-        message = "Calibrate command sent";
-        ret = ESP_OK;
-    } else if (command_str == "enable_auto_balancing") {
-        ESP_LOGI(TAG, "Publishing ENABLE_AUTO_BALANCING_COMMAND_RECEIVED");
-        UI_EnableAutoBalancing cmd_event;
-        m_eventBus.publish(cmd_event);
-        message = "Enable auto balancing command sent";
-        ret = ESP_OK;
-     } else if (command_str == "disable_auto_balancing") {
-        ESP_LOGI(TAG, "Publishing DISABLE_AUTO_BALANCING_COMMAND_RECEIVED");
-        UI_DisableAutoBalancing cmd_event;
-        m_eventBus.publish(cmd_event);
-        message = "Disable auto balancing command sent";
-        ret = ESP_OK;
-    } else if (command_str == "enable_fall_detect") {
-        ESP_LOGI(TAG, "Publishing ENABLE_FALL_DETECT_COMMAND_RECEIVED");
-        UI_EnableFallDetection cmd_event;
-        m_eventBus.publish(cmd_event);
-        message = "Enable fall detect command sent";
-        ret = ESP_OK;
-    } else if (command_str == "disable_fall_detect") {
-        ESP_LOGI(TAG, "Publishing DISABLE_FALL_DETECT_COMMAND_RECEIVED");
-        UI_DisableFallDetection cmd_event;
-        m_eventBus.publish(cmd_event);
-        message = "Disable fall detect command sent";
-        ret = ESP_OK;
-    } else if (command_str == "start_pid_tuning") {
+    };
+
+    struct SimpleCommandRoute {
+        const char* command;
+        const char* logName;
+        const char* successMessage;
+        void (*publish)(EventBus&);
+    };
+
+    const auto simpleRoutes = std::array<SimpleCommandRoute, 10>{{
+        {"start", "START_COMMAND_RECEIVED", "Start command sent", [](EventBus& bus) { UI_StartBalancing event; bus.publish(event); }},
+        {"stop", "STOP_COMMAND_RECEIVED", "Stop command sent", [](EventBus& bus) { UI_Stop event; bus.publish(event); }},
+        {"calibrate", "CALIBRATE_COMMAND_RECEIVED", "Calibrate command sent", [](EventBus& bus) { UI_CalibrateImu event; bus.publish(event); }},
+        {"enable_auto_balancing", "ENABLE_AUTO_BALANCING_COMMAND_RECEIVED", "Enable auto balancing command sent", [](EventBus& bus) { UI_EnableAutoBalancing event; bus.publish(event); }},
+        {"disable_auto_balancing", "DISABLE_AUTO_BALANCING_COMMAND_RECEIVED", "Disable auto balancing command sent", [](EventBus& bus) { UI_DisableAutoBalancing event; bus.publish(event); }},
+        {"enable_fall_detect", "ENABLE_FALL_DETECT_COMMAND_RECEIVED", "Enable fall detect command sent", [](EventBus& bus) { UI_EnableFallDetection event; bus.publish(event); }},
+        {"disable_fall_detect", "DISABLE_FALL_DETECT_COMMAND_RECEIVED", "Disable fall detect command sent", [](EventBus& bus) { UI_DisableFallDetection event; bus.publish(event); }},
+        {"cancel_pid_tuning", "CANCEL_PID_TUNING_COMMAND_RECEIVED", "PID tuning cancel command sent", [](EventBus& bus) { UI_CancelPidTuning event; bus.publish(event); }},
+        {"save_pid_tuning", "SAVE_PID_TUNING_COMMAND_RECEIVED", "PID tuning save command sent", [](EventBus& bus) { UI_SavePidTuning event; bus.publish(event); }},
+        {"discard_pid_tuning", "DISCARD_PID_TUNING_COMMAND_RECEIVED", "PID tuning discard command sent", [](EventBus& bus) { UI_DiscardPidTuning event; bus.publish(event); }},
+    }};
+
+    for (const SimpleCommandRoute& route : simpleRoutes) {
+        if (command_str == route.command) {
+            ESP_LOGI(TAG, "Publishing %s", route.logName);
+            route.publish(m_eventBus);
+            message = route.successMessage;
+            ret = ESP_OK;
+            break;
+        }
+    }
+
+    if (ret != ESP_OK && command_str == "start_pid_tuning") {
         PidTuningTarget target = PidTuningTarget::MOTOR_SPEED_LEFT;
         cJSON *target_item = cJSON_GetObjectItemCaseSensitive(root, "target");
         if (target_item && cJSON_IsString(target_item) && target_item->valuestring) {
@@ -126,43 +119,17 @@ esp_err_t CommandApiHandler::handleRequest(httpd_req_t *req) {
                 return ESP_FAIL;
             }
         }
-        ESP_LOGI(TAG, "Publishing START_PID_TUNING_COMMAND_RECEIVED");
         UI_StartPidTuning cmd_event(target);
-        m_eventBus.publish(cmd_event);
-        message = "PID tuning start command sent";
-        ret = ESP_OK;
-    } else if (command_str == "cancel_pid_tuning") {
-        ESP_LOGI(TAG, "Publishing CANCEL_PID_TUNING_COMMAND_RECEIVED");
-        UI_CancelPidTuning cmd_event;
-        m_eventBus.publish(cmd_event);
-        message = "PID tuning cancel command sent";
-        ret = ESP_OK;
-    } else if (command_str == "save_pid_tuning") {
-        ESP_LOGI(TAG, "Publishing SAVE_PID_TUNING_COMMAND_RECEIVED");
-        UI_SavePidTuning cmd_event;
-        m_eventBus.publish(cmd_event);
-        message = "PID tuning save command sent";
-        ret = ESP_OK;
-    } else if (command_str == "discard_pid_tuning") {
-        ESP_LOGI(TAG, "Publishing DISCARD_PID_TUNING_COMMAND_RECEIVED");
-        UI_DiscardPidTuning cmd_event;
-        m_eventBus.publish(cmd_event);
-        message = "PID tuning discard command sent";
-        ret = ESP_OK;
-    } else if (command_str == "start_guided_calibration") {
-        ESP_LOGI(TAG, "Publishing START_GUIDED_CALIBRATION_COMMAND_RECEIVED");
+        publishCommand("START_PID_TUNING_COMMAND_RECEIVED", cmd_event, "PID tuning start command sent");
+    } else if (ret != ESP_OK && command_str == "start_guided_calibration") {
         UI_StartGuidedCalibration cmd_event;
-        m_eventBus.publish(cmd_event);
-        message = "Guided calibration start command sent";
-        ret = ESP_OK;
-    } else if (command_str == "cancel_guided_calibration") {
-        ESP_LOGI(TAG, "Publishing CANCEL_GUIDED_CALIBRATION_COMMAND_RECEIVED");
+        publishCommand("START_GUIDED_CALIBRATION_COMMAND_RECEIVED", cmd_event, "Guided calibration start command sent");
+    } else if (ret != ESP_OK && command_str == "cancel_guided_calibration") {
         UI_CancelGuidedCalibration cmd_event;
-        m_eventBus.publish(cmd_event);
-        message = "Guided calibration cancel command sent";
-        ret = ESP_OK;
-    // <<< END Added >>>
-    } else {
+        publishCommand("CANCEL_GUIDED_CALIBRATION_COMMAND_RECEIVED", cmd_event, "Guided calibration cancel command sent");
+    }
+
+    if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Unknown command received: %s", command_str.c_str());
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Unknown command");
         return ESP_FAIL; // Error already sent

@@ -4,5 +4,7 @@
 
 class UI_CancelGuidedCalibration : public BaseEvent {
 public:
-    UI_CancelGuidedCalibration() : BaseEvent(EventType::UI_CANCEL_GUIDED_CALIBRATION) {}
+    DECLARE_EVENT_IDENTITY(UI_CancelGuidedCalibration)
+    UI_CancelGuidedCalibration() : BaseEvent() {}
 };
+

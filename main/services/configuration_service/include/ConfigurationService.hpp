@@ -1,6 +1,8 @@
 #pragma once
 
 #include "ConfigData.hpp"
+#include "ConfigChangePublisher.hpp"
+#include "ConfigValidator.hpp"
 #include "EventBus.hpp"
 #include "EventHandler.hpp"
 #include <string>
@@ -58,11 +60,10 @@ private:
     IConfigParser& m_configParser;
     EventBus& m_eventBus;
     const std::string m_configKey;
+    ConfigValidator m_configValidator;
+    ConfigChangePublisher m_configChangePublisher;
     ConfigData m_configData; // Holds the current configuration
     mutable std::mutex m_mutex; // Protects m_configData
 
     esp_err_t saveInternal(); // Internal save helper (assumes mutex is held)
-    bool validateConfig(const ConfigData& config, std::string& error) const; // Validation helper
-    
-    void publishGranularConfigEvents(const ConfigData& oldConfig, const ConfigData& newConfig);
 };

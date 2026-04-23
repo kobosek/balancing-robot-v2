@@ -4,5 +4,7 @@
 
 class UI_SavePidTuning : public BaseEvent {
 public:
-    UI_SavePidTuning() : BaseEvent(EventType::UI_SAVE_PID_TUNING) {}
+    DECLARE_EVENT_IDENTITY(UI_SavePidTuning)
+    UI_SavePidTuning() : BaseEvent() {}
 };
+

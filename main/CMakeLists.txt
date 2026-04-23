@@ -8,8 +8,14 @@ idf_component_register(SRCS # --- Tasks ---
                             "core/StateManager.cpp"
                             "core/RobotController.cpp" 
                             "core/Application.cpp"
+                            "core/ApplicationContext.cpp"
+                            "core/ApplicationEventWiring.cpp"
+                            "core/ApplicationRuntime.cpp"
                             # --- Configuration Service ---
                             "services/configuration_service/SPIFFSStorageService.cpp"
+                            "services/configuration_service/ConfigChangePublisher.cpp"
+                            "services/configuration_service/ConfigValidator.cpp"
+                            "services/configuration_service/JsonConfigSectionCodecs.cpp"
                             "services/configuration_service/JsonConfigParser.cpp"
                             "services/configuration_service/ConfigurationService.cpp"
                             # --- IMU Service---

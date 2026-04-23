@@ -3,7 +3,6 @@
 #include "ConfigurationService.hpp"
 #include "EncoderService.hpp"
 #include "EventBus.hpp"
-#include "EventTypes.hpp"
 #include "PID_TuningFinished.hpp"
 #include "SYSTEM_StateChanged.hpp"
 #include "SystemState.hpp"
@@ -53,26 +52,19 @@ PidTuningStatus PidTuningService::getStatus() const {
 }
 
 void PidTuningService::handleEvent(const BaseEvent& event) {
-    switch (event.type) {
-        case EventType::UI_START_PID_TUNING:
-            handleStartCommand(static_cast<const UI_StartPidTuning&>(event));
-            break;
-        case EventType::UI_CANCEL_PID_TUNING:
-            handleCancelCommand(static_cast<const UI_CancelPidTuning&>(event));
-            break;
-        case EventType::UI_SAVE_PID_TUNING:
-            handleSaveCommand(static_cast<const UI_SavePidTuning&>(event));
-            break;
-        case EventType::UI_DISCARD_PID_TUNING:
-            handleDiscardCommand(static_cast<const UI_DiscardPidTuning&>(event));
-            break;
-        case EventType::SYSTEM_STATE_CHANGED:
-            handleSystemStateChanged(static_cast<const SYSTEM_StateChanged&>(event));
-            break;
-        default:
-            ESP_LOGV(TAG, "%s: Received unhandled event type %d",
-                     getHandlerName().c_str(), static_cast<int>(event.type));
-            break;
+    if (event.is<UI_StartPidTuning>()) {
+        handleStartCommand(event.as<UI_StartPidTuning>());
+    } else if (event.is<UI_CancelPidTuning>()) {
+        handleCancelCommand(event.as<UI_CancelPidTuning>());
+    } else if (event.is<UI_SavePidTuning>()) {
+        handleSaveCommand(event.as<UI_SavePidTuning>());
+    } else if (event.is<UI_DiscardPidTuning>()) {
+        handleDiscardCommand(event.as<UI_DiscardPidTuning>());
+    } else if (event.is<SYSTEM_StateChanged>()) {
+        handleSystemStateChanged(event.as<SYSTEM_StateChanged>());
+    } else {
+        ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
+                 getHandlerName().c_str(), event.eventName());
     }
 }
 

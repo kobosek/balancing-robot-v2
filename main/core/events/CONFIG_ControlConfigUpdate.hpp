@@ -4,9 +4,11 @@
 
 class CONFIG_ControlConfigUpdate : public BaseEvent {
 public:
+    DECLARE_EVENT_IDENTITY(CONFIG_ControlConfigUpdate)
     const ControlConfig& config;
 
     CONFIG_ControlConfigUpdate(const ControlConfig& data) :
-        BaseEvent(EventType::CONFIG_CONTROL_UPDATE),
+        BaseEvent(),
         config(data) {}
 };
+

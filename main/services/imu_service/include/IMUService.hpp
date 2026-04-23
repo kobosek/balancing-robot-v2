@@ -1,11 +1,12 @@
 #pragma once
 
-#include "ConfigData.hpp"
 #include "EventHandler.hpp"
 #include "IIMUFaultSink.hpp"
 #include "IMUState.hpp"
 #include "MPU6050Profile.hpp"
 #include "SystemState.hpp"
+#include "config/MPU6050Config.hpp"
+#include "config/SystemBehaviorConfig.hpp"
 #include "esp_err.h"
 #include <atomic>
 #include <cstdint>

@@ -1,6 +1,5 @@
 #include "BatteryService.hpp"
 #include "ConfigData.hpp"
-#include "EventTypes.hpp"
 #include "BATTERY_StatusUpdate.hpp"
 #include "EventBus.hpp"
 #include "CONFIG_FullConfigUpdate.hpp" // Include event with payload
@@ -236,16 +235,11 @@ void BatteryService::applyConfig(const BatteryConfig& batConf, const SystemBehav
 }
 
 void BatteryService::handleEvent(const BaseEvent& event) {
-    // Central event handler that dispatches to specific handlers based on event type
-    switch (event.type) {
-        case EventType::CONFIG_FULL_UPDATE:
-            handleConfigUpdate(static_cast<const CONFIG_FullConfigUpdate&>(event));
-            break;
-            
-        default:
-            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
-                     getHandlerName().c_str(), static_cast<int>(event.type));
-            break;
+    if (event.is<CONFIG_FullConfigUpdate>()) {
+        handleConfigUpdate(event.as<CONFIG_FullConfigUpdate>());
+    } else {
+        ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
+                 getHandlerName().c_str(), event.eventName());
     }
 }
 

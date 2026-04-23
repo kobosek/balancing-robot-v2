@@ -3,7 +3,6 @@
 #include "SYSTEM_StateChanged.hpp"  // Found via INCLUDE_DIRS
 #include "MX1616H_HWDriver.hpp"         // Found via INCLUDE_DIRS (needed for make_unique)
 #include "BaseEvent.hpp"                // Found via INCLUDE_DIRS (needed for handle state change)
-#include "EventTypes.hpp"               // Found via INCLUDE_DIRS (needed for handle state change)
 #include "SystemState.hpp"              // Found via INCLUDE_DIRS (needed for handle state change)
 #include "esp_check.h"
 #include "driver/ledc.h"
@@ -74,16 +73,11 @@ esp_err_t MotorService::init() {
 
 // EventHandler implementation
 void MotorService::handleEvent(const BaseEvent& event) {
-    // Central event handler that dispatches to specific handlers based on event type
-    switch (event.type) {
-        case EventType::SYSTEM_STATE_CHANGED:
-            handleSystemStateChange(static_cast<const SYSTEM_StateChanged&>(event));
-            break;
-            
-        default:
-            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
-                     getHandlerName().c_str(), static_cast<int>(event.type));
-            break;
+    if (event.is<SYSTEM_StateChanged>()) {
+        handleSystemStateChange(event.as<SYSTEM_StateChanged>());
+    } else {
+        ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
+                 getHandlerName().c_str(), event.eventName());
     }
 }
 

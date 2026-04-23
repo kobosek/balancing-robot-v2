@@ -9,7 +9,6 @@
 #include "BaseEvent.hpp"
 #include "CONFIG_FullConfigUpdate.hpp"
 #include "EventBus.hpp"
-#include "EventTypes.hpp"
 #include "IMU_AttachRequested.hpp"
 #include "IMU_AvailabilityChanged.hpp"
 #include "IMU_CalibrationCompleted.hpp"
@@ -96,62 +95,43 @@ void StateManager::setState(SystemState newState) {
 }
 
 void StateManager::handleEvent(const BaseEvent& event) {
-    switch (event.type) {
-        case EventType::BALANCE_FALL_DETECTED:
-            handleFallDetected(static_cast<const BALANCE_FallDetected&>(event));
-            break;
-        case EventType::BALANCE_AUTO_BALANCE_READY:
-            handleAutoBalanceReady(static_cast<const BALANCE_AutoBalanceReady&>(event));
-            break;
-        case EventType::UI_START_BALANCING:
-            handleStartBalancing(static_cast<const UI_StartBalancing&>(event));
-            break;
-        case EventType::UI_STOP:
-            handleStop(static_cast<const UI_Stop&>(event));
-            break;
-        case EventType::BATTERY_STATUS_UPDATE:
-            handleBatteryUpdate(static_cast<const BATTERY_StatusUpdate&>(event));
-            break;
-        case EventType::UI_CALIBRATE_IMU:
-            handleCalibrateCommand(static_cast<const UI_CalibrateImu&>(event));
-            break;
-        case EventType::UI_START_PID_TUNING:
-            handleStartPidTuning(static_cast<const UI_StartPidTuning&>(event));
-            break;
-        case EventType::UI_CANCEL_PID_TUNING:
-            handleCancelPidTuning(static_cast<const UI_CancelPidTuning&>(event));
-            break;
-        case EventType::PID_TUNING_FINISHED:
-            handlePidTuningFinished(static_cast<const PID_TuningFinished&>(event));
-            break;
-        case EventType::UI_START_GUIDED_CALIBRATION:
-            handleStartGuidedCalibration(static_cast<const UI_StartGuidedCalibration&>(event));
-            break;
-        case EventType::UI_CANCEL_GUIDED_CALIBRATION:
-            handleCancelGuidedCalibration(static_cast<const UI_CancelGuidedCalibration&>(event));
-            break;
-        case EventType::GUIDED_CALIBRATION_FINISHED:
-            handleGuidedCalibrationFinished(static_cast<const GUIDED_CalibrationFinished&>(event));
-            break;
-        case EventType::IMU_CALIBRATION_COMPLETED:
-            handleCalibrationComplete(static_cast<const IMU_CalibrationCompleted&>(event));
-            break;
-        case EventType::IMU_CALIBRATION_REJECTED:
-            handleCalibrationRejected(static_cast<const IMU_CalibrationRequestRejected&>(event));
-            break;
-        case EventType::IMU_COMMUNICATION_ERROR:
-            handleImuCommunicationError(static_cast<const IMU_CommunicationError&>(event));
-            break;
-        case EventType::IMU_AVAILABILITY_CHANGED:
-            handleImuAvailabilityChanged(static_cast<const IMU_AvailabilityChanged&>(event));
-            break;
-        case EventType::CONFIG_FULL_UPDATE:
-            handleConfigUpdate(static_cast<const CONFIG_FullConfigUpdate&>(event));
-            break;
-        default:
-            ESP_LOGV(TAG, "%s: Received unhandled event type %d",
-                     getHandlerName().c_str(), static_cast<int>(event.type));
-            break;
+    if (event.is<BALANCE_FallDetected>()) {
+        handleFallDetected(event.as<BALANCE_FallDetected>());
+    } else if (event.is<BALANCE_AutoBalanceReady>()) {
+        handleAutoBalanceReady(event.as<BALANCE_AutoBalanceReady>());
+    } else if (event.is<UI_StartBalancing>()) {
+        handleStartBalancing(event.as<UI_StartBalancing>());
+    } else if (event.is<UI_Stop>()) {
+        handleStop(event.as<UI_Stop>());
+    } else if (event.is<BATTERY_StatusUpdate>()) {
+        handleBatteryUpdate(event.as<BATTERY_StatusUpdate>());
+    } else if (event.is<UI_CalibrateImu>()) {
+        handleCalibrateCommand(event.as<UI_CalibrateImu>());
+    } else if (event.is<UI_StartPidTuning>()) {
+        handleStartPidTuning(event.as<UI_StartPidTuning>());
+    } else if (event.is<UI_CancelPidTuning>()) {
+        handleCancelPidTuning(event.as<UI_CancelPidTuning>());
+    } else if (event.is<PID_TuningFinished>()) {
+        handlePidTuningFinished(event.as<PID_TuningFinished>());
+    } else if (event.is<UI_StartGuidedCalibration>()) {
+        handleStartGuidedCalibration(event.as<UI_StartGuidedCalibration>());
+    } else if (event.is<UI_CancelGuidedCalibration>()) {
+        handleCancelGuidedCalibration(event.as<UI_CancelGuidedCalibration>());
+    } else if (event.is<GUIDED_CalibrationFinished>()) {
+        handleGuidedCalibrationFinished(event.as<GUIDED_CalibrationFinished>());
+    } else if (event.is<IMU_CalibrationCompleted>()) {
+        handleCalibrationComplete(event.as<IMU_CalibrationCompleted>());
+    } else if (event.is<IMU_CalibrationRequestRejected>()) {
+        handleCalibrationRejected(event.as<IMU_CalibrationRequestRejected>());
+    } else if (event.is<IMU_CommunicationError>()) {
+        handleImuCommunicationError(event.as<IMU_CommunicationError>());
+    } else if (event.is<IMU_AvailabilityChanged>()) {
+        handleImuAvailabilityChanged(event.as<IMU_AvailabilityChanged>());
+    } else if (event.is<CONFIG_FullConfigUpdate>()) {
+        handleConfigUpdate(event.as<CONFIG_FullConfigUpdate>());
+    } else {
+        ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
+                 getHandlerName().c_str(), event.eventName());
     }
 }
 

@@ -2,7 +2,6 @@
 // File: main/algorithms/CommandProcessor.cpp
 // ================================================
 #include "CommandProcessor.hpp"
-#include "EventTypes.hpp"
 #include "SYSTEM_StateChanged.hpp"
 #include "MOTION_TargetMovement.hpp"
 #include "SystemState.hpp"
@@ -80,24 +79,15 @@ esp_err_t CommandProcessor::init() {
 }
 
 void CommandProcessor::handleEvent(const BaseEvent& event) {
-    // Central event handler that dispatches to specific handlers based on event type
-    switch (event.type) {
-        case EventType::SYSTEM_STATE_CHANGED:
-            handleSystemStateChange(static_cast<const SYSTEM_StateChanged&>(event));
-            break;
-            
-        case EventType::UI_JOYSTICK_INPUT:
-            handleJoystickInput(static_cast<const UI_JoystickInput&>(event));
-            break;
-            
-        case EventType::CONFIG_FULL_UPDATE:
-            handleConfigUpdate(static_cast<const CONFIG_FullConfigUpdate&>(event));
-            break;
-            
-        default:
-            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
-                     getHandlerName().c_str(), static_cast<int>(event.type));
-            break;
+    if (event.is<SYSTEM_StateChanged>()) {
+        handleSystemStateChange(event.as<SYSTEM_StateChanged>());
+    } else if (event.is<UI_JoystickInput>()) {
+        handleJoystickInput(event.as<UI_JoystickInput>());
+    } else if (event.is<CONFIG_FullConfigUpdate>()) {
+        handleConfigUpdate(event.as<CONFIG_FullConfigUpdate>());
+    } else {
+        ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
+                 getHandlerName().c_str(), event.eventName());
     }
 }
 

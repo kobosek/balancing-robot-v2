@@ -4,8 +4,8 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "TelemetryDataPoint.hpp" // Include the struct definition
-#include "ConfigData.hpp" // Include full definition
 #include "EventHandler.hpp"
+#include "config/WebServerConfig.hpp"
 #include <deque>
 #include <mutex>
 #include <vector>

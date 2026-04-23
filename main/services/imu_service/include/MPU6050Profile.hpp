@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ConfigData.hpp"
 #include "driver/gpio.h"
 #include "mpu6050.hpp"
+#include "config/MPU6050Config.hpp"
 #include <cstdint>
 
 struct MPU6050Profile {

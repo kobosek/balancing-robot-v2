@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ConfigData.hpp"
 #include "MPU6050Profile.hpp"
+#include "config/MPU6050Config.hpp"
 #include "esp_err.h"
 
 class I2CDevice;

@@ -3,6 +3,7 @@
 #include <mutex>
 #include "esp_err.h"
 #include "EventHandler.hpp"
+#include "SystemState.hpp"
 #include <memory>
 
 // Forward Declarations
@@ -12,13 +13,14 @@ class EncoderService;
 class MotorService;
 class BatteryService;
 class StateManager;
-class CommandProcessor;
 class PidTuningService;
 class GuidedCalibrationService;
 class ControlEventDispatcher;
 class BaseEvent;
 class MOTION_TargetMovement;
-class EventBus;
+struct MotorEffort;
+struct TelemetryDataPoint;
+struct GuidedCalibrationSample;
 
 class RobotController : public EventHandler {
 public:
@@ -29,13 +31,11 @@ public:
         BalancingAlgorithm& algorithm,
         StateManager& stateManager,
         BatteryService& batteryService,
-        CommandProcessor& commandProcessor,
         PidTuningService& pidTuningService,
         GuidedCalibrationService& guidedCalibrationService,
         ControlEventDispatcher& controlEventDispatcher
     );
 
-    esp_err_t init(EventBus& bus);
     void runControlStep(float dt);
 
     // EventHandler interface implementation
@@ -52,7 +52,6 @@ private:
     BalancingAlgorithm& m_algorithm;
     StateManager& m_stateManager;
     BatteryService& m_batteryService;
-    CommandProcessor& m_commandProcessor;
     PidTuningService& m_pidTuningService;
     GuidedCalibrationService& m_guidedCalibrationService;
     ControlEventDispatcher& m_controlEventDispatcher;
@@ -62,8 +61,26 @@ private:
     float m_latestTargetAngVel_dps = 0.0f;
     std::mutex m_target_values_mutex;
 
-    // Event bus reference
-    EventBus* m_eventBus = nullptr;
-
+    void stopControlLoop();
+    MotorEffort executeControlMode(SystemState currentState,
+                                   float dt,
+                                   float pitch_deg,
+                                   float pitch_rate_dps,
+                                   float yaw_rate_dps,
+                                   float speedL_dps,
+                                   float speedR_dps,
+                                   float& currentTargetPitchOffset_deg,
+                                   float& currentTargetAngVel_dps);
+    MotorEffort executeGuidedCalibrationMode(float dt,
+                                             float pitch_deg,
+                                             float speedL_dps,
+                                             float speedR_dps) const;
+    TelemetryDataPoint buildTelemetrySnapshot(int64_t timestamp_us,
+                                              SystemState currentState,
+                                              float pitch_deg,
+                                              float yaw_rate_dps,
+                                              float speedL_dps,
+                                              float speedR_dps,
+                                              float currentTargetPitchOffset_deg) const;
     void handleTargetMovementCommand(const MOTION_TargetMovement& event);
 };

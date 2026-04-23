@@ -4,6 +4,8 @@
 
 class BALANCE_AutoBalanceReady : public BaseEvent {
 public:
+    DECLARE_EVENT_IDENTITY(BALANCE_AutoBalanceReady)
     BALANCE_AutoBalanceReady() :
-        BaseEvent(EventType::BALANCE_AUTO_BALANCE_READY) {}
+        BaseEvent() {}
 };
+

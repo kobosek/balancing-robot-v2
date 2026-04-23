@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ConfigData.hpp"               // Found via INCLUDE_DIRS (Need PIDConfig struct definition)
+#include "config/PIDConfig.hpp"
 #include <string>
 #include "esp_err.h"
 

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ConfigData.hpp"
 #include "IMUState.hpp"
+#include "config/SystemBehaviorConfig.hpp"
 #include "esp_err.h"
 #include "esp_timer.h"
 #include <atomic>

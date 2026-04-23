@@ -1,9 +1,10 @@
 #pragma once
 
-#include "ConfigData.hpp"
 #include "EventHandler.hpp"
 #include "BalancingAlgorithm.hpp"
 #include "SystemState.hpp"
+#include "config/MotorConfig.hpp"
+#include "config/PidTuningConfig.hpp"
 #include "esp_err.h"
 #include <mutex>
 #include <string>

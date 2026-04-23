@@ -5,5 +5,7 @@
 // Internal event from StateManager requesting IMUService to start calibration
 class IMU_CalibrationRequest : public BaseEvent {
 public:
-    IMU_CalibrationRequest() : BaseEvent(EventType::IMU_CALIBRATION_REQUEST) {}
+    DECLARE_EVENT_IDENTITY(IMU_CalibrationRequest)
+    IMU_CalibrationRequest() : BaseEvent() {}
 };
+

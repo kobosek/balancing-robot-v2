@@ -1,11 +1,11 @@
 // main/include/MotorService.hpp
 #pragma once
 
-#include "ConfigData.hpp"               // Found via INCLUDE_DIRS
 #include "EventBus.hpp"                 // Found via INCLUDE_DIRS
 #include "SystemState.hpp"              // Found via INCLUDE_DIRS
 #include "MX1616H_HWDriver.hpp"         // Found via INCLUDE_DIRS
 #include "EventHandler.hpp"             // For EventHandler base class
+#include "config/MotorConfig.hpp"
 // #include "esp_log.h" // Moved to .cpp
 #include <memory>
 #include <algorithm>                    // Not needed in header

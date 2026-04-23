@@ -10,10 +10,6 @@
 #include "PidTuningService.hpp"
 #include "GuidedCalibrationService.hpp"
 #include "ControlEventDispatcher.hpp"
-#include "BATTERY_StatusUpdate.hpp"
-#include "CommandProcessor.hpp"
-#include "EventBus.hpp"
-#include "EventTypes.hpp"
 #include "MOTION_TargetMovement.hpp"
 #include "TelemetryDataPoint.hpp"
 
@@ -28,7 +24,6 @@ RobotController::RobotController(
     BalancingAlgorithm& algorithm,
     StateManager& stateManager,
     BatteryService& batteryService,
-    CommandProcessor& commandProcessor,
     PidTuningService& pidTuningService,
     GuidedCalibrationService& guidedCalibrationService,
     ControlEventDispatcher& controlEventDispatcher
@@ -39,7 +34,6 @@ RobotController::RobotController(
     m_algorithm(algorithm),
     m_stateManager(stateManager),
     m_batteryService(batteryService),
-    m_commandProcessor(commandProcessor),
     m_pidTuningService(pidTuningService),
     m_guidedCalibrationService(guidedCalibrationService),
     m_controlEventDispatcher(controlEventDispatcher),
@@ -49,25 +43,13 @@ RobotController::RobotController(
     ESP_LOGI(TAG, "RobotController constructed.");
 }
 
-esp_err_t RobotController::init(EventBus& bus) {
-    ESP_LOGI(TAG, "Initializing RobotController...");
-    m_eventBus = &bus;
-    ESP_LOGI(TAG, "RobotController initialized.");
-    return ESP_OK;
-}
-
 // EventHandler implementation
 void RobotController::handleEvent(const BaseEvent& event) {
-    // Central event handler that dispatches to specific handlers based on event type
-    switch (event.type) {
-        case EventType::MOTION_TARGET_SET:
-            handleTargetMovementCommand(static_cast<const MOTION_TargetMovement&>(event));
-            break;
-            
-        default:
-            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
-                     getHandlerName().c_str(), static_cast<int>(event.type));
-            break;
+    if (event.is<MOTION_TargetMovement>()) {
+        handleTargetMovementCommand(event.as<MOTION_TargetMovement>());
+    } else {
+        ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
+                 getHandlerName().c_str(), event.eventName());
     }
 }
 
@@ -82,99 +64,152 @@ void RobotController::handleTargetMovementCommand(const MOTION_TargetMovement& e
 }
 
 void RobotController::runControlStep(float dt) {
-    int64_t startTimeMicros = esp_timer_get_time();
+    const int64_t startTimeMicros = esp_timer_get_time();
 
-    // Check State
-    SystemState currentState = m_stateManager.getCurrentState();
+    const SystemState currentState = m_stateManager.getCurrentState();
     if (currentState == SystemState::FATAL_ERROR || currentState == SystemState::INIT || currentState == SystemState::SHUTDOWN) {
-        m_motorService.setMotorEffort(0.0f, 0.0f);
-        m_algorithm.resetState();
+        stopControlLoop();
         ESP_LOGV(TAG, "Skipping control step due to state: %d", static_cast<int>(currentState));
         return;
     }
 
-    // 1. Get Orientation Data
     const auto orientation = m_estimator->getPitchAndYawRate();
-    float pitch_deg = orientation.first;
-    float pitch_rate_dps = 0.0f;
-    float yaw_rate_dps = orientation.second;
+    const float pitch_deg = orientation.first;
+    const float pitch_rate_dps = 0.0f;
+    const float yaw_rate_dps = orientation.second;
 
-    // BalanceMonitor and telemetry observers run from a lower-priority dispatcher task.
     m_controlEventDispatcher.enqueueOrientation(
         pitch_deg * OrientationEstimator::DEG_TO_RAD,
         pitch_rate_dps * OrientationEstimator::DEG_TO_RAD);
 
-    // 2. Update Encoder Speeds
     m_encoderService.update(dt);
-    float speedL_dps = m_encoderService.getLeftSpeedDegPerSec();
-    float speedR_dps = m_encoderService.getRightSpeedDegPerSec();
+    const float speedL_dps = m_encoderService.getLeftSpeedDegPerSec();
+    const float speedR_dps = m_encoderService.getRightSpeedDegPerSec();
 
-    // 3. Get Target Control Values
     float currentTargetPitchOffset_deg;
     float currentTargetAngVel_dps;
-    { // Lock scope
+    {
         std::lock_guard<std::mutex> lock(m_target_values_mutex);
         currentTargetPitchOffset_deg = m_latestTargetPitchOffset_deg;
         currentTargetAngVel_dps = m_latestTargetAngVel_dps;
     }
 
-    // 4. Run Balancing Algorithm
-    MotorEffort effort = {0.0f, 0.0f};
-    if (currentState == SystemState::BALANCING) {
-         effort = m_algorithm.update(dt, pitch_deg, pitch_rate_dps, yaw_rate_dps,
-                                    speedL_dps, speedR_dps,
-                                    currentTargetPitchOffset_deg,
-                                    currentTargetAngVel_dps);
-    } else if (currentState == SystemState::PID_TUNING) {
-        m_algorithm.resetState();
-        effort = m_pidTuningService.update(dt, speedL_dps, speedR_dps);
-        currentTargetPitchOffset_deg = 0.0f;
-        currentTargetAngVel_dps = 0.0f;
-    } else if (currentState == SystemState::GUIDED_CALIBRATION) {
-        m_algorithm.resetState();
-        GuidedCalibrationSample guidedSample = {};
-        guidedSample.pitch_deg = pitch_deg;
-        guidedSample.speedLeft_dps = speedL_dps;
-        guidedSample.speedRight_dps = speedR_dps;
-        effort = m_guidedCalibrationService.update(dt, guidedSample);
-        currentTargetPitchOffset_deg = 0.0f;
-        currentTargetAngVel_dps = 0.0f;
-    } else {
-        m_algorithm.resetState();
-        effort = {0.0f, 0.0f};
-        currentTargetPitchOffset_deg = 0.0f;
-        currentTargetAngVel_dps = 0.0f;
-    }
+    const MotorEffort effort = executeControlMode(currentState,
+                                                  dt,
+                                                  pitch_deg,
+                                                  pitch_rate_dps,
+                                                  yaw_rate_dps,
+                                                  speedL_dps,
+                                                  speedR_dps,
+                                                  currentTargetPitchOffset_deg,
+                                                  currentTargetAngVel_dps);
 
-    // 5. Set Motor Effort
     m_motorService.setMotorEffort(effort.left, effort.right);
 
-    // 6. Update Telemetry Buffer
+    const TelemetryDataPoint snapshot = buildTelemetrySnapshot(startTimeMicros,
+                                                               currentState,
+                                                               pitch_deg,
+                                                               yaw_rate_dps,
+                                                               speedL_dps,
+                                                               speedR_dps,
+                                                               currentTargetPitchOffset_deg);
+    m_controlEventDispatcher.enqueueTelemetry(snapshot);
+
+    ESP_LOGV(TAG, "Ctrl Step: dt=%.4f, P=%.1f YawR=%.1f | TgtPO=%.1f, TgtAV=%.1f | SSetL=%.1f, SSetR=%.1f | SActL=%.1f, SActR=%.1f | EffL=%.2f, EffR=%.2f",
+        dt, pitch_deg, yaw_rate_dps, currentTargetPitchOffset_deg, currentTargetAngVel_dps,
+        snapshot.speedSetpointLeft_dps, snapshot.speedSetpointRight_dps,
+        speedL_dps, speedR_dps, effort.left, effort.right);
+}
+
+void RobotController::stopControlLoop() {
+    m_motorService.setMotorEffort(0.0f, 0.0f);
+    m_algorithm.resetState();
+}
+
+MotorEffort RobotController::executeControlMode(SystemState currentState,
+                                                float dt,
+                                                float pitch_deg,
+                                                float pitch_rate_dps,
+                                                float yaw_rate_dps,
+                                                float speedL_dps,
+                                                float speedR_dps,
+                                                float& currentTargetPitchOffset_deg,
+                                                float& currentTargetAngVel_dps) {
+    switch (currentState) {
+        case SystemState::BALANCING:
+            return m_algorithm.update(dt,
+                                      pitch_deg,
+                                      pitch_rate_dps,
+                                      yaw_rate_dps,
+                                      speedL_dps,
+                                      speedR_dps,
+                                      currentTargetPitchOffset_deg,
+                                      currentTargetAngVel_dps);
+
+        case SystemState::PID_TUNING:
+            m_algorithm.resetState();
+            currentTargetPitchOffset_deg = 0.0f;
+            currentTargetAngVel_dps = 0.0f;
+            return m_pidTuningService.update(dt, speedL_dps, speedR_dps);
+
+        case SystemState::GUIDED_CALIBRATION:
+            m_algorithm.resetState();
+            currentTargetPitchOffset_deg = 0.0f;
+            currentTargetAngVel_dps = 0.0f;
+            return executeGuidedCalibrationMode(dt, pitch_deg, speedL_dps, speedR_dps);
+
+        default:
+            stopControlLoop();
+            currentTargetPitchOffset_deg = 0.0f;
+            currentTargetAngVel_dps = 0.0f;
+            return {0.0f, 0.0f};
+    }
+}
+
+MotorEffort RobotController::executeGuidedCalibrationMode(float dt,
+                                                          float pitch_deg,
+                                                          float speedL_dps,
+                                                          float speedR_dps) const {
+    GuidedCalibrationSample guidedSample = {};
+    guidedSample.pitch_deg = pitch_deg;
+    guidedSample.speedLeft_dps = speedL_dps;
+    guidedSample.speedRight_dps = speedR_dps;
+    return m_guidedCalibrationService.update(dt, guidedSample);
+}
+
+TelemetryDataPoint RobotController::buildTelemetrySnapshot(int64_t timestamp_us,
+                                                           SystemState currentState,
+                                                           float pitch_deg,
+                                                           float yaw_rate_dps,
+                                                           float speedL_dps,
+                                                           float speedR_dps,
+                                                           float currentTargetPitchOffset_deg) const {
     TelemetryDataPoint snapshot = {};
-    snapshot.timestamp_us = startTimeMicros;
+    snapshot.timestamp_us = timestamp_us;
     snapshot.pitch_deg = pitch_deg;
     snapshot.speedLeft_dps = speedL_dps;
     snapshot.speedRight_dps = speedR_dps;
     snapshot.batteryVoltage = m_batteryService.getLatestStatus().voltage;
     snapshot.systemState = static_cast<int>(currentState);
-    if (currentState == SystemState::PID_TUNING) {
-        snapshot.speedSetpointLeft_dps = m_pidTuningService.getLastSpeedSetpointLeftDPS();
-        snapshot.speedSetpointRight_dps = m_pidTuningService.getLastSpeedSetpointRightDPS();
-    } else if (currentState == SystemState::GUIDED_CALIBRATION) {
-        snapshot.speedSetpointLeft_dps = 0.0f;
-        snapshot.speedSetpointRight_dps = 0.0f;
-    } else {
-        snapshot.speedSetpointLeft_dps = m_algorithm.getLastSpeedSetpointLeftDPS();
-        snapshot.speedSetpointRight_dps = m_algorithm.getLastSpeedSetpointRightDPS();
-    }
     snapshot.desiredAngle_deg = currentTargetPitchOffset_deg;
     snapshot.yawRate_dps = yaw_rate_dps;
 
-    m_controlEventDispatcher.enqueueTelemetry(snapshot);
+    switch (currentState) {
+        case SystemState::PID_TUNING:
+            snapshot.speedSetpointLeft_dps = m_pidTuningService.getLastSpeedSetpointLeftDPS();
+            snapshot.speedSetpointRight_dps = m_pidTuningService.getLastSpeedSetpointRightDPS();
+            break;
 
-    // Update Log (added Yaw)
-    ESP_LOGV(TAG, "Ctrl Step: dt=%.4f, P=%.1f YawR=%.1f | TgtPO=%.1f, TgtAV=%.1f | SSetL=%.1f, SSetR=%.1f | SActL=%.1f, SActR=%.1f | EffL=%.2f, EffR=%.2f",
-        dt, pitch_deg, yaw_rate_dps, currentTargetPitchOffset_deg, currentTargetAngVel_dps,
-        snapshot.speedSetpointLeft_dps, snapshot.speedSetpointRight_dps,
-        speedL_dps, speedR_dps, effort.left, effort.right);
+        case SystemState::GUIDED_CALIBRATION:
+            snapshot.speedSetpointLeft_dps = 0.0f;
+            snapshot.speedSetpointRight_dps = 0.0f;
+            break;
+
+        default:
+            snapshot.speedSetpointLeft_dps = m_algorithm.getLastSpeedSetpointLeftDPS();
+            snapshot.speedSetpointRight_dps = m_algorithm.getLastSpeedSetpointRightDPS();
+            break;
+    }
+
+    return snapshot;
 }

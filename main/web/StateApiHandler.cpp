@@ -34,10 +34,8 @@ StateApiHandler::StateApiHandler(StateManager& stateManager,
 
 // EventHandler implementation
 void StateApiHandler::handleEvent(const BaseEvent& event) {
-    // Currently this handler doesn't need to process any events
-    // Just log unhandled events at verbose level
-    ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
-             getHandlerName().c_str(), static_cast<int>(event.type));
+    ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
+             getHandlerName().c_str(), event.eventName());
 }
 
 // Helper function remains the same

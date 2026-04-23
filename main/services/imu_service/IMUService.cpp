@@ -170,24 +170,16 @@ void IMUService::stopTasks() {
 }
 
 void IMUService::handleEvent(const BaseEvent& event) {
-    switch (event.type) {
-        case EventType::CONFIG_FULL_UPDATE:
-            handleConfigUpdate(static_cast<const CONFIG_FullConfigUpdate&>(event));
-            break;
-        case EventType::CONFIG_IMU_UPDATE:
-            handleIMUConfigUpdate(static_cast<const CONFIG_ImuConfigUpdate&>(event));
-            break;
-        case EventType::IMU_CALIBRATION_REQUEST:
-            handleCalibrationRequest(static_cast<const IMU_CalibrationRequest&>(event));
-            break;
-        case EventType::IMU_ATTACH_REQUESTED:
-            handleAttachRequested(static_cast<const IMU_AttachRequested&>(event));
-            break;
-        case EventType::SYSTEM_STATE_CHANGED:
-            handleSystemStateChanged(static_cast<const SYSTEM_StateChanged&>(event));
-            break;
-        default:
-            break;
+    if (event.is<CONFIG_FullConfigUpdate>()) {
+        handleConfigUpdate(event.as<CONFIG_FullConfigUpdate>());
+    } else if (event.is<CONFIG_ImuConfigUpdate>()) {
+        handleIMUConfigUpdate(event.as<CONFIG_ImuConfigUpdate>());
+    } else if (event.is<IMU_CalibrationRequest>()) {
+        handleCalibrationRequest(event.as<IMU_CalibrationRequest>());
+    } else if (event.is<IMU_AttachRequested>()) {
+        handleAttachRequested(event.as<IMU_AttachRequested>());
+    } else if (event.is<SYSTEM_StateChanged>()) {
+        handleSystemStateChanged(event.as<SYSTEM_StateChanged>());
     }
 }
 

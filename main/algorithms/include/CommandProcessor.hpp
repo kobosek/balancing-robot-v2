@@ -5,7 +5,8 @@
 #include "EventBus.hpp"
 #include "EventHandler.hpp"
 #include "SystemState.hpp"
-#include "ConfigData.hpp"           // For ControlConfig & SystemBehaviorConfig
+#include "config/ControlConfig.hpp"
+#include "config/SystemBehaviorConfig.hpp"
 #include <mutex>                    // For thread safety
 
 

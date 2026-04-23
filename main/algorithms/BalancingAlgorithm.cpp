@@ -5,7 +5,6 @@
 #include "CONFIG_FullConfigUpdate.hpp"
 #include "CONFIG_PidConfigUpdate.hpp"
 #include "BaseEvent.hpp"
-#include "EventTypes.hpp"
 #include "esp_check.h"
 #include <cmath>
 #include <algorithm>
@@ -59,20 +58,13 @@ esp_err_t BalancingAlgorithm::init() {
 }
 
 void BalancingAlgorithm::handleEvent(const BaseEvent& event) {
-    // Central event handler that dispatches to specific handlers based on event type
-    switch (event.type) {
-        case EventType::CONFIG_FULL_UPDATE:
-            handleConfigUpdate(static_cast<const CONFIG_FullConfigUpdate&>(event));
-            break;
-            
-        case EventType::CONFIG_PID_UPDATE:
-            handlePIDConfigUpdate(static_cast<const CONFIG_PidConfigUpdate&>(event));
-            break;
-            
-        default:
-            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
-                     getHandlerName().c_str(), static_cast<int>(event.type));
-            break;
+    if (event.is<CONFIG_FullConfigUpdate>()) {
+        handleConfigUpdate(event.as<CONFIG_FullConfigUpdate>());
+    } else if (event.is<CONFIG_PidConfigUpdate>()) {
+        handlePIDConfigUpdate(event.as<CONFIG_PidConfigUpdate>());
+    } else {
+        ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
+                 getHandlerName().c_str(), event.eventName());
     }
 }
 

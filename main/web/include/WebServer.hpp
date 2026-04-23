@@ -6,17 +6,10 @@
 #include <string>
 #include <memory>
 #include "TelemetryDataPoint.hpp"
-#include "ConfigData.hpp" // Include full definition
 #include "EventHandler.hpp"
+#include "config/WebServerConfig.hpp"
 
 // Forward declare dependencies needed by constructor/members
-class ConfigurationService; // Still needed for ConfigApiHandler
-class StateManager;
-class BalanceMonitor;
-class BatteryService;
-class PidTuningService;
-class GuidedCalibrationService;
-class OTAService;
 class EventBus;
 class BaseEvent;
 
@@ -30,16 +23,13 @@ class OTAApiHandler;
 
 class WebServer : public EventHandler {
 public:
-    // Constructor takes high-level dependencies + WebServerConfig
-    WebServer(ConfigurationService& configService,
-              StateManager& stateManager,
-              BalanceMonitor& balanceMonitor,
-              BatteryService& batteryService,
-              PidTuningService& pidTuningService,
-              GuidedCalibrationService& guidedCalibrationService,
-              OTAService& otaService,
-              EventBus& eventBus,
-              const WebServerConfig& initialWebConfig);
+    WebServer(EventBus& eventBus,
+              std::unique_ptr<StaticFileHandler> staticFileHandler,
+              std::unique_ptr<TelemetryHandler> telemetryHandler,
+              std::unique_ptr<ConfigApiHandler> configApiHandler,
+              std::unique_ptr<CommandApiHandler> commandApiHandler,
+              std::unique_ptr<StateApiHandler> stateApiHandler,
+              std::unique_ptr<OTAApiHandler> otaApiHandler);
     ~WebServer();
 
     esp_err_t init();
@@ -56,14 +46,6 @@ private:
     static constexpr const char* TAG = "WebServer";
     httpd_handle_t server = nullptr;
 
-    // Store references to dependencies needed by WS handler or specific handlers
-    ConfigurationService& m_configService;
-    StateManager& m_stateManager;
-    BalanceMonitor& m_balanceMonitor;
-    BatteryService& m_batteryService;
-    PidTuningService& m_pidTuningService;
-    GuidedCalibrationService& m_guidedCalibrationService;
-    OTAService& m_otaService;
     EventBus& m_eventBus;
 
     // Own instances of the handlers

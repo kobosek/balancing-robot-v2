@@ -8,16 +8,9 @@
 #include "StateApiHandler.hpp"
 #include "OTAApiHandler.hpp"
 
-// Include necessary services/events for handler instantiation/use
-#include "ConfigurationService.hpp"
-#include "StateManager.hpp"
-#include "BalanceMonitor.hpp"
-#include "PidTuningService.hpp"
 #include "EventBus.hpp"
 #include "TelemetryDataPoint.hpp"
 #include "UI_JoystickInput.hpp"
-#include "ConfigData.hpp" // Needed for config struct
-#include "EventTypes.hpp" // Needed for subscription
 #include "CONFIG_FullConfigUpdate.hpp" // Needed for subscription
 #include "TELEMETRY_Snapshot.hpp"
 
@@ -28,32 +21,22 @@
 #include <cstring>
 #include <algorithm>
 
-// Constructor: Instantiate handlers, injecting dependencies
-WebServer::WebServer(ConfigurationService& configService,
-                     StateManager& stateManager,
-                     BalanceMonitor& balanceMonitor,
-                     BatteryService& batteryService,
-                     PidTuningService& pidTuningService,
-                     GuidedCalibrationService& guidedCalibrationService,
-                     OTAService& otaService,
-                     EventBus& eventBus,
-                     const WebServerConfig& initialWebConfig)
+WebServer::WebServer(EventBus& eventBus,
+                     std::unique_ptr<StaticFileHandler> staticFileHandler,
+                     std::unique_ptr<TelemetryHandler> telemetryHandler,
+                     std::unique_ptr<ConfigApiHandler> configApiHandler,
+                     std::unique_ptr<CommandApiHandler> commandApiHandler,
+                     std::unique_ptr<StateApiHandler> stateApiHandler,
+                     std::unique_ptr<OTAApiHandler> otaApiHandler)
     : server(nullptr),
-      m_configService(configService),
-      m_stateManager(stateManager),
-      m_balanceMonitor(balanceMonitor),
-      m_batteryService(batteryService),
-      m_pidTuningService(pidTuningService),
-      m_guidedCalibrationService(guidedCalibrationService),
-      m_otaService(otaService),
-      m_eventBus(eventBus)
+      m_eventBus(eventBus),
+      m_staticFileHandler(std::move(staticFileHandler)),
+      m_telemetryHandler(std::move(telemetryHandler)),
+      m_configApiHandler(std::move(configApiHandler)),
+      m_commandApiHandler(std::move(commandApiHandler)),
+      m_stateApiHandler(std::move(stateApiHandler)),
+      m_otaApiHandler(std::move(otaApiHandler))
 {
-    m_staticFileHandler = std::make_unique<StaticFileHandler>("/spiffs");
-    m_telemetryHandler = std::make_unique<TelemetryHandler>(initialWebConfig);
-    m_configApiHandler = std::make_unique<ConfigApiHandler>(m_configService);
-    m_commandApiHandler = std::make_unique<CommandApiHandler>(m_eventBus);
-    m_stateApiHandler = std::make_unique<StateApiHandler>(m_stateManager, m_balanceMonitor, m_batteryService, m_pidTuningService, m_guidedCalibrationService, m_configService, m_otaService);
-    m_otaApiHandler = std::make_unique<OTAApiHandler>(m_otaService);
     ESP_LOGI(TAG, "Webserver handlers created.");
 }
 
@@ -71,29 +54,23 @@ void WebServer::addTelemetrySnapshot(const TelemetryDataPoint& data) {
 
 // EventHandler implementation
 void WebServer::handleEvent(const BaseEvent& event) {
-    // Central event handler that dispatches to specific handlers based on event type
-    switch (event.type) {
-        case EventType::CONFIG_FULL_UPDATE:
-            // Forward config updates to handlers that need them
-            if (m_telemetryHandler) {
-                ESP_LOGV(TAG, "Forwarding CONFIG_FULL_UPDATE to TelemetryHandler");
-                m_telemetryHandler->handleEvent(event);
-            }
-            if (m_configApiHandler) {
-                ESP_LOGV(TAG, "Forwarding CONFIG_FULL_UPDATE to ConfigApiHandler");
-                m_configApiHandler->handleEvent(event);
-            }
-            break;
-        case EventType::TELEMETRY_SNAPSHOT:
-            if(m_telemetryHandler) {
-                ESP_LOGV(TAG, "Forwarding TELEMETRY_SNAPSHOT to TelemetryHandler");
-                m_telemetryHandler->handleEvent(event);
-            }
-            break;
-        default:
-            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
-                     getHandlerName().c_str(), static_cast<int>(event.type));
-            break;
+    if (event.is<CONFIG_FullConfigUpdate>()) {
+        if (m_telemetryHandler) {
+            ESP_LOGV(TAG, "Forwarding CONFIG_FullConfigUpdate to TelemetryHandler");
+            m_telemetryHandler->handleEvent(event);
+        }
+        if (m_configApiHandler) {
+            ESP_LOGV(TAG, "Forwarding CONFIG_FullConfigUpdate to ConfigApiHandler");
+            m_configApiHandler->handleEvent(event);
+        }
+    } else if (event.is<TELEMETRY_Snapshot>()) {
+        if(m_telemetryHandler) {
+            ESP_LOGV(TAG, "Forwarding TELEMETRY_Snapshot to TelemetryHandler");
+            m_telemetryHandler->handleEvent(event);
+        }
+    } else {
+        ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
+                 getHandlerName().c_str(), event.eventName());
     }
 }
 

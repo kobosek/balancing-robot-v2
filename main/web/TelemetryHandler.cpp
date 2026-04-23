@@ -3,7 +3,6 @@
 #include "CONFIG_FullConfigUpdate.hpp" // Include event definition
 #include "TELEMETRY_Snapshot.hpp"
 #include "BaseEvent.hpp"
-#include "EventTypes.hpp"
 #include "ConfigData.hpp" // Need full struct def for WebServerConfig
 #include "cJSON.h"
 #include <memory>
@@ -35,19 +34,13 @@ void TelemetryHandler::applyConfig(const WebServerConfig& config) {
 
 // EventHandler implementation
 void TelemetryHandler::handleEvent(const BaseEvent& event) {
-    switch (event.type) {
-        case EventType::CONFIG_FULL_UPDATE:
-            handleConfigUpdate(static_cast<const CONFIG_FullConfigUpdate&>(event));
-            break;
-
-        case EventType::TELEMETRY_SNAPSHOT:
-            addTelemetrySnapshot(static_cast<const TELEMETRY_Snapshot&>(event).snapshot);
-            break;
-
-        default:
-            ESP_LOGV(TAG, "%s: Received unhandled event type %d", 
-                     getHandlerName().c_str(), static_cast<int>(event.type));
-            break;
+    if (event.is<CONFIG_FullConfigUpdate>()) {
+        handleConfigUpdate(event.as<CONFIG_FullConfigUpdate>());
+    } else if (event.is<TELEMETRY_Snapshot>()) {
+        addTelemetrySnapshot(event.as<TELEMETRY_Snapshot>().snapshot);
+    } else {
+        ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
+                 getHandlerName().c_str(), event.eventName());
     }
 }
 
