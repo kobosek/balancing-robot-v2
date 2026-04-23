@@ -29,10 +29,25 @@
                 </div>
                 <div class="status-item">
                     <span class="status-label">Battery:</span>
-                     <span class="status-value"><span id="batteryVoltageValue">?.??</span> V (<span id="batteryPercentValue">??</span>%)</span>
+                     <span class="status-value">
+                        <span id="batteryVoltageValue">?.??</span> V
+                        (<span id="batteryPercentValue">??</span>%)
+                        <span id="batteryStateValue">UNKNOWN</span>
+                    </span>
+                    <div class="battery-bar" aria-hidden="true">
+                        <div id="batteryBarFill" class="battery-bar-fill"></div>
+                    </div>
                 </div>
-                <div class="status-item"><span class="status-label">Auto Recovery:</span> <span id="autoRecoveryStatus" class="status-value">UNKNOWN</span></div>
+                <div class="status-item battery-diagnostics">
+                    <span class="status-label">ADC Pin:</span>
+                    <span class="status-value">
+                        <span id="batteryAdcPinVoltageValue">?.??</span> V
+                        <span id="batteryAdcCalibrationValue" class="battery-state unknown">CAL ?</span>
+                    </span>
+                </div>
+                <div class="status-item"><span class="status-label">Auto Balancing:</span> <span id="autoBalancingStatus" class="status-value">UNKNOWN</span></div>
                 <div class="status-item"><span class="status-label">Fall Detect:</span> <span id="fallDetectStatus" class="status-value">UNKNOWN</span></div>
+                <div class="status-item"><span class="status-label">Crit Batt Shutdown:</span> <span id="criticalBatteryShutdownStatus" class="status-value">UNKNOWN</span></div>
                 <div class="status-item"><span class="status-label">Control Conn:</span> <span id="wsStatus" class="status-value" style="font-weight: bold;">INIT</span></div>
 
                 <!-- Configuration Section -->
@@ -62,7 +77,8 @@
                     <button id="stopBtn" class="stop">Stop / Idle</button>
                     <button id="calibrateBtn" class="calibrate">Calibrate IMU</button>
                     <button id="toggleFallDetectBtn" class="toggle-button">Enable Fall Detect</button> <!-- Class used by JS -->
-                    <button id="toggleRecoveryBtn" class="toggle-button">Enable Auto Recovery</button> <!-- Class used by JS -->
+                    <button id="toggleAutoBalancingBtn" class="toggle-button">Enable Auto Balancing</button>
+                    <button id="toggleCriticalBatteryShutdownBtn" class="toggle-button">Critical Battery Shutdown</button>
                 </div>
                 <!-- Joystick Zone -->
                 <div id="joystickZone"></div> <!-- NippleJS target -->

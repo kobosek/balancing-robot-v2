@@ -177,6 +177,9 @@ button:disabled { /* Style for disabled buttons */
     align-items: center;
     flex-wrap: wrap;
 }
+.form-group-checkbox {
+    gap: 10px;
+}
 label {
     display: inline-block;
     width: 80px;
@@ -199,6 +202,16 @@ input[type="number"]:focus {
     border-color: #80bdff;
     outline: 0;
     box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
+}
+.form-group-checkbox label {
+    width: auto;
+    text-align: left;
+    margin-right: 0;
+}
+.form-group-checkbox input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    margin: 0;
 }
 .config-save-btn {
     background-color: #0d6efd;
@@ -297,6 +310,52 @@ input[type="number"]:focus {
 }
 .status-value > span {
     display: inline;
+}
+.battery-state {
+    margin-left: 6px;
+}
+.battery-diagnostics .status-value {
+    color: #5c6770;
+    font-weight: 600;
+}
+.battery-state.ok {
+    color: #198754;
+}
+.battery-state.low {
+    color: #fd7e14;
+}
+.battery-state.critical {
+    color: #dc3545;
+}
+.battery-state.unknown {
+    color: #6c757d;
+}
+.battery-bar {
+    width: 100%;
+    height: 8px;
+    margin-top: 6px;
+    border-radius: 999px;
+    background: #e9ecef;
+    overflow: hidden;
+    border: 1px solid #d6dbe0;
+}
+.battery-bar-fill {
+    height: 100%;
+    width: 0;
+    background: #adb5bd;
+    transition: width 0.2s ease, background-color 0.2s ease;
+}
+.battery-bar-fill.ok {
+    background: #198754;
+}
+.battery-bar-fill.low {
+    background: #fd7e14;
+}
+.battery-bar-fill.critical {
+    background: #dc3545;
+}
+.battery-bar-fill.unknown {
+    background: #adb5bd;
 }
 
 

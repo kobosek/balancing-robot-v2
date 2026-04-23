@@ -4,7 +4,6 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include <functional>
-#include <vector>
 
 class MPU6050Driver;
 
@@ -28,7 +27,4 @@ private:
 
     MPU6050Driver& m_driver;
     float m_gyro_offset_dps[3] = {0.0f, 0.0f, 0.0f};
-    std::vector<float> m_calib_gx_samples;
-    std::vector<float> m_calib_gy_samples;
-    std::vector<float> m_calib_gz_samples;
 };

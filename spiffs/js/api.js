@@ -75,7 +75,20 @@ export async function fetchStateApi() {
         }
     } catch (error) {
         console.error('Error fetching state:', error);
-        updateCurrentSystemState({ state_id: -1, name: 'ERROR', auto_recovery_enabled: false, fall_detection_enabled: false }); // Update state to ERROR
+        updateCurrentSystemState({
+            state_id: -1,
+            name: 'ERROR',
+            state_name: 'ERROR',
+            auto_balancing_enabled: false,
+            fall_detection_enabled: false,
+            critical_battery_motor_shutdown_enabled: false,
+            battery_voltage: 0,
+            battery_adc_pin_voltage: 0,
+            battery_percentage: 0,
+            battery_is_low: false,
+            battery_is_critical: false,
+            battery_adc_calibrated: false
+        });
         updateStatusSectionUI(); // Update UI to show error
     }
 }

@@ -8,6 +8,7 @@
 #include <numeric>
 #include <vector>
 #include <algorithm>
+#include <cmath>
 #include "esp_check.h"
 #include "driver/gpio.h"
 #include "soc/soc_caps.h"
@@ -16,6 +17,34 @@
 #include "esp_adc/adc_cali_scheme.h"
 #include <mutex>
 #include "esp_rom_sys.h"
+
+namespace {
+constexpr int kBatteryWarmupSamples = 1;
+constexpr int kBatterySampleDelayUs = 250;
+constexpr int kBatteryStartupDirectSamples = 3;
+constexpr float kBatteryVoltageFilterAlpha = 0.50f;
+
+float estimate_adc_full_scale_voltage(adc_atten_t atten) {
+    switch (atten) {
+        case ADC_ATTEN_DB_0:
+            return 0.95f;
+        case ADC_ATTEN_DB_2_5:
+            return 1.25f;
+        case ADC_ATTEN_DB_6:
+            return 1.75f;
+#if defined(ADC_ATTEN_DB_11)
+        case ADC_ATTEN_DB_11:
+            return 3.10f;
+#endif
+#if defined(ADC_ATTEN_DB_12)
+        case ADC_ATTEN_DB_12:
+            return 3.10f;
+#endif
+        default:
+            return 3.10f;
+    }
+}
+}
 
 
 // Constructor takes initial config structs and EventBus reference
@@ -29,9 +58,12 @@ BatteryService::BatteryService(const BatteryConfig& initialConfig, const SystemB
     m_oneshot_adc_handle(nullptr),
     m_oversampling_count(64) // Initialize with default, will be overridden by applyConfig
 {
-    m_latest_status.percentage = -1;
-    m_latest_status.voltage = -1.0f;
+    m_latest_status.percentage = 0;
+    m_latest_status.voltage = 0.0f;
+    m_latest_status.adcPinVoltage = 0.0f;
     m_latest_status.isLow = false;
+    m_latest_status.isCritical = false;
+    m_latest_status.adcCalibrated = false;
     applyConfig(initialConfig, initialBehavior); // Apply initial values
     ESP_LOGI(TAG, "BatteryService constructed.");
 }
@@ -173,6 +205,12 @@ bool BatteryService::adc_calibration_init(adc_channel_t channel) {
 
 // Apply config values from structs
 void BatteryService::applyConfig(const BatteryConfig& batConf, const SystemBehaviorConfig& behaviorConf) {
+    const bool adc_path_changed =
+        m_config.adc_pin != batConf.adc_pin ||
+        m_config.adc_atten != batConf.adc_atten ||
+        m_config.adc_bitwidth != batConf.adc_bitwidth ||
+        std::abs(m_config.voltage_divider_ratio - batConf.voltage_divider_ratio) > 0.0001f;
+
     // Update local config struct copies
     m_config = batConf;
     m_behaviorConfig = behaviorConf;
@@ -181,8 +219,15 @@ void BatteryService::applyConfig(const BatteryConfig& batConf, const SystemBehav
     m_oversampling_count = std::max(1, m_behaviorConfig.battery_oversampling_count); // Ensure at least 1 sample
     // Note: Read interval is now passed to the task constructor, not used directly here
 
-    ESP_LOGI(TAG, "Applied BatteryService params: Oversampling=%d, Vmin=%.2f, Vmax=%.2f, Ratio=%.2f",
-             m_oversampling_count, m_config.voltage_min, m_config.voltage_max, m_config.voltage_divider_ratio);
+    if (adc_path_changed) {
+        std::lock_guard<std::mutex> lock(m_status_mutex);
+        m_filtered_adc_pin_voltage = -1.0f;
+        m_filter_sample_count = 0;
+    }
+
+    ESP_LOGI(TAG, "Applied BatteryService params: Oversampling=%d, Vmin=%.2f, Vmax=%.2f, Ratio=%.2f, CritShutdown=%s",
+             m_oversampling_count, m_config.voltage_min, m_config.voltage_max, m_config.voltage_divider_ratio,
+             m_config.critical_battery_motor_shutdown_enabled ? "true" : "false");
 
     // Re-configure ADC channel if attenuation or bitwidth changed?
     // This requires more complex handling (deleting old calibration, re-init channel, re-init calib)
@@ -222,8 +267,18 @@ void BatteryService::updateBatteryStatus() {
         return;
     }
 
-    int raw_sum = 0;
-    int successful_samples = 0;
+    for (int i = 0; i < kBatteryWarmupSamples; i++) {
+        int ignored_raw_value = 0;
+        esp_err_t ret = adc_oneshot_read(m_oneshot_adc_handle, m_adc_channel, &ignored_raw_value);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "ADC warmup sample failed (%s).", esp_err_to_name(ret));
+        }
+        esp_rom_delay_us(kBatterySampleDelayUs);
+    }
+
+    std::vector<int> raw_samples;
+    raw_samples.reserve(m_oversampling_count);
+
     for (int i = 0; i < m_oversampling_count; i++) {
         int raw_value;
         esp_err_t ret = adc_oneshot_read(m_oneshot_adc_handle, m_adc_channel, &raw_value);
@@ -231,48 +286,72 @@ void BatteryService::updateBatteryStatus() {
             ESP_LOGE(TAG, "ADC read failed (%s)! Skipping sample %d.", esp_err_to_name(ret), i);
             continue; // Skip this sample
         }
-        raw_sum += raw_value;
-        successful_samples++;
+        raw_samples.push_back(raw_value);
         // Optionally add small delay between samples if ADC needs it
         if (i < m_oversampling_count - 1) {
-             esp_rom_delay_us(10); // very short microsecond delay
+             esp_rom_delay_us(kBatterySampleDelayUs);
         }
     }
 
-    if (successful_samples == 0) {
+    if (raw_samples.empty()) {
         ESP_LOGE(TAG, "No successful ADC samples obtained after %d attempts.", m_oversampling_count);
         return; // Cannot calculate voltage
     }
 
-    // Calculate average using successful samples
-    int adc_raw = raw_sum / successful_samples;
-    ESP_LOGD(TAG, "Raw ADC value: %d (average of %d samples)", adc_raw, successful_samples);
+    std::sort(raw_samples.begin(), raw_samples.end());
+    int trim_count = 0;
+    if (raw_samples.size() >= 8) {
+        trim_count = static_cast<int>(raw_samples.size() / 8); // Trim 12.5% on each side.
+    }
+    const int start_index = trim_count;
+    const int end_index = static_cast<int>(raw_samples.size()) - trim_count;
+
+    int64_t raw_sum = 0;
+    for (int i = start_index; i < end_index; i++) {
+        raw_sum += raw_samples[i];
+    }
+
+    const int filtered_sample_count = std::max(1, end_index - start_index);
+    int adc_raw = static_cast<int>(raw_sum / filtered_sample_count);
+    ESP_LOGD(TAG, "Raw ADC value: %d (trimmed average of %d/%d samples)", adc_raw, filtered_sample_count, static_cast<int>(raw_samples.size()));
 
     // Convert to voltage
-    float voltage = 0.0f;
+    const float adc_full_scale_voltage = estimate_adc_full_scale_voltage(static_cast<adc_atten_t>(m_config.adc_atten));
+    float adc_pin_voltage = 0.0f;
     if (m_adc_cali_enable && m_adc_cali_handle) {
         int volt_mv;
         esp_err_t ret = adc_cali_raw_to_voltage(m_adc_cali_handle, adc_raw, &volt_mv);
         if (ret == ESP_OK) {
-            voltage = volt_mv / 1000.0f; // Convert mV to V
+            adc_pin_voltage = volt_mv / 1000.0f; // Convert mV to V
         } else {
             ESP_LOGW(TAG, "ADC calibration conversion failed (%s)! Falling back.", esp_err_to_name(ret));
-            // Fall back to a very rough estimate if needed, though calibration should ideally work
-             voltage = adc_raw * (3.3f / 4095.0f); // Example fallback without divider
+            adc_pin_voltage = adc_raw * (adc_full_scale_voltage / 4095.0f);
         }
     } else {
         // Manual conversion if calibration disabled (less accurate)
-        // This depends heavily on ADC linearity and Vref. Use calibration if possible.
-        voltage = adc_raw * (3.3f / 4095.0f); // Example fallback without divider
+        adc_pin_voltage = adc_raw * (adc_full_scale_voltage / 4095.0f);
         ESP_LOGV(TAG, "ADC calibration disabled or failed, using raw estimate.");
     }
 
-    // Apply resistor divider correction from config
-    if (m_config.voltage_divider_ratio > 1.0f) {
-        voltage *= m_config.voltage_divider_ratio;
+    {
+        std::lock_guard<std::mutex> lock(m_status_mutex);
+        if (m_filtered_adc_pin_voltage < 0.0f || m_filter_sample_count < kBatteryStartupDirectSamples) {
+            m_filtered_adc_pin_voltage = adc_pin_voltage;
+        } else {
+            m_filtered_adc_pin_voltage =
+                (kBatteryVoltageFilterAlpha * m_filtered_adc_pin_voltage) +
+                ((1.0f - kBatteryVoltageFilterAlpha) * adc_pin_voltage);
+        }
+        m_filter_sample_count++;
+        adc_pin_voltage = m_filtered_adc_pin_voltage;
     }
 
-    ESP_LOGD(TAG, "Battery voltage: %.2fV (unclamped)", voltage);
+    float voltage = adc_pin_voltage;
+    if (m_config.voltage_divider_ratio > 0.0f) {
+        voltage = adc_pin_voltage * m_config.voltage_divider_ratio;
+    }
+
+    ESP_LOGD(TAG, "ADC pin voltage: %.3fV, battery voltage: %.3fV (filtered)", adc_pin_voltage, voltage);
 
     // Sanity check - clamp voltage to reasonable range
     if (voltage < 0.1f) {
@@ -303,14 +382,18 @@ void BatteryService::updateBatteryStatus() {
     percentage = std::max(0.0f, std::min(100.0f, percentage));
     int rounded_percentage = static_cast<int>(percentage + 0.5f); // Round to nearest integer
 
-    // Check if battery is critically low (using 10% margin above min voltage)
-    bool is_low = voltage <= (m_config.voltage_min + (m_config.voltage_max - m_config.voltage_min) * 0.1f);
+    const float low_warning_voltage = m_config.voltage_min + (m_config.voltage_max - m_config.voltage_min) * 0.1f;
+    const bool is_critical = voltage <= m_config.voltage_min;
+    const bool is_low = voltage <= low_warning_voltage;
 
     // Create battery status struct
     BatteryStatus new_status;
     new_status.voltage = voltage;
+    new_status.adcPinVoltage = adc_pin_voltage;
     new_status.percentage = rounded_percentage;
     new_status.isLow = is_low;
+    new_status.isCritical = is_critical;
+    new_status.adcCalibrated = m_adc_cali_enable && m_adc_cali_handle != nullptr;
 
     // Check if status has changed significantly before publishing
     bool status_changed = false;
@@ -319,23 +402,29 @@ void BatteryService::updateBatteryStatus() {
         // Compare with more tolerance for voltage to avoid spamming events
         if (m_latest_status.percentage != rounded_percentage ||
             std::abs(m_latest_status.voltage - voltage) > 0.05f || // 50mV change threshold
-            m_latest_status.isLow != is_low) {
+            std::abs(m_latest_status.adcPinVoltage - adc_pin_voltage) > 0.02f ||
+            m_latest_status.isLow != is_low ||
+            m_latest_status.isCritical != is_critical ||
+            m_latest_status.adcCalibrated != new_status.adcCalibrated) {
 
             status_changed = true;
-            m_latest_status = new_status; // Update the stored status
         }
+
+        m_latest_status = new_status; // Always keep telemetry and /api/state current.
     }
 
     // Publish event if status changed
     if (status_changed) {
-        ESP_LOGI(TAG, "Battery status updated: %.2fV, %d%%, %s",
-                voltage, rounded_percentage, is_low ? "LOW" : "OK");
+        const char* battery_state = is_critical ? "CRITICAL" : (is_low ? "LOW" : "OK");
+        ESP_LOGI(TAG, "Battery status updated: batt=%.2fV adc=%.2fV, %d%%, %s",
+                voltage, adc_pin_voltage, rounded_percentage, battery_state);
 
         BATTERY_StatusUpdate event(new_status);
-        //m_eventBus.publish(event);
+        m_eventBus.publish(event);
     } else {
-        ESP_LOGD(TAG, "Battery status unchanged: %.2fV, %d%%, %s",
-                voltage, rounded_percentage, is_low ? "LOW" : "OK");
+        const char* battery_state = is_critical ? "CRITICAL" : (is_low ? "LOW" : "OK");
+        ESP_LOGD(TAG, "Battery status unchanged: batt=%.2fV adc=%.2fV, %d%%, %s",
+                voltage, adc_pin_voltage, rounded_percentage, battery_state);
     }
 }
 

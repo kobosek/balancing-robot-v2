@@ -5,8 +5,8 @@
 #include "UI_StartBalancing.hpp"// Need full definition
 #include "UI_Stop.hpp"          // Need full definition
 #include "UI_CalibrateImu.hpp"        // <<< ADDED
-#include "UI_EnableFallRecovery.hpp"   // <<< ADDED
-#include "UI_DisableFallRecovery.hpp"  // <<< ADDED
+#include "UI_EnableAutoBalancing.hpp"
+#include "UI_DisableAutoBalancing.hpp"
 #include "UI_EnableFallDetection.hpp"  // <<< ADDED
 #include "UI_DisableFallDetection.hpp" // <<< ADDED
 #include "BaseEvent.hpp"           // Need for BaseEvent
@@ -81,17 +81,17 @@ esp_err_t CommandApiHandler::handleRequest(httpd_req_t *req) {
         m_eventBus.publish(cmd_event);
         message = "Calibrate command sent";
         ret = ESP_OK;
-    } else if (command_str == "enable_recovery") { // <<< ADDED
-        ESP_LOGI(TAG, "Publishing ENABLE_RECOVERY_COMMAND_RECEIVED");
-        UI_EnableFallRecovery cmd_event;
+    } else if (command_str == "enable_auto_balancing") {
+        ESP_LOGI(TAG, "Publishing ENABLE_AUTO_BALANCING_COMMAND_RECEIVED");
+        UI_EnableAutoBalancing cmd_event;
         m_eventBus.publish(cmd_event);
-        message = "Enable recovery command sent";
+        message = "Enable auto balancing command sent";
         ret = ESP_OK;
-     } else if (command_str == "disable_recovery") { // <<< ADDED
-        ESP_LOGI(TAG, "Publishing DISABLE_RECOVERY_COMMAND_RECEIVED");
-        UI_DisableFallRecovery cmd_event;
+     } else if (command_str == "disable_auto_balancing") {
+        ESP_LOGI(TAG, "Publishing DISABLE_AUTO_BALANCING_COMMAND_RECEIVED");
+        UI_DisableAutoBalancing cmd_event;
         m_eventBus.publish(cmd_event);
-        message = "Disable recovery command sent";
+        message = "Disable auto balancing command sent";
         ret = ESP_OK;
     } else if (command_str == "enable_fall_detect") {
         ESP_LOGI(TAG, "Publishing ENABLE_FALL_DETECT_COMMAND_RECEIVED");

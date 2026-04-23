@@ -1,14 +1,13 @@
 #pragma once
 
+#include "IIMUDataSink.hpp"
 #include "IMUDataReadyInterrupt.hpp"
-#include "OrientationEstimator.hpp"
 #include "driver/gpio.h"
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include <atomic>
 #include <cstdint>
-#include <memory>
 
 class IIMUFaultSink;
 class IMUHealthMonitor;
@@ -17,7 +16,7 @@ class MPU6050Driver;
 class FIFOProcessor {
 public:
     FIFOProcessor(MPU6050Driver& driver,
-                  std::shared_ptr<OrientationEstimator> estimator,
+                  IIMUDataSink& dataSink,
                   IMUHealthMonitor& healthMonitor,
                   IIMUFaultSink& faultSink);
     ~FIFOProcessor();
@@ -32,11 +31,7 @@ public:
     esp_err_t resetFIFO();
     esp_err_t resetAndReEnableFIFO();
 
-    void notifyDataReady();
-    esp_err_t registerInterrupt(int interruptPin, bool activeHigh);
-    esp_err_t unregisterInterrupt(int interruptPin);
-
-    SemaphoreHandle_t getDataReadySemaphore() { return m_dataReadySemaphore; }
+    SemaphoreHandle_t getDataReadySemaphore() const { return m_dataReadySemaphore; }
     static void IRAM_ATTR isrHandler(void* arg);
 
 private:
@@ -44,14 +39,15 @@ private:
     static constexpr size_t FIFO_PACKET_SIZE = 12;
     static constexpr size_t MAX_FIFO_BUFFER_SIZE = 1024;
     static constexpr uint16_t MAX_SAMPLES_PER_PIPELINE_CALL = 20;
+    static constexpr uint32_t OUTLIER_LOG_INTERVAL = 25;
 
     MPU6050Driver& m_driver;
-    std::shared_ptr<OrientationEstimator> m_estimator;
+    IIMUDataSink& m_dataSink;
     IMUHealthMonitor& m_healthMonitor;
     IIMUFaultSink& m_faultSink;
 
-    float m_accel_lsb_per_g;
-    float m_gyro_lsb_per_dps;
+    std::atomic<float> m_accel_scale_g_per_lsb;
+    std::atomic<float> m_gyro_scale_dps_per_lsb;
     uint8_t m_fifo_buffer[MAX_FIFO_BUFFER_SIZE];
 
     std::atomic<bool> m_isr_active;
@@ -60,9 +56,12 @@ private:
     int m_interrupt_pin;
     bool m_interrupt_active_high;
     IMUDataReadyInterrupt m_irqHelper;
-    uint16_t m_fifo_read_threshold_bytes;
-    uint8_t m_misalignment_strikes = 0;
+    std::atomic<uint16_t> m_fifo_read_threshold_bytes;
+    uint32_t m_physics_outlier_count;
 
-    bool validateFIFOData(const uint8_t* data, size_t length);
+    void notifyDataReady();
+    void clearPendingDataReadySignal();
+    esp_err_t registerInterrupt(int interruptPin, bool activeHigh);
+    esp_err_t unregisterInterrupt();
     esp_err_t recoverFifoHard(const char* reason);
 };

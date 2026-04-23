@@ -36,8 +36,8 @@ std::string eventTypeToString(EventType type) {
         case EventType::UI_START_BALANCING: return "UI_START_BALANCING";
         case EventType::UI_STOP: return "UI_STOP";
         case EventType::UI_CALIBRATE_IMU: return "UI_CALIBRATE_IMU";
-        case EventType::UI_ENABLE_FALL_RECOVERY: return "UI_ENABLE_FALL_RECOVERY";
-        case EventType::UI_DISABLE_FALL_RECOVERY: return "UI_DISABLE_FALL_RECOVERY";
+        case EventType::UI_ENABLE_AUTO_BALANCING: return "UI_ENABLE_AUTO_BALANCING";
+        case EventType::UI_DISABLE_AUTO_BALANCING: return "UI_DISABLE_AUTO_BALANCING";
         case EventType::UI_ENABLE_FALL_DETECTION: return "UI_ENABLE_FALL_DETECTION";
         case EventType::UI_DISABLE_FALL_DETECTION: return "UI_DISABLE_FALL_DETECTION";
         case EventType::UI_JOYSTICK_INPUT: return "UI_JOYSTICK_INPUT";
@@ -54,7 +54,7 @@ std::string eventTypeToString(EventType type) {
         
         //BALANCE DETECTION
         case EventType::BALANCE_FALL_DETECTED: return "BALANCE_FALL_DETECTED";
-        case EventType::BALANCE_RECOVERY_DETECTED: return "BALANCE_RECOVERY_DETECTED";
+        case EventType::BALANCE_AUTO_BALANCE_READY: return "BALANCE_AUTO_BALANCE_READY";
 
         // IMU State Management Events
         case EventType::IMU_CALIBRATION_REJECTED: return "IMU_CALIBRATION_REJECTED";

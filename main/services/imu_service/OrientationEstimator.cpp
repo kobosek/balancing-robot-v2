@@ -1,12 +1,11 @@
 #include "OrientationEstimator.hpp"
 #include <cmath>
-#include <tuple>
 #include "esp_log.h"
 
 // Constructor implementation
 OrientationEstimator::OrientationEstimator() :
     m_alpha(0.98f),
-    m_sample_period_s(0.001f),
+    m_sample_period_s(MPU6050Profile::DEFAULT_SAMPLE_PERIOD_S),
     m_pitch_deg(0.0f),
     m_yaw_rate_dps(0.0f),
     m_gyro_offset_x_dps(0.0f),
@@ -18,18 +17,16 @@ OrientationEstimator::OrientationEstimator() :
 
 // Initialization method
 void OrientationEstimator::init(float alpha, float sample_period_s,
-                               float gyro_offset_x_dps,
-                               float gyro_offset_y_dps,
-                               float gyro_offset_z_dps) {
-    safeExecuteVoid([&]() {
-        m_alpha = alpha;
-        m_sample_period_s = sample_period_s;
-        m_gyro_offset_x_dps = gyro_offset_x_dps;
-        m_gyro_offset_y_dps = gyro_offset_y_dps;
-        m_gyro_offset_z_dps = gyro_offset_z_dps;
-        m_pitch_deg = 0.0f; // Reset state on init
-        m_yaw_rate_dps = 0.0f; // Reset state on init
-    });
+                                float gyro_offset_x_dps,
+                                float gyro_offset_y_dps,
+                                float gyro_offset_z_dps) {
+    m_alpha.store(alpha, std::memory_order_relaxed);
+    m_sample_period_s.store(sample_period_s, std::memory_order_relaxed);
+    m_gyro_offset_x_dps.store(gyro_offset_x_dps, std::memory_order_relaxed);
+    m_gyro_offset_y_dps.store(gyro_offset_y_dps, std::memory_order_relaxed);
+    m_gyro_offset_z_dps.store(gyro_offset_z_dps, std::memory_order_relaxed);
+    m_pitch_deg.store(0.0f, std::memory_order_relaxed);
+    m_yaw_rate_dps.store(0.0f, std::memory_order_relaxed);
     
     ESP_LOGI(TAG, "Estimator init: Alpha=%.3f, dt=%.4fs, Offsets(X:%.3f Y:%.3f Z:%.3f)",
              alpha, sample_period_s, gyro_offset_x_dps, gyro_offset_y_dps, gyro_offset_z_dps);
@@ -38,23 +35,17 @@ void OrientationEstimator::init(float alpha, float sample_period_s,
 void OrientationEstimator::updateGyroOffsets(float gyro_offset_x_dps,
                                              float gyro_offset_y_dps,
                                              float gyro_offset_z_dps) {
-    safeExecuteVoid([&]() {
-        m_gyro_offset_x_dps = gyro_offset_x_dps;
-        m_gyro_offset_y_dps = gyro_offset_y_dps;
-        m_gyro_offset_z_dps = gyro_offset_z_dps;
-    });
+    m_gyro_offset_x_dps.store(gyro_offset_x_dps, std::memory_order_relaxed);
+    m_gyro_offset_y_dps.store(gyro_offset_y_dps, std::memory_order_relaxed);
+    m_gyro_offset_z_dps.store(gyro_offset_z_dps, std::memory_order_relaxed);
     
     ESP_LOGI(TAG, "Estimator gyro offsets updated: X:%.3f Y:%.3f Z:%.3f",
              gyro_offset_x_dps, gyro_offset_y_dps, gyro_offset_z_dps);
 }
 
 void OrientationEstimator::reset() {
-    safeExecuteVoid([this]() {
-        m_pitch_deg = 0.0f;
-        m_yaw_rate_dps = 0.0f;
-        // Gyro offsets are not reset by this method, they are part of configuration.
-        // Re-call init() if offsets need to be reset to defaults or reloaded.
-    });
+    m_pitch_deg.store(0.0f, std::memory_order_relaxed);
+    m_yaw_rate_dps.store(0.0f, std::memory_order_relaxed);
     
     ESP_LOGI(TAG, "Orientation Estimator state (pitch, yaw_rate) reset.");
 }
@@ -64,17 +55,11 @@ void OrientationEstimator::processSample(float ax_g, float ay_g, float az_g,
 {
     // Suppress unused parameter warning for raw_gyro_dps_x (kept for interface compatibility)
     (void)raw_gyro_dps_x;
-    // Fetch current state and parameters under lock with exception safety
-    auto state_tuple = safeExecute([this]() {
-        return std::make_tuple(m_pitch_deg, m_gyro_offset_y_dps, 
-                              m_gyro_offset_z_dps, m_sample_period_s, m_alpha);
-    });
-    
-    float current_pitch_deg_local = std::get<0>(state_tuple);
-    float gy_offset_local = std::get<1>(state_tuple);
-    float gz_offset_local = std::get<2>(state_tuple);
-    float sample_period_s_local = std::get<3>(state_tuple);
-    float alpha_local = std::get<4>(state_tuple);
+    const float current_pitch_deg_local = m_pitch_deg.load(std::memory_order_relaxed);
+    const float gy_offset_local = m_gyro_offset_y_dps.load(std::memory_order_relaxed);
+    const float gz_offset_local = m_gyro_offset_z_dps.load(std::memory_order_relaxed);
+    const float sample_period_s_local = m_sample_period_s.load(std::memory_order_relaxed);
+    const float alpha_local = m_alpha.load(std::memory_order_relaxed);
 
     // Apply gyro offsets (only Y and Z are used in current implementation)
     float gyro_dps_y = raw_gyro_dps_y - gy_offset_local;
@@ -91,48 +76,36 @@ void OrientationEstimator::processSample(float ax_g, float ay_g, float az_g,
 
     float dt = sample_period_s_local;
     if (dt <= 0) {
-         ESP_LOGW(TAG, "Invalid sample period (%.4f) in estimator, using 0.001s", dt);
-         dt = 0.001f;
-    }
+         ESP_LOGW(TAG,
+                  "Invalid sample period (%.4f) in estimator, using %.4fs",
+                  dt,
+                  MPU6050Profile::DEFAULT_SAMPLE_PERIOD_S);
+         dt = MPU6050Profile::DEFAULT_SAMPLE_PERIOD_S;
+     }
     float filtered_pitch_deg = alpha_local * (current_pitch_deg_local + gyro_dps_y * dt) + (1.0f - alpha_local) * accel_pitch_deg;
 
     // --- Store Yaw Rate ---
     // We use the offset-corrected Z-axis gyro reading for yaw rate
     float latest_yaw_rate_dps = gyro_dps_z;
 
-    // Store the final updated values atomically (thread-safe write)
-    safeExecuteVoid([&]() {
-        m_pitch_deg = filtered_pitch_deg;
-        m_yaw_rate_dps = latest_yaw_rate_dps;
-    });
+    m_pitch_deg.store(filtered_pitch_deg, std::memory_order_relaxed);
+    m_yaw_rate_dps.store(latest_yaw_rate_dps, std::memory_order_relaxed);
 
     ESP_LOGV(TAG, "Processed Sample: Acc(%.2f,%.2f,%.2f) RawGyro(%.2f,%.2f,%.2f) -> Filt P:%.2f CalibYawR:%.2f",
              ax_g, ay_g, az_g, raw_gyro_dps_x, raw_gyro_dps_y, raw_gyro_dps_z, filtered_pitch_deg, latest_yaw_rate_dps);
 }
 
 float OrientationEstimator::getPitchDeg() const {
-    return safeExecute([this]() { return m_pitch_deg; });
+    return m_pitch_deg.load(std::memory_order_relaxed);
 }
 
 float OrientationEstimator::getYawRateDPS() const {
-    return safeExecute([this]() { return m_yaw_rate_dps; });
+    return m_yaw_rate_dps.load(std::memory_order_relaxed);
 }
 
 std::pair<float, float> OrientationEstimator::getPitchAndYawRate() const {
-    return safeExecute([this]() {
-        return std::make_pair(m_pitch_deg, m_yaw_rate_dps);
-    });
-}
-
-// Thread-safe mutex operations implementation (ESP32 compatible - no exceptions)
-template<typename Func>
-auto OrientationEstimator::safeExecute(Func&& func) const -> decltype(func()) {
-    std::lock_guard<std::mutex> lock(m_stateMutex);
-    return func();
-}
-
-template<typename Func>
-void OrientationEstimator::safeExecuteVoid(Func&& func) const {
-    std::lock_guard<std::mutex> lock(m_stateMutex);
-    func();
+    return {
+        m_pitch_deg.load(std::memory_order_relaxed),
+        m_yaw_rate_dps.load(std::memory_order_relaxed)
+    };
 }

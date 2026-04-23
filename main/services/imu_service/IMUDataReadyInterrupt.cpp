@@ -63,6 +63,14 @@ esp_err_t IMUDataReadyInterrupt::init(gpio_num_t pin, bool activeHigh, gpio_isr_
         return ret;
     }
 
+    if (m_handlerInstalled) {
+        ret = gpio_intr_disable(m_pin);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG_IRQ, "Failed to disable GPIO interrupt on pin %d: %s", m_pin, esp_err_to_name(ret));
+            return ret;
+        }
+    }
+
     if (m_handlerInstalled && m_pin != pin) {
         const gpio_num_t previousPin = m_pin;
         ret = gpio_isr_handler_remove(previousPin);
@@ -81,6 +89,13 @@ esp_err_t IMUDataReadyInterrupt::init(gpio_num_t pin, bool activeHigh, gpio_isr_
         return ret;
     }
 
+    ret = gpio_intr_enable(pin);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG_IRQ, "Failed to enable GPIO interrupt on pin %d: %s", pin, esp_err_to_name(ret));
+        (void)gpio_isr_handler_remove(pin);
+        return ret;
+    }
+
     m_pin = pin;
     m_activeHigh = activeHigh;
     m_handlerInstalled = true;
@@ -93,11 +108,24 @@ esp_err_t IMUDataReadyInterrupt::deinit() {
         return ESP_OK;
     }
     const gpio_num_t pin = m_pin;
-    esp_err_t ret = gpio_isr_handler_remove(pin);
+    esp_err_t ret = gpio_intr_disable(pin);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG_IRQ, "Error disabling GPIO interrupt on pin %d: %s", pin, esp_err_to_name(ret));
+        return ret;
+    }
+
+    ret = gpio_isr_handler_remove(pin);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG_IRQ, "Error removing ISR handler for pin %d: %s", pin, esp_err_to_name(ret));
         return ret;
     }
+
+    ret = gpio_set_intr_type(pin, GPIO_INTR_DISABLE);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG_IRQ, "Error disabling GPIO interrupt type for pin %d: %s", pin, esp_err_to_name(ret));
+        return ret;
+    }
+
     m_handlerInstalled = false;
     m_pin = GPIO_NUM_MAX;
     ESP_LOGI(TAG_IRQ, "ISR handler removed from pin %d", pin);

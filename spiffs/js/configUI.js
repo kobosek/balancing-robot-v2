@@ -44,14 +44,34 @@ export function createConfigForms() {
  * @returns {HTMLInputElement} - The created input element.
  */
 function addFormField(parent, fieldConfig) {
-    const group = document.createElement('div'); group.className = 'form-group';
-    const lbl = document.createElement('label'); lbl.htmlFor = fieldConfig.id; lbl.textContent = fieldConfig.label + ':';
-    const inp = document.createElement('input'); inp.type = 'number'; inp.id = fieldConfig.id; inp.name = fieldConfig.id;
-    // Apply optional attributes
-    if (fieldConfig.step) inp.step = fieldConfig.step;
-    if (fieldConfig.min !== undefined) inp.min = fieldConfig.min;
-    if (fieldConfig.max !== undefined) inp.max = fieldConfig.max;
-    group.appendChild(lbl); group.appendChild(inp); parent.appendChild(group);
+    const isCheckbox = fieldConfig.type === 'checkbox';
+    const group = document.createElement('div');
+    group.className = isCheckbox ? 'form-group form-group-checkbox' : 'form-group';
+
+    const lbl = document.createElement('label');
+    lbl.htmlFor = fieldConfig.id;
+    lbl.textContent = isCheckbox ? fieldConfig.label : fieldConfig.label + ':';
+
+    const inp = document.createElement('input');
+    inp.type = isCheckbox ? 'checkbox' : 'number';
+    inp.id = fieldConfig.id;
+    inp.name = fieldConfig.id;
+
+    if (!isCheckbox) {
+        if (fieldConfig.step) inp.step = fieldConfig.step;
+        if (fieldConfig.min !== undefined) inp.min = fieldConfig.min;
+        if (fieldConfig.max !== undefined) inp.max = fieldConfig.max;
+    }
+
+    if (isCheckbox) {
+        group.appendChild(inp);
+        group.appendChild(lbl);
+    } else {
+        group.appendChild(lbl);
+        group.appendChild(inp);
+    }
+
+    parent.appendChild(group);
     return inp;
 }
 
@@ -110,7 +130,8 @@ function createGeneralConfigForm(container) {
         // --- battery ---
         { label: 'Batt Max V', id: `battery_voltage_max`, step: '0.01', min: 0.1, max: 100, section: 'battery', key: 'voltage_max'},
         { label: 'Batt Min V', id: `battery_voltage_min`, step: '0.01', min: 0.1, section: 'battery', key: 'voltage_min'},
-        { label: 'Batt Divider', id: `battery_voltage_divider_ratio`, step: '0.01', min: 0.1, max: 100, section: 'battery', key: 'voltage_divider_ratio'},
+        { label: 'Batt Ratio', id: `battery_voltage_divider_ratio`, step: '0.001', min: 0.1, max: 100, section: 'battery', key: 'voltage_divider_ratio'},
+        { label: 'Crit Batt Shutdown', id: `battery_critical_battery_motor_shutdown_enabled`, type: 'checkbox', section: 'battery', key: 'critical_battery_motor_shutdown_enabled'},
         // --- dimensions ---
         { label: 'Wheelbase (m)', id: `dimensions_wheelbase_m`, step: '0.001', min: 0.01, max: 1.0, section: 'dimensions', key: 'wheelbase_m'},
         // --- behavior ---
@@ -119,8 +140,8 @@ function createGeneralConfigForm(container) {
         { label: 'Joy Max AngVel', id: `behavior_max_target_angular_velocity_dps`, step: '1', min: 1, max: 1000, section: 'behavior', key: 'max_target_angular_velocity_dps'},
         { label: 'Fall Thresh(deg)', id: `behavior_fall_pitch_threshold_deg`, step: '1', min: 10, max: 90, section: 'behavior', key: 'fall_pitch_threshold_deg'},
         { label: 'Fall Dura(ms)', id: `behavior_fall_threshold_duration_ms`, step: '10', min: 1, max: 10000, section: 'behavior', key: 'fall_threshold_duration_ms'},
-        { label: 'Recov Thresh(deg)', id: `behavior_recovery_pitch_threshold_deg`, step: '0.1', min: 0, max: 30, section: 'behavior', key: 'recovery_pitch_threshold_deg'},
-        { label: 'Recov Hold(ms)', id: `behavior_recovery_hold_duration_ms`, step: '100', min: 1, max: 60000, section: 'behavior', key: 'recovery_hold_duration_ms'},
+        { label: 'AutoBal Thresh(deg)', id: `behavior_auto_balance_pitch_threshold_deg`, step: '0.1', min: 0, max: 30, section: 'behavior', key: 'auto_balance_pitch_threshold_deg'},
+        { label: 'AutoBal Hold(ms)', id: `behavior_auto_balance_hold_duration_ms`, step: '100', min: 1, max: 60000, section: 'behavior', key: 'auto_balance_hold_duration_ms'},
         { label: 'Batt Samples', id: `behavior_battery_oversampling_count`, step: '1', min: 1, max: 1024, section: 'behavior', key: 'battery_oversampling_count'},
         { label: 'Batt Int(ms)', id: `behavior_battery_read_interval_ms`, step: '100', min: 100, max: 60000, section: 'behavior', key: 'battery_read_interval_ms'},
         { label: 'IMU I2C Fail Thr', id: `behavior_imu_health_i2c_fail_threshold`, step: '1', min: 1, max: 100, section: 'behavior', key: 'imu_health_i2c_fail_threshold'},
@@ -206,7 +227,7 @@ async function loadGeneralConfig(formElement) {
         return;
     }
 
-    formElement.querySelectorAll('input[type="number"]').forEach(input => {
+    formElement.querySelectorAll('input').forEach(input => {
         const idParts = input.id.split('_');
         if (idParts.length < 2) { console.warn(`Could not parse section/key from input ID: ${input.id}`); return; }
         const sectionKey = idParts[0];
@@ -216,7 +237,10 @@ async function loadGeneralConfig(formElement) {
         let value = fullConfig;
         try {
              value = value[sectionKey][valueKey];
-             if (value !== undefined) { input.value = value; }
+             if (value !== undefined) {
+                 if (input.type === 'checkbox') { input.checked = !!value; }
+                 else { input.value = value; }
+             }
              else { console.warn(`Value for ${sectionKey}.${valueKey} (ID: ${input.id}) is undefined in config.`); }
         } catch (e) {
              console.warn(`Error accessing ${sectionKey}.${valueKey} (ID: ${input.id}) in config data:`, e);
@@ -253,13 +277,16 @@ async function saveGeneralConfig(formElement, fieldMapping) {
         if (!isValid) return;
         const input = formElement.querySelector(`#${field.id}`);
         if (input) {
-            const value = parseFloat(input.value);
-            if (isNaN(value)) { alert(`Invalid number for ${field.label}`); input.focus(); isValid = false; }
-            else {
-                // Ensure nested structure exists
-                if (!configToSend[field.section]) { configToSend[field.section] = {}; }
-                configToSend[field.section][field.key] = value;
+            let value;
+            if (input.type === 'checkbox') {
+                value = input.checked;
+            } else {
+                value = parseFloat(input.value);
+                if (isNaN(value)) { alert(`Invalid number for ${field.label}`); input.focus(); isValid = false; return; }
             }
+
+            if (!configToSend[field.section]) { configToSend[field.section] = {}; }
+            configToSend[field.section][field.key] = value;
         } else { console.warn(`Input field ID ${field.id} not found.`); }
     });
     if (!isValid) return;

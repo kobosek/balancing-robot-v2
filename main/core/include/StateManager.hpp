@@ -14,7 +14,7 @@
 // Forward declarations
 class BaseEvent;
 class BALANCE_FallDetected;
-class BALANCE_RecoveryDetected;
+class BALANCE_AutoBalanceReady;
 class UI_StartBalancing;
 class UI_Stop;
 class BATTERY_StatusUpdate;
@@ -27,14 +27,16 @@ class IMU_CommunicationError;
 class IMU_AvailabilityChanged;
 
 struct SystemBehaviorConfig; 
+struct BatteryConfig;
 struct ConfigData; 
 
 class StateManager : public EventHandler {
 public:
-    StateManager(EventBus& eventBus, const SystemBehaviorConfig& initialBehaviorConfig);
+    StateManager(EventBus& eventBus, const SystemBehaviorConfig& initialBehaviorConfig, const BatteryConfig& initialBatteryConfig);
     ~StateManager() = default;
 
     SystemState getCurrentState() const;
+    bool isCriticalBatteryMotorShutdownEnabled() const { return m_criticalBatteryMotorShutdownEnabled; }
     void setState(SystemState newState);
 
     esp_err_t init();
@@ -53,9 +55,11 @@ private:
     bool m_imu_available = false;
     bool m_pending_calibration = false;
     bool m_pending_start = false;
+    bool m_battery_critical = false;
+    bool m_criticalBatteryMotorShutdownEnabled = false;
 
     void handleFallDetected(const BALANCE_FallDetected& event);
-    void handleRecoveryDetected(const BALANCE_RecoveryDetected& event);
+    void handleAutoBalanceReady(const BALANCE_AutoBalanceReady& event);
     void handleStartBalancing(const UI_StartBalancing& event);
     void handleStop(const UI_Stop& event);
     void handleBatteryUpdate(const BATTERY_StatusUpdate& event);
@@ -69,5 +73,5 @@ private:
     void initiateCalibration(bool force = false);
     
     std::string stateToString(SystemState state) const;
-    void applyConfig(const SystemBehaviorConfig& config);
+    void applyConfig(const SystemBehaviorConfig& behaviorConfig, const BatteryConfig& batteryConfig);
 };

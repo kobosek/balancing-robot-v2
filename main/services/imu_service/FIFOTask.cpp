@@ -20,7 +20,9 @@ void FIFOTask::run() {
     while (true) {
         if (dataReadySemaphore != NULL) {
             const BaseType_t waitResult = xSemaphoreTake(dataReadySemaphore, pollInterval);
-            (void)waitResult;
+            if (waitResult != pdTRUE) {
+                continue;
+            }
         } else {
             vTaskDelay(pollInterval);
         }

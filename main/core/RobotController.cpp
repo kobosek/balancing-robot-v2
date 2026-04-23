@@ -87,9 +87,10 @@ void RobotController::runControlStep(float dt) {
     }
 
     // 1. Get Orientation Data
-    float pitch_deg = m_estimator->getPitchDeg();
+    const auto orientation = m_estimator->getPitchAndYawRate();
+    float pitch_deg = orientation.first;
     float pitch_rate_dps = 0.0f;
-    float yaw_rate_dps = m_estimator->getYawRateDPS();
+    float yaw_rate_dps = orientation.second;
 
     // Publish orientation data — BalanceMonitor handles fall detection and recovery as an observer
     if (m_eventBus) {

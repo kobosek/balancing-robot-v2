@@ -11,8 +11,8 @@ class BaseEvent;
 class CONFIG_FullConfigUpdate;
 class IMU_OrientationData;
 class SYSTEM_StateChanged;
-class UI_EnableFallRecovery;
-class UI_DisableFallRecovery;
+class UI_EnableAutoBalancing;
+class UI_DisableAutoBalancing;
 class UI_DisableFallDetection;
 class UI_EnableFallDetection;
 
@@ -23,7 +23,7 @@ public:
 
     void reset();
 
-    bool isAutoRecoveryEnabled() const { return m_autoRecoveryEnabled; }
+    bool isAutoBalancingEnabled() const { return m_autoBalancingEnabled; }
     bool isFallDetectionEnabled() const { return m_fallDetectionEnabled; }
 
     void handleEvent(const BaseEvent& event) override;
@@ -41,24 +41,24 @@ private:
     int64_t m_fall_start_time_us = 0;
     bool m_fall_event_published = false;
 
-    // Recovery detection state
-    float m_recovery_angle_threshold_rad;
-    uint64_t m_recovery_hold_time_us;
-    bool m_within_recovery_angle = false;
-    int64_t m_recovery_angle_start_time_us = 0;
+    // Auto balancing detection state
+    float m_auto_balance_angle_threshold_rad;
+    uint64_t m_auto_balance_hold_time_us;
+    bool m_within_auto_balance_angle = false;
+    int64_t m_auto_balance_angle_start_time_us = 0;
 
-    bool m_autoRecoveryEnabled = true;
+    bool m_autoBalancingEnabled = true;
     bool m_fallDetectionEnabled = true;
 
     void applyConfig(const SystemBehaviorConfig& config);
     void handleConfigUpdate(const CONFIG_FullConfigUpdate& event);
     void handleOrientationData(const IMU_OrientationData& event);
     void handleStateChanged(const SYSTEM_StateChanged& event);
-    void handleEnableRecovery(const UI_EnableFallRecovery& event);
-    void handleDisableRecovery(const UI_DisableFallRecovery& event);
+    void handleEnableAutoBalancing(const UI_EnableAutoBalancing& event);
+    void handleDisableAutoBalancing(const UI_DisableAutoBalancing& event);
     void handleEnableFallDetect(const UI_EnableFallDetection& event);
     void handleDisableFallDetect(const UI_DisableFallDetection& event);
 
     void checkFall(float pitch_rad);
-    void checkRecovery(float pitch_rad);
+    void checkAutoBalancing(float pitch_rad);
 };

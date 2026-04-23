@@ -72,22 +72,19 @@ private:
     std::unique_ptr<HealthMonitorTask> m_healthMonitorTask;
 
     std::atomic<bool> m_is_calibrating_flag;
-    std::atomic<IMUState> m_current_state;
+    IMUState m_current_state;
     std::atomic<SystemState> m_system_state;
     std::atomic<bool> m_pending_hardware_apply;
     std::atomic<bool> m_fault_reported;
     std::atomic<int64_t> m_next_auto_attach_time_us;
-
-    float m_accel_lsb_per_g;
-    float m_gyro_lsb_per_dps;
-    float m_sample_period_s;
+    std::atomic<bool> m_initialized;
     MPU6050Profile m_profile;
 
     mutable std::mutex m_state_mutex;
     mutable std::mutex m_config_mutex;
     mutable std::mutex m_attach_mutex;
 
-    void transitionToState(IMUState newState);
+    bool transitionToState(IMUState newState);
     esp_err_t enterInitializedState();
     esp_err_t exitInitializedState();
     esp_err_t enterOperationalState();
@@ -99,12 +96,17 @@ private:
     static bool isValidTransition(IMUState from, IMUState to);
 
     void refreshDerivedStateLocked();
-    void applyConfig(const MPU6050Config& newConfig);
+    void applyRuntimeProfile(const MPU6050Config& config,
+                             const MPU6050Profile& profile,
+                             bool reinitializeEstimator);
+    bool applyConfig(const MPU6050Config& newConfig);
     void applyConfig(const SystemBehaviorConfig& config);
     bool canApplyHardwareConfigNow() const;
     void applyPendingHardwareConfigIfSafe();
+    void publishAvailabilityIfOperational(bool shouldPublishAvailabilityEvent);
     esp_err_t attachAndConfigureCurrentProfile(bool publishAvailabilityEvent);
-    esp_err_t attachAndConfigureCurrentProfileLocked(bool publishAvailabilityEvent);
+    esp_err_t attachAndConfigureCurrentProfileLocked(bool publishAvailabilityEvent,
+                                                     bool* shouldPublishAvailabilityEvent = nullptr);
     void markSensorUnavailable(esp_err_t errorCode, bool publishErrorEvent);
     esp_err_t performCalibration();
     void scheduleAutoAttachRetry(int64_t delayUs = 0);

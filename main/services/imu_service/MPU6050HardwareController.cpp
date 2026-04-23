@@ -73,38 +73,40 @@ esp_err_t MPU6050HardwareController::applyConfiguration(const MPU6050Config& con
     vTaskDelay(DEVICE_RESET_DELAY_TICKS);
 
     ret = m_driver.setPowerManagementReg(MPU6050PowerManagement::CLOCK_PLL_X_GYRO);
-    if (ret != ESP_OK) {
-        return ret;
+    if (ret == ESP_OK) {
+        vTaskDelay(CLOCK_SETTLE_DELAY_TICKS);
     }
-    vTaskDelay(CLOCK_SETTLE_DELAY_TICKS);
-
-    ret = m_driver.setAccelRangeReg(profile.accelRangeReg);
-    if (ret != ESP_OK) {
-        return ret;
+    if (ret == ESP_OK) {
+        ret = m_driver.setAccelRangeReg(profile.accelRangeReg);
     }
-    ret = m_driver.setGyroRangeReg(profile.gyroRangeReg);
-    if (ret != ESP_OK) {
-        return ret;
+    if (ret == ESP_OK) {
+        ret = m_driver.setGyroRangeReg(profile.gyroRangeReg);
     }
-    ret = m_driver.setDLPFConfigReg(profile.dlpfReg);
-    if (ret != ESP_OK) {
-        return ret;
+    if (ret == ESP_OK) {
+        ret = m_driver.setDLPFConfigReg(profile.dlpfReg);
     }
-    ret = m_driver.setSampleRateDivReg(profile.sampleRateDivReg);
-    if (ret != ESP_OK) {
-        return ret;
+    if (ret == ESP_OK) {
+        ret = m_driver.setSampleRateDivReg(profile.sampleRateDivReg);
     }
 
     const MPU6050Interrupt interruptBits = profile.interruptEnabled ?
         MPU6050Interrupt::DATA_READY :
         static_cast<MPU6050Interrupt>(0);
-    ret = m_driver.configureInterruptPinReg(profile.interruptPinConfig, interruptBits);
-    if (ret != ESP_OK) {
-        return ret;
+    if (ret == ESP_OK) {
+        ret = m_driver.configureInterruptPinReg(profile.interruptPinConfig, interruptBits);
     }
 
-    (void)config;
-    return clearFifoState();
+    if (ret == ESP_OK) {
+        (void)config;
+        ret = clearFifoState();
+    }
+
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "IMU configuration failed (%s), resetting sensor", esp_err_to_name(ret));
+        (void)m_driver.resetSensor();
+    }
+
+    return ret;
 }
 
 void MPU6050HardwareController::disconnect() {

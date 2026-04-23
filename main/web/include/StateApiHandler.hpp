@@ -8,10 +8,11 @@
 // Forward declare dependencies
 class StateManager;
 class BalanceMonitor;
+class BatteryService;
 
 class StateApiHandler : public EventHandler {
 public:
-    StateApiHandler(StateManager& stateManager, BalanceMonitor& balanceMonitor);
+    StateApiHandler(StateManager& stateManager, BalanceMonitor& balanceMonitor, BatteryService& batteryService);
     esp_err_t handleRequest(httpd_req_t *req);
 
     // EventHandler interface implementation
@@ -22,4 +23,5 @@ private:
     static constexpr const char* TAG = "StateApiHandler";
     StateManager& m_stateManager;
     BalanceMonitor& m_balanceMonitor;
+    BatteryService& m_batteryService;
 };

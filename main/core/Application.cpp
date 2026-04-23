@@ -84,7 +84,7 @@ esp_err_t Application::init()
     PIDConfig yawRatePidConf = m_configService->getPidYawRateConfig();
 
     // --- State Manager ---
-    m_stateManager = std::make_shared<StateManager>(*m_eventBus, behaviorConf); // Pass behavior config
+    m_stateManager = std::make_shared<StateManager>(*m_eventBus, behaviorConf, batteryConf);
     ret = m_stateManager->init(); ESP_RETURN_ON_ERROR(ret, TAG, "StateManager init failed");
     ESP_LOGI(TAG, "StateManager initialized");
 
@@ -117,7 +117,7 @@ esp_err_t Application::init()
     m_balanceMonitor = std::make_shared<BalanceMonitor>(*m_eventBus, behaviorConf);
 
     // WebServer needs ConfigService mainly to pass to handlers that NEED it (ConfigApiHandler)
-    m_webServer = std::make_shared<WebServer>(*m_configService, *m_stateManager, *m_balanceMonitor, *m_eventBus, webConf);
+    m_webServer = std::make_shared<WebServer>(*m_configService, *m_stateManager, *m_balanceMonitor, *m_batteryService, *m_eventBus, webConf);
     ret = m_webServer->init(); ESP_RETURN_ON_ERROR(ret, TAG, "WebServer init failed");
 
     // Create IMUService with encapsulated components
@@ -160,8 +160,8 @@ esp_err_t Application::init()
         EventType::IMU_ORIENTATION_DATA,
         EventType::SYSTEM_STATE_CHANGED,
         EventType::CONFIG_FULL_UPDATE,
-        EventType::UI_ENABLE_FALL_RECOVERY,
-        EventType::UI_DISABLE_FALL_RECOVERY,
+        EventType::UI_ENABLE_AUTO_BALANCING,
+        EventType::UI_DISABLE_AUTO_BALANCING,
         EventType::UI_ENABLE_FALL_DETECTION,
         EventType::UI_DISABLE_FALL_DETECTION
     });
@@ -179,7 +179,7 @@ esp_err_t Application::init()
     // StateManager subscriptions - now using EventHandler
     m_eventBus->subscribe(m_stateManager, {
         EventType::BALANCE_FALL_DETECTED,
-        EventType::BALANCE_RECOVERY_DETECTED,
+        EventType::BALANCE_AUTO_BALANCE_READY,
         EventType::UI_START_BALANCING,
         EventType::UI_STOP,
         EventType::BATTERY_STATUS_UPDATE,

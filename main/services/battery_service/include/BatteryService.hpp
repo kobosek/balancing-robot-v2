@@ -56,6 +56,8 @@ private:
 
     mutable std::mutex m_status_mutex;
     BatteryStatus m_latest_status;
+    float m_filtered_adc_pin_voltage = -1.0f;
+    int m_filter_sample_count = 0;
 
     bool adc_calibration_init(adc_channel_t channel);
     esp_err_t map_gpio_to_channel();

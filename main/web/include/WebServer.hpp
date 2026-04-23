@@ -13,6 +13,7 @@
 class ConfigurationService; // Still needed for ConfigApiHandler
 class StateManager;
 class BalanceMonitor;
+class BatteryService;
 class EventBus;
 class BaseEvent;
 
@@ -29,6 +30,7 @@ public:
     WebServer(ConfigurationService& configService,
               StateManager& stateManager,
               BalanceMonitor& balanceMonitor,
+              BatteryService& batteryService,
               EventBus& eventBus,
               const WebServerConfig& initialWebConfig);
     ~WebServer();
@@ -51,6 +53,7 @@ private:
     ConfigurationService& m_configService;
     StateManager& m_stateManager;
     BalanceMonitor& m_balanceMonitor;
+    BatteryService& m_batteryService;
     EventBus& m_eventBus;
 
     // Own instances of the handlers

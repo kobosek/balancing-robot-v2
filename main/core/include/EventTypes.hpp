@@ -24,8 +24,8 @@ enum class EventType {
     UI_START_BALANCING,              // UI_StartBalancing
     UI_STOP,                         // UI_Stop
     UI_CALIBRATE_IMU,                // UI_CalibrateImu
-    UI_ENABLE_FALL_RECOVERY,         // UI_EnableFallRecovery
-    UI_DISABLE_FALL_RECOVERY,        // UI_DisableFallRecovery
+    UI_ENABLE_AUTO_BALANCING,        // UI_EnableAutoBalancing
+    UI_DISABLE_AUTO_BALANCING,       // UI_DisableAutoBalancing
     UI_ENABLE_FALL_DETECTION,        // UI_EnableFallDetection
     UI_DISABLE_FALL_DETECTION,       // UI_DisableFallDetection
     UI_JOYSTICK_INPUT,               // UI_JoystickInput
@@ -42,7 +42,7 @@ enum class EventType {
 
     //Balance Monitoring
     BALANCE_FALL_DETECTED,            // BALANCE_FallDetected
-    BALANCE_RECOVERY_DETECTED,        // BALANCE_RecoveryDetected
+    BALANCE_AUTO_BALANCE_READY,       // BALANCE_AutoBalanceReady
 
     // IMU State Management Events
     IMU_CALIBRATION_REJECTED,        // IMU_CalibrationRequestRejected

@@ -4,7 +4,7 @@
 #include "StateManager.hpp"
 
 #include "BALANCE_FallDetected.hpp"
-#include "BALANCE_RecoveryDetected.hpp"
+#include "BALANCE_AutoBalanceReady.hpp"
 #include "BATTERY_StatusUpdate.hpp"
 #include "BaseEvent.hpp"
 #include "CONFIG_FullConfigUpdate.hpp"
@@ -23,10 +23,10 @@
 #include "esp_err.h"
 #include "esp_log.h"
 
-StateManager::StateManager(EventBus& eventBus, const SystemBehaviorConfig& initialBehaviorConfig) :
+StateManager::StateManager(EventBus& eventBus, const SystemBehaviorConfig& initialBehaviorConfig, const BatteryConfig& initialBatteryConfig) :
     m_eventBus(eventBus),
     m_currentState(SystemState::INIT) {
-    applyConfig(initialBehaviorConfig);
+    applyConfig(initialBehaviorConfig, initialBatteryConfig);
 }
 
 esp_err_t StateManager::init() {
@@ -35,8 +35,9 @@ esp_err_t StateManager::init() {
     return ESP_OK;
 }
 
-void StateManager::applyConfig(const SystemBehaviorConfig& config) {
-    (void)config;
+void StateManager::applyConfig(const SystemBehaviorConfig& behaviorConfig, const BatteryConfig& batteryConfig) {
+    (void)behaviorConfig;
+    m_criticalBatteryMotorShutdownEnabled = batteryConfig.critical_battery_motor_shutdown_enabled;
 }
 
 SystemState StateManager::getCurrentState() const {
@@ -89,8 +90,8 @@ void StateManager::handleEvent(const BaseEvent& event) {
         case EventType::BALANCE_FALL_DETECTED:
             handleFallDetected(static_cast<const BALANCE_FallDetected&>(event));
             break;
-        case EventType::BALANCE_RECOVERY_DETECTED:
-            handleRecoveryDetected(static_cast<const BALANCE_RecoveryDetected&>(event));
+        case EventType::BALANCE_AUTO_BALANCE_READY:
+            handleAutoBalanceReady(static_cast<const BALANCE_AutoBalanceReady&>(event));
             break;
         case EventType::UI_START_BALANCING:
             handleStartBalancing(static_cast<const UI_StartBalancing&>(event));
@@ -132,7 +133,7 @@ void StateManager::subscribeToEvents(EventBus& bus) {
 }
 
 void StateManager::handleConfigUpdate(const CONFIG_FullConfigUpdate& event) {
-    applyConfig(event.configData.behavior);
+    applyConfig(event.configData.behavior, event.configData.battery);
 }
 
 void StateManager::handleFallDetected(const BALANCE_FallDetected& event) {
@@ -143,10 +144,29 @@ void StateManager::handleFallDetected(const BALANCE_FallDetected& event) {
     }
 }
 
-void StateManager::handleRecoveryDetected(const BALANCE_RecoveryDetected& event) {
+void StateManager::handleAutoBalanceReady(const BALANCE_AutoBalanceReady& event) {
     (void)event;
-    ESP_LOGW(TAG, "Recovery Detected Event Received!");
-    if (m_currentState == SystemState::FALLEN && m_imu_available) {
+    ESP_LOGI(TAG, "Auto balance ready event received.");
+
+    if (m_currentState != SystemState::IDLE && m_currentState != SystemState::FALLEN) {
+        return;
+    }
+
+    if (!m_imu_available) {
+        ESP_LOGW(TAG, "Ignoring auto balance trigger because IMU is unavailable.");
+        return;
+    }
+
+    if (m_criticalBatteryMotorShutdownEnabled && m_battery_critical) {
+        ESP_LOGW(TAG, "Ignoring auto balance trigger because battery is critical and shutdown is enabled.");
+        m_pending_start = false;
+        if (m_currentState == SystemState::FALLEN) {
+            setState(SystemState::IDLE);
+        }
+        return;
+    }
+
+    if (m_currentState == SystemState::FALLEN || m_currentState == SystemState::IDLE) {
         setState(SystemState::BALANCING);
     }
 }
@@ -157,6 +177,15 @@ void StateManager::handleStartBalancing(const UI_StartBalancing& event) {
 
     if (m_currentState != SystemState::IDLE && m_currentState != SystemState::FALLEN) {
         ESP_LOGW(TAG, "Cannot start balancing from current state: %s", stateToString(m_currentState).c_str());
+        return;
+    }
+
+    if (m_criticalBatteryMotorShutdownEnabled && m_battery_critical) {
+        ESP_LOGW(TAG, "Cannot start balancing because battery is critical and motor shutdown is enabled.");
+        m_pending_start = false;
+        if (m_currentState == SystemState::FALLEN) {
+            setState(SystemState::IDLE);
+        }
         return;
     }
 
@@ -180,10 +209,14 @@ void StateManager::handleStop(const UI_Stop& event) {
 }
 
 void StateManager::handleBatteryUpdate(const BATTERY_StatusUpdate& event) {
-    if (event.status.isLow && m_currentState == SystemState::BALANCING) {
-        ESP_LOGW(TAG, "Battery level LOW while balancing! Transitioning to IDLE.");
+    m_battery_critical = event.status.isCritical;
+
+    if (m_criticalBatteryMotorShutdownEnabled && event.status.isCritical) {
         m_pending_start = false;
-        setState(SystemState::IDLE);
+        if (m_currentState == SystemState::BALANCING) {
+            ESP_LOGW(TAG, "Battery level CRITICAL while balancing. Transitioning to IDLE.");
+            setState(SystemState::IDLE);
+        }
     }
 }
 
@@ -211,7 +244,10 @@ void StateManager::handleImuAvailabilityChanged(const IMU_AvailabilityChanged& e
     m_imu_available = event.available;
     ESP_LOGI(TAG, "IMU availability changed: %s", m_imu_available ? "available" : "unavailable");
 
-    if (m_imu_available && m_pending_start && m_currentState == SystemState::IDLE) {
+    if (m_imu_available &&
+        m_pending_start &&
+        m_currentState == SystemState::IDLE &&
+        (!m_criticalBatteryMotorShutdownEnabled || !m_battery_critical)) {
         m_pending_start = false;
         setState(SystemState::BALANCING);
     }

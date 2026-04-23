@@ -416,8 +416,8 @@ bool ConfigurationService::validateConfig(const ConfigData& config, std::string&
     if (config.behavior.max_target_angular_velocity_dps <= 0.0f || config.behavior.max_target_angular_velocity_dps > 1000.0f) { error = "behavior.max_target_angular_velocity_dps (>0, <=1k)"; return false; }
     if (config.behavior.fall_pitch_threshold_deg < 10.0f || config.behavior.fall_pitch_threshold_deg > 90.0f) { error = "behavior.fall_pitch_threshold_deg [10,90]"; return false; }
     if (config.behavior.fall_threshold_duration_ms < 1 || config.behavior.fall_threshold_duration_ms > 10000) { error = "behavior.fall_threshold_duration_ms [1,10k]"; return false; }
-    if (config.behavior.recovery_pitch_threshold_deg < 0.0f || config.behavior.recovery_pitch_threshold_deg > 30.0f) { error = "behavior.recovery_pitch_threshold_deg [0,30]"; return false; }
-    if (config.behavior.recovery_hold_duration_ms < 1 || config.behavior.recovery_hold_duration_ms > 60000) { error = "behavior.recovery_hold_duration_ms [1,60k]"; return false; }
+    if (config.behavior.auto_balance_pitch_threshold_deg < 0.0f || config.behavior.auto_balance_pitch_threshold_deg > 30.0f) { error = "behavior.auto_balance_pitch_threshold_deg [0,30]"; return false; }
+    if (config.behavior.auto_balance_hold_duration_ms < 1 || config.behavior.auto_balance_hold_duration_ms > 60000) { error = "behavior.auto_balance_hold_duration_ms [1,60k]"; return false; }
     if (config.behavior.battery_oversampling_count < 1 || config.behavior.battery_oversampling_count > 1024) { error = "behavior.battery_oversampling_count [1,1024]"; return false; }
     if (config.behavior.battery_read_interval_ms < 100 || config.behavior.battery_read_interval_ms > 60000) { error = "behavior.battery_read_interval_ms [100,60k]"; return false; }
     if (config.behavior.imu_health_i2c_fail_threshold < 1 || config.behavior.imu_health_i2c_fail_threshold > 100) { error = "behavior.imu_health_i2c_fail_threshold [1,100]"; return false; }

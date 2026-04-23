@@ -2,6 +2,7 @@
 #include "StateApiHandler.hpp"
 #include "StateManager.hpp"
 #include "BalanceMonitor.hpp"
+#include "BatteryService.hpp"
 #include "SystemState.hpp"
 #include "BaseEvent.hpp"
 #include "cJSON.h"
@@ -10,8 +11,8 @@
 #include "esp_log.h"
 #include "esp_http_server.h"
 
-StateApiHandler::StateApiHandler(StateManager& stateManager, BalanceMonitor& balanceMonitor)
-    : m_stateManager(stateManager), m_balanceMonitor(balanceMonitor) {
+StateApiHandler::StateApiHandler(StateManager& stateManager, BalanceMonitor& balanceMonitor, BatteryService& batteryService)
+    : m_stateManager(stateManager), m_balanceMonitor(balanceMonitor), m_batteryService(batteryService) {
     ESP_LOGI(TAG, "StateApiHandler constructed.");
 }
 
@@ -39,8 +40,10 @@ static const char* stateToString(SystemState state) {
 esp_err_t StateApiHandler::handleRequest(httpd_req_t *req) {
     ESP_LOGD(TAG, "Received request for /api/state (GET)");
     SystemState currentState = m_stateManager.getCurrentState();
-    bool autoRecoveryEnabled = m_balanceMonitor.isAutoRecoveryEnabled();
+    bool autoBalancingEnabled = m_balanceMonitor.isAutoBalancingEnabled();
     bool fallDetectionEnabled = m_balanceMonitor.isFallDetectionEnabled();
+    bool criticalBatteryMotorShutdownEnabled = m_stateManager.isCriticalBatteryMotorShutdownEnabled();
+    const BatteryStatus batteryStatus = m_batteryService.getLatestStatus();
     const char* stateStr = stateToString(currentState);
 
     auto cjson_deleter = [](cJSON* ptr){ if(ptr) cJSON_Delete(ptr); };
@@ -53,8 +56,15 @@ esp_err_t StateApiHandler::handleRequest(httpd_req_t *req) {
 
     cJSON_AddNumberToObject(root, "state_id", static_cast<int>(currentState));
     cJSON_AddStringToObject(root, "state_name", stateStr);
-    cJSON_AddBoolToObject(root, "auto_recovery_enabled", autoRecoveryEnabled);
+    cJSON_AddBoolToObject(root, "auto_balancing_enabled", autoBalancingEnabled);
     cJSON_AddBoolToObject(root, "fall_detection_enabled", fallDetectionEnabled);
+    cJSON_AddBoolToObject(root, "critical_battery_motor_shutdown_enabled", criticalBatteryMotorShutdownEnabled);
+    cJSON_AddNumberToObject(root, "battery_voltage", batteryStatus.voltage);
+    cJSON_AddNumberToObject(root, "battery_adc_pin_voltage", batteryStatus.adcPinVoltage);
+    cJSON_AddNumberToObject(root, "battery_percentage", batteryStatus.percentage);
+    cJSON_AddBoolToObject(root, "battery_is_low", batteryStatus.isLow);
+    cJSON_AddBoolToObject(root, "battery_is_critical", batteryStatus.isCritical);
+    cJSON_AddBoolToObject(root, "battery_adc_calibrated", batteryStatus.adcCalibrated);
 
     std::unique_ptr<char, decltype(char_deleter)> json_str_ptr(cJSON_PrintUnformatted(root));
     char* json_string = json_str_ptr.get();

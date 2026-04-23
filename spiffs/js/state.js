@@ -31,7 +31,21 @@ export const appState = {
     ],
 
     // Current snapshot states
-    currentSystemState: { id: -1, state_id: null, name: 'UNKNOWN', state_name: 'UNKNOWN', auto_recovery_enabled: false, fall_detection_enabled: false },
+    currentSystemState: {
+        id: -1,
+        state_id: null,
+        name: 'UNKNOWN',
+        state_name: 'UNKNOWN',
+        auto_balancing_enabled: true,
+        fall_detection_enabled: false,
+        critical_battery_motor_shutdown_enabled: false,
+        battery_voltage: 0,
+        battery_adc_pin_voltage: 0,
+        battery_percentage: 0,
+        battery_is_low: false,
+        battery_is_critical: false,
+        battery_adc_calibrated: false
+    },
     currentBattery: { voltage: 0, percentage: 0 },
 
     // Caches
@@ -67,8 +81,9 @@ export function updateCurrentSystemState(newStateData) {
     appState.currentSystemState = { ...previousState, ...newStateData };
     if (previousState.state_id !== appState.currentSystemState.state_id ||
         previousState.state_name !== appState.currentSystemState.state_name ||
-        previousState.auto_recovery_enabled !== appState.currentSystemState.auto_recovery_enabled ||
-        previousState.fall_detection_enabled !== appState.currentSystemState.fall_detection_enabled)
+        previousState.auto_balancing_enabled !== appState.currentSystemState.auto_balancing_enabled ||
+        previousState.fall_detection_enabled !== appState.currentSystemState.fall_detection_enabled ||
+        previousState.critical_battery_motor_shutdown_enabled !== appState.currentSystemState.critical_battery_motor_shutdown_enabled)
     { console.log("State Update:", appState.currentSystemState); return true; }
     return false;
 }

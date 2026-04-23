@@ -72,24 +72,38 @@ bool I2CDevice::isOpen() const {
 }
 
 esp_err_t I2CDevice::writeRegister(uint8_t reg, uint8_t data) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (m_deviceHandle == nullptr) {
-        m_healthTracker.recordFailure(ESP_ERR_INVALID_STATE);
-        return ESP_ERR_INVALID_STATE;
+    esp_err_t lastError = ESP_FAIL;
+    uint8_t attempts = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_deviceHandle == nullptr) {
+            m_healthTracker.recordFailure(ESP_ERR_INVALID_STATE);
+            return ESP_ERR_INVALID_STATE;
+        }
+        attempts = static_cast<uint8_t>(m_config.max_retries + 1);
     }
 
-    esp_err_t lastError = ESP_FAIL;
-    const uint8_t attempts = static_cast<uint8_t>(m_config.max_retries + 1);
     for (uint8_t attempt = 0; attempt < attempts; ++attempt) {
-        lastError = writeRegisterOnce(reg, data);
-        if (lastError == ESP_OK) {
-            m_healthTracker.recordSuccess();
-            return ESP_OK;
+        uint32_t retryDelayMs = 0;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_deviceHandle == nullptr) {
+                m_healthTracker.recordFailure(ESP_ERR_INVALID_STATE);
+                return ESP_ERR_INVALID_STATE;
+            }
+
+            retryDelayMs = m_config.retry_delay_ms;
+            lastError = writeRegisterOnce(reg, data);
+            if (lastError == ESP_OK) {
+                m_healthTracker.recordSuccess();
+                return ESP_OK;
+            }
+
+            m_healthTracker.recordFailure(lastError);
         }
 
-        m_healthTracker.recordFailure(lastError);
         if (attempt + 1 < attempts) {
-            vTaskDelay(pdMS_TO_TICKS(m_config.retry_delay_ms));
+            vTaskDelay(pdMS_TO_TICKS(retryDelayMs));
         }
     }
 
@@ -97,27 +111,42 @@ esp_err_t I2CDevice::writeRegister(uint8_t reg, uint8_t data) {
 }
 
 esp_err_t I2CDevice::readRegisters(uint8_t reg, uint8_t* data, size_t len) const {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (m_deviceHandle == nullptr) {
-        m_healthTracker.recordFailure(ESP_ERR_INVALID_STATE);
-        return ESP_ERR_INVALID_STATE;
-    }
     if (data == nullptr || len == 0) {
         return ESP_ERR_INVALID_ARG;
     }
 
     esp_err_t lastError = ESP_FAIL;
-    const uint8_t attempts = static_cast<uint8_t>(m_config.max_retries + 1);
+    uint8_t attempts = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_deviceHandle == nullptr) {
+            m_healthTracker.recordFailure(ESP_ERR_INVALID_STATE);
+            return ESP_ERR_INVALID_STATE;
+        }
+        attempts = static_cast<uint8_t>(m_config.max_retries + 1);
+    }
+
     for (uint8_t attempt = 0; attempt < attempts; ++attempt) {
-        lastError = readRegistersOnce(reg, data, len);
-        if (lastError == ESP_OK) {
-            m_healthTracker.recordSuccess();
-            return ESP_OK;
+        uint32_t retryDelayMs = 0;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_deviceHandle == nullptr) {
+                m_healthTracker.recordFailure(ESP_ERR_INVALID_STATE);
+                return ESP_ERR_INVALID_STATE;
+            }
+
+            retryDelayMs = m_config.retry_delay_ms;
+            lastError = readRegistersOnce(reg, data, len);
+            if (lastError == ESP_OK) {
+                m_healthTracker.recordSuccess();
+                return ESP_OK;
+            }
+
+            m_healthTracker.recordFailure(lastError);
         }
 
-        m_healthTracker.recordFailure(lastError);
         if (attempt + 1 < attempts) {
-            vTaskDelay(pdMS_TO_TICKS(m_config.retry_delay_ms));
+            vTaskDelay(pdMS_TO_TICKS(retryDelayMs));
         }
     }
 

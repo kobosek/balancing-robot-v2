@@ -7,7 +7,7 @@ import { setupWebSocket } from './websocket.js';
 import { setupJoystick, stopJoystickSendInterval } from './joystick.js'; // Import stop function
 import { setupGraphs, drawAllGraphs } from './graph.js'; // Use new names
 import { createConfigForms, toggleConfigMenu, showConfigForm, showGeneralConfigForm } from './configUI.js'; // Import showGeneralConfigForm
-import { sendCommandApi, fetchStateApi } from './api.js';
+import { sendCommandApi, fetchConfigApi, fetchStateApi, postConfigApi } from './api.js';
 import { updateTelemetryData } from './telemetry.js';
 import { DATA_FETCH_INTERVAL_MS, STATE_FETCH_INTERVAL_MS } from './constants.js';
 
@@ -61,7 +61,8 @@ function setupEventListeners() {
 
     // Toggle Buttons
     uiElements.toggleFallDetectBtn?.addEventListener('click', handleToggleFallDetect);
-    uiElements.toggleRecoveryBtn?.addEventListener('click', handleToggleRecovery);
+    uiElements.toggleAutoBalancingBtn?.addEventListener('click', handleToggleAutoBalancing);
+    uiElements.toggleCriticalBatteryShutdownBtn?.addEventListener('click', handleToggleCriticalBatteryShutdown);
 
     console.log("Event listeners setup complete.");
 }
@@ -96,37 +97,26 @@ async function handleCommandClick(command, buttonElement) {
     return success; // Return the success status
 }
 
-async function handleToggleRecovery() {
-    console.log("--- handleToggleRecovery called ---");
+async function handleToggleAutoBalancing() {
+    console.log("--- handleToggleAutoBalancing called ---");
     // Ensure state and button exist
     if (!appState.currentSystemState) {
-        console.error("Cannot toggle recovery: appState.currentSystemState is null.");
+        console.error("Cannot toggle auto balancing: appState.currentSystemState is null.");
         return;
     }
-    if (!uiElements.toggleRecoveryBtn) {
-        console.error("Cannot toggle recovery: uiElements.toggleRecoveryBtn is null.");
+    if (!uiElements.toggleAutoBalancingBtn) {
+        console.error("Cannot toggle auto balancing: uiElements.toggleAutoBalancingBtn is null.");
         return;
     }
 
-    const isRecoveryEnabled = appState.currentSystemState.auto_recovery_enabled;
-    const isFallDetectEnabled = appState.currentSystemState.fall_detection_enabled;
-    console.log(`Current recovery state: ${isRecoveryEnabled}, Fall detect state: ${isFallDetectEnabled}`);
+    const isAutoBalancingEnabled = appState.currentSystemState.auto_balancing_enabled;
+    console.log(`Current auto balancing state: ${isAutoBalancingEnabled}`);
 
-    // Determine desired command
-    const command = isRecoveryEnabled ? 'disable_recovery' : 'enable_recovery';
-
-    // Prevent enabling recovery if fall detect is off
-    if (command === 'enable_recovery' && !isFallDetectEnabled) {
-        console.log("Cannot enable Auto Recovery because Fall Detection is disabled.");
-        alert("Cannot enable Auto Recovery while Fall Detection is disabled.");
-        // No command sent, ensure button is immediately re-enabled if it was somehow disabled
-        disableCommandButton(uiElements.toggleRecoveryBtn, false);
-        return; // Exit the function
-    }
+    const command = isAutoBalancingEnabled ? 'disable_auto_balancing' : 'enable_auto_balancing';
 
     // Proceed to send the command
     console.log(`Sending command: ${command}`);
-    await handleCommandClick(command, uiElements.toggleRecoveryBtn);
+    await handleCommandClick(command, uiElements.toggleAutoBalancingBtn);
     // UI update will be handled by the next state fetch
 }
 
@@ -150,25 +140,47 @@ async function handleToggleFallDetect() {
     console.log(`Sending command: ${command}`);
 
     // Send the primary command and wait for success/failure indication
-    const success = await handleCommandClick(command, uiElements.toggleFallDetectBtn);
-
-    // If we successfully initiated the command to DISABLE fall detect...
-    if (command === 'disable_fall_detect' && success) {
-        console.log("Fall detection disable command sent. Checking auto recovery...");
-        // ...and if auto recovery is currently enabled (check state again just in case)...
-        // Use optional chaining ?. just in case state becomes invalid between checks
-        if (appState.currentSystemState?.auto_recovery_enabled === true) {
-            console.log("Auto recovery is enabled, sending disable_recovery command...");
-            // ...send the command to disable recovery as well.
-            // We don't need to wait for this second command's result explicitly here.
-            // Call sendCommandApi directly to avoid messing with the fall detect button's timeout
-            sendCommandApi('disable_recovery')
-                .catch(e => console.error("Error sending disable_recovery after fall detect disable:", e));
-        } else {
-            console.log("Auto recovery is already disabled or state unknown.");
-        }
-    }
+    await handleCommandClick(command, uiElements.toggleFallDetectBtn);
     // UI update will be handled by the next state fetch
+}
+
+async function handleToggleCriticalBatteryShutdown() {
+    console.log("--- handleToggleCriticalBatteryShutdown called ---");
+
+    if (!uiElements.toggleCriticalBatteryShutdownBtn) {
+        console.error("Cannot toggle critical battery shutdown: button is null.");
+        return;
+    }
+
+    disableCommandButton(uiElements.toggleCriticalBatteryShutdownBtn, true);
+
+    try {
+        const currentConfig = appState.configDataCache || await fetchConfigApi();
+        if (!currentConfig?.battery) {
+            console.error("Battery config is unavailable.");
+            alert("Cannot change critical battery shutdown because battery config is unavailable.");
+            return;
+        }
+
+        const isEnabled = !!currentConfig.battery.critical_battery_motor_shutdown_enabled;
+        const configToSend = JSON.parse(JSON.stringify(currentConfig));
+        configToSend.battery.critical_battery_motor_shutdown_enabled = !isEnabled;
+
+        console.log(`Saving critical battery shutdown = ${!isEnabled}`);
+        const saveResult = await postConfigApi(configToSend);
+        if (!saveResult) {
+            return;
+        }
+
+        await fetchConfigApi();
+        await fetchStateApi();
+        updateStatusSectionUI();
+    } catch (error) {
+        console.error("Error toggling critical battery shutdown:", error);
+        alert(`Error toggling critical battery shutdown: ${error.message || 'Unknown error'}`);
+    } finally {
+        disableCommandButton(uiElements.toggleCriticalBatteryShutdownBtn, false);
+    }
 }
 
 
@@ -179,9 +191,9 @@ function startDataFetching() {
 
     // Fetch initial state and data immediately, handle potential errors
     // Use Promise.all to fetch state and first telemetry data concurrently
-    Promise.all([fetchStateApi(), updateTelemetryData()])
+    Promise.all([fetchConfigApi(), fetchStateApi(), updateTelemetryData()])
         .then(() => {
-            console.log("Initial state and telemetry fetched.");
+            console.log("Initial config, state, and telemetry fetched.");
             updateStatusSectionUI(); // Update UI after first state fetch
             drawAllGraphs(); // Draw graphs after initial data
         })

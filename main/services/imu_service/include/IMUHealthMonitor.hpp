@@ -24,9 +24,9 @@ private:
     static constexpr const char* TAG = "IMUHealthMonitor";
 
     IIMUFaultSink& m_faultSink;
-    uint8_t m_i2c_failure_threshold;
-    uint8_t m_no_data_failure_threshold;
-    int64_t m_data_timeout_us;
+    std::atomic<uint8_t> m_i2c_failure_threshold;
+    std::atomic<uint8_t> m_no_data_failure_threshold;
+    std::atomic<int64_t> m_data_timeout_us;
 
     std::atomic<int64_t> m_last_pet_time_us{0};
     std::atomic<uint8_t> m_consecutive_i2c_failures{0};

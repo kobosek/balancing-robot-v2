@@ -22,8 +22,8 @@ cJSON* JsonConfigParser::serializeBehavior(const SystemBehaviorConfig& b) const 
     cJSON_AddNumberToObject(obj, "max_target_angular_velocity_dps", b.max_target_angular_velocity_dps);
     cJSON_AddNumberToObject(obj, "fall_pitch_threshold_deg", b.fall_pitch_threshold_deg);
     cJSON_AddNumberToObject(obj, "fall_threshold_duration_ms", b.fall_threshold_duration_ms);
-    cJSON_AddNumberToObject(obj, "recovery_pitch_threshold_deg", b.recovery_pitch_threshold_deg);
-    cJSON_AddNumberToObject(obj, "recovery_hold_duration_ms", b.recovery_hold_duration_ms);
+    cJSON_AddNumberToObject(obj, "auto_balance_pitch_threshold_deg", b.auto_balance_pitch_threshold_deg);
+    cJSON_AddNumberToObject(obj, "auto_balance_hold_duration_ms", b.auto_balance_hold_duration_ms);
     cJSON_AddNumberToObject(obj, "battery_oversampling_count", b.battery_oversampling_count);
     cJSON_AddNumberToObject(obj, "battery_read_interval_ms", b.battery_read_interval_ms);
     cJSON_AddNumberToObject(obj, "imu_health_i2c_fail_threshold", b.imu_health_i2c_fail_threshold);
@@ -40,8 +40,19 @@ bool JsonConfigParser::deserializeBehavior(cJSON* obj, SystemBehaviorConfig& b) 
     GET_JSON_NUMBER_DOUBLE(obj, "max_target_angular_velocity_dps", b.max_target_angular_velocity_dps);
     GET_JSON_NUMBER_DOUBLE(obj, "fall_pitch_threshold_deg", b.fall_pitch_threshold_deg);
     GET_JSON_NUMBER_INT(obj, "fall_threshold_duration_ms", b.fall_threshold_duration_ms);
-    GET_JSON_NUMBER_DOUBLE(obj, "recovery_pitch_threshold_deg", b.recovery_pitch_threshold_deg);
-    GET_JSON_NUMBER_INT(obj, "recovery_hold_duration_ms", b.recovery_hold_duration_ms);
+    cJSON* auto_balance_pitch_item = cJSON_GetObjectItem(obj, "auto_balance_pitch_threshold_deg");
+    if (auto_balance_pitch_item && cJSON_IsNumber(auto_balance_pitch_item)) {
+        b.auto_balance_pitch_threshold_deg = auto_balance_pitch_item->valuedouble;
+    } else {
+        GET_JSON_NUMBER_DOUBLE(obj, "recovery_pitch_threshold_deg", b.auto_balance_pitch_threshold_deg);
+    }
+
+    cJSON* auto_balance_hold_item = cJSON_GetObjectItem(obj, "auto_balance_hold_duration_ms");
+    if (auto_balance_hold_item && cJSON_IsNumber(auto_balance_hold_item)) {
+        b.auto_balance_hold_duration_ms = auto_balance_hold_item->valueint;
+    } else {
+        GET_JSON_NUMBER_INT(obj, "recovery_hold_duration_ms", b.auto_balance_hold_duration_ms);
+    }
     GET_JSON_NUMBER_INT(obj, "battery_oversampling_count", b.battery_oversampling_count);
     GET_JSON_NUMBER_INT(obj, "battery_read_interval_ms", b.battery_read_interval_ms);
     GET_JSON_NUMBER_INT(obj, "imu_health_i2c_fail_threshold", b.imu_health_i2c_fail_threshold);
@@ -189,6 +200,7 @@ esp_err_t JsonConfigParser::serialize(const ConfigData& config, std::string& out
     cJSON_AddNumberToObject(section, "voltage_divider_ratio", config.battery.voltage_divider_ratio);
     cJSON_AddNumberToObject(section, "voltage_max", config.battery.voltage_max);
     cJSON_AddNumberToObject(section, "voltage_min", config.battery.voltage_min);
+    cJSON_AddBoolToObject(section, "critical_battery_motor_shutdown_enabled", config.battery.critical_battery_motor_shutdown_enabled);
     cJSON_AddNumberToObject(section, "adc_bitwidth", config.battery.adc_bitwidth);
     cJSON_AddNumberToObject(section, "adc_atten", config.battery.adc_atten);
     if (!cJSON_AddItemToObject(root, "battery", section)) { ESP_LOGE(TAG, "Failed add battery obj"); cJSON_Delete(section); return ESP_FAIL; }
@@ -333,6 +345,7 @@ esp_err_t JsonConfigParser::deserialize(const std::string& input, ConfigData& co
         GET_JSON_NUMBER_DOUBLE(battery_section, "voltage_divider_ratio", tempConfig.battery.voltage_divider_ratio);
         GET_JSON_NUMBER_DOUBLE(battery_section, "voltage_max", tempConfig.battery.voltage_max);
         GET_JSON_NUMBER_DOUBLE(battery_section, "voltage_min", tempConfig.battery.voltage_min);
+        GET_JSON_BOOL(battery_section, "critical_battery_motor_shutdown_enabled", tempConfig.battery.critical_battery_motor_shutdown_enabled);
         GET_JSON_NUMBER_INT_CAST(battery_section, "adc_bitwidth", tempConfig.battery.adc_bitwidth, adc_bitwidth_t);
         GET_JSON_NUMBER_INT_CAST(battery_section, "adc_atten", tempConfig.battery.adc_atten, adc_atten_t);
     } else { ESP_LOGW(TAG, "'battery' section missing."); }

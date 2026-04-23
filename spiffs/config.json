@@ -60,9 +60,10 @@
   },
   "battery": {
     "adc_pin": 2,
-    "voltage_divider_ratio": 2.0,
+    "voltage_divider_ratio": 1.4545455,
     "voltage_max": 4.2,
     "voltage_min": 3.3,
+    "critical_battery_motor_shutdown_enabled": false,
     "adc_bitwidth": 12,
     "adc_atten": 3
   },
@@ -109,10 +110,10 @@
     "max_target_angular_velocity_dps": 60.0,
     "fall_pitch_threshold_deg": 45.0,
     "fall_threshold_duration_ms": 500,
-    "recovery_pitch_threshold_deg": 5.0,
-    "recovery_hold_duration_ms": 2000,
+    "auto_balance_pitch_threshold_deg": 5.0,
+    "auto_balance_hold_duration_ms": 2000,
     "battery_oversampling_count": 64,
-    "battery_read_interval_ms": 5000,
+    "battery_read_interval_ms": 1000,
     "imu_health_i2c_fail_threshold": 5,
     "imu_health_no_data_threshold": 5,
     "imu_health_data_timeout_ms": 500

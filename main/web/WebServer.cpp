@@ -27,18 +27,19 @@
 #include <algorithm>
 
 // Constructor: Instantiate handlers, injecting dependencies
-WebServer::WebServer(ConfigurationService& configService, StateManager& stateManager, BalanceMonitor& balanceMonitor, EventBus& eventBus, const WebServerConfig& initialWebConfig)
+WebServer::WebServer(ConfigurationService& configService, StateManager& stateManager, BalanceMonitor& balanceMonitor, BatteryService& batteryService, EventBus& eventBus, const WebServerConfig& initialWebConfig)
     : server(nullptr),
       m_configService(configService),
       m_stateManager(stateManager),
       m_balanceMonitor(balanceMonitor),
+      m_batteryService(batteryService),
       m_eventBus(eventBus)
 {
     m_staticFileHandler = std::make_unique<StaticFileHandler>("/spiffs");
     m_telemetryHandler = std::make_unique<TelemetryHandler>(initialWebConfig);
     m_configApiHandler = std::make_unique<ConfigApiHandler>(m_configService);
     m_commandApiHandler = std::make_unique<CommandApiHandler>(m_eventBus);
-    m_stateApiHandler = std::make_unique<StateApiHandler>(m_stateManager, m_balanceMonitor);
+    m_stateApiHandler = std::make_unique<StateApiHandler>(m_stateManager, m_balanceMonitor, m_batteryService);
     ESP_LOGI(TAG, "Webserver handlers created.");
 }
 
