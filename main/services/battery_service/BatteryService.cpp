@@ -277,8 +277,10 @@ void BatteryService::updateBatteryStatus() {
         esp_rom_delay_us(kBatterySampleDelayUs);
     }
 
-    std::vector<int> raw_samples;
-    raw_samples.reserve(m_oversampling_count);
+    m_raw_samples.clear();
+    if (m_raw_samples.capacity() < static_cast<size_t>(m_oversampling_count)) {
+        m_raw_samples.reserve(m_oversampling_count);
+    }
 
     for (int i = 0; i < m_oversampling_count; i++) {
         int raw_value;
@@ -287,34 +289,42 @@ void BatteryService::updateBatteryStatus() {
             ESP_LOGE(TAG, "ADC read failed (%s)! Skipping sample %d.", esp_err_to_name(ret), i);
             continue; // Skip this sample
         }
-        raw_samples.push_back(raw_value);
+        m_raw_samples.push_back(raw_value);
         // Optionally add small delay between samples if ADC needs it
         if (i < m_oversampling_count - 1) {
              esp_rom_delay_us(kBatterySampleDelayUs);
         }
     }
 
-    if (raw_samples.empty()) {
+    if (m_raw_samples.empty()) {
         ESP_LOGE(TAG, "No successful ADC samples obtained after %d attempts.", m_oversampling_count);
         return; // Cannot calculate voltage
     }
 
-    std::sort(raw_samples.begin(), raw_samples.end());
     int trim_count = 0;
-    if (raw_samples.size() >= 8) {
-        trim_count = static_cast<int>(raw_samples.size() / 8); // Trim 12.5% on each side.
+    if (m_raw_samples.size() >= 8) {
+        trim_count = static_cast<int>(m_raw_samples.size() / 8); // Trim 12.5% on each side.
     }
     const int start_index = trim_count;
-    const int end_index = static_cast<int>(raw_samples.size()) - trim_count;
+    const int end_index = static_cast<int>(m_raw_samples.size()) - trim_count;
+
+    auto samples_begin = m_raw_samples.begin();
+    auto samples_end = m_raw_samples.end();
+    auto trimmed_begin = samples_begin + start_index;
+    auto trimmed_end = samples_begin + end_index;
+    if (trim_count > 0) {
+        std::nth_element(samples_begin, trimmed_begin, samples_end);
+        std::nth_element(trimmed_begin, trimmed_end, samples_end);
+    }
 
     int64_t raw_sum = 0;
-    for (int i = start_index; i < end_index; i++) {
-        raw_sum += raw_samples[i];
+    for (auto it = trimmed_begin; it != trimmed_end; ++it) {
+        raw_sum += *it;
     }
 
     const int filtered_sample_count = std::max(1, end_index - start_index);
     int adc_raw = static_cast<int>(raw_sum / filtered_sample_count);
-    ESP_LOGD(TAG, "Raw ADC value: %d (trimmed average of %d/%d samples)", adc_raw, filtered_sample_count, static_cast<int>(raw_samples.size()));
+    ESP_LOGD(TAG, "Raw ADC value: %d (trimmed average of %d/%d samples)", adc_raw, filtered_sample_count, static_cast<int>(m_raw_samples.size()));
 
     // Convert to voltage
     const float adc_full_scale_voltage = estimate_adc_full_scale_voltage(static_cast<adc_atten_t>(m_config.adc_atten));

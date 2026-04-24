@@ -22,6 +22,55 @@
 #include <memory>
 #include <cstring>
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
+
+namespace {
+const char* findJsonFieldValue(const char* payload, const char* fieldName) {
+    const char* field = std::strstr(payload, fieldName);
+    if (!field) {
+        return nullptr;
+    }
+
+    const char* value = std::strchr(field + std::strlen(fieldName), ':');
+    if (!value) {
+        return nullptr;
+    }
+
+    value++;
+    while (*value != '\0' && std::isspace(static_cast<unsigned char>(*value))) {
+        value++;
+    }
+    return value;
+}
+
+bool hasJsonStringField(const char* payload, const char* fieldName, const char* expectedValue) {
+    const char* value = findJsonFieldValue(payload, fieldName);
+    if (!value || *value != '"') {
+        return false;
+    }
+
+    value++;
+    const size_t expectedLength = std::strlen(expectedValue);
+    return std::strncmp(value, expectedValue, expectedLength) == 0 && value[expectedLength] == '"';
+}
+
+bool parseJsonNumberField(const char* payload, const char* fieldName, float& outValue) {
+    const char* value = findJsonFieldValue(payload, fieldName);
+    if (!value) {
+        return false;
+    }
+
+    char* end = nullptr;
+    const float parsed = std::strtof(value, &end);
+    if (end == value) {
+        return false;
+    }
+
+    outValue = parsed;
+    return true;
+}
+} // namespace
 
 WebServer::WebServer(EventBus& eventBus,
                      std::unique_ptr<StaticFileHandler> staticFileHandler,
@@ -245,14 +294,47 @@ esp_err_t WebServer::handleWebSocketFrame(httpd_req_t *req, httpd_ws_frame_t *ws
         return ESP_OK;
     }
 
+    const char* payload = reinterpret_cast<const char*>(ws_pkt->payload);
+
+    if (hasJsonStringField(payload, "\"type\"", "joystick")) {
+        float joystick_x = 0.0f;
+        float joystick_y = 0.0f;
+        if (!parseJsonNumberField(payload, "\"x\"", joystick_x) ||
+            !parseJsonNumberField(payload, "\"y\"", joystick_y)) {
+            ESP_LOGE(TAG, "WS: Missing/invalid 'x' or 'y' for type 'joystick'");
+            return ESP_FAIL;
+        }
+
+        joystick_x = std::max(-1.0f, std::min(1.0f, joystick_x));
+        joystick_y = std::max(-1.0f, std::min(1.0f, joystick_y));
+
+        ESP_LOGV(TAG, "WS: Publishing JOYSTICK_INPUT_RECEIVED: X=%.3f, Y=%.3f", joystick_x, joystick_y);
+        UI_JoystickInput js_event(joystick_x, joystick_y);
+        m_eventBus.publish(js_event);
+        return ESP_OK;
+    }
+
+    if (hasJsonStringField(payload, "\"type\"", "ping")) {
+        ESP_LOGD(TAG, "WS: Received ping, sending pong.");
+        httpd_ws_frame_t pong_pkt;
+        memset(&pong_pkt, 0, sizeof(httpd_ws_frame_t));
+        const char *pong_payload = "{\"type\":\"pong\"}";
+        pong_pkt.payload = (uint8_t*)pong_payload;
+        pong_pkt.len = strlen(pong_payload);
+        pong_pkt.type = HTTPD_WS_TYPE_TEXT;
+        esp_err_t ret = httpd_ws_send_frame(req, &pong_pkt);
+        if (ret != ESP_OK) { ESP_LOGE(TAG, "httpd_ws_send_frame (pong) failed: %d", ret); }
+        return ESP_OK;
+    }
+
     esp_err_t ret = ESP_FAIL; // Default to fail
 
     // Use unique_ptr for RAII cleanup of cJSON object
     auto cjson_deleter = [](cJSON* ptr){ if(ptr) cJSON_Delete(ptr); };
-    std::unique_ptr<cJSON, decltype(cjson_deleter)> root_ptr(cJSON_Parse((const char*)ws_pkt->payload));
+    std::unique_ptr<cJSON, decltype(cjson_deleter)> root_ptr(cJSON_Parse(payload), cjson_deleter);
     cJSON* root = root_ptr.get();
 
-    if (!root) { ESP_LOGE(TAG, "WS: Failed to parse JSON: %s", (const char*)ws_pkt->payload); return ESP_FAIL; }
+    if (!root) { ESP_LOGE(TAG, "WS: Failed to parse JSON: %s", payload); return ESP_FAIL; }
 
     cJSON *type_item = cJSON_GetObjectItemCaseSensitive(root, "type");
     if (!type_item || !cJSON_IsString(type_item) || !type_item->valuestring) { ESP_LOGE(TAG, "WS: Missing/invalid 'type' field"); return ESP_FAIL; }
@@ -265,33 +347,30 @@ esp_err_t WebServer::handleWebSocketFrame(httpd_req_t *req, httpd_ws_frame_t *ws
 
         if (!x_item || !cJSON_IsNumber(x_item) || !y_item || !cJSON_IsNumber(y_item)) {
             ESP_LOGE(TAG, "WS: Missing/invalid 'x' or 'y' for type 'joystick'");
-            return ESP_FAIL; // Bad request format
+            return ESP_FAIL;
         }
 
-        float joystick_x = x_item->valuedouble;
-        float joystick_y = y_item->valuedouble;
+        float joystick_x = static_cast<float>(x_item->valuedouble);
+        float joystick_y = static_cast<float>(y_item->valuedouble);
 
-        // Clamp received values to expected range [-1.0, 1.0]
         joystick_x = std::max(-1.0f, std::min(1.0f, joystick_x));
         joystick_y = std::max(-1.0f, std::min(1.0f, joystick_y));
 
         ESP_LOGV(TAG, "WS: Publishing JOYSTICK_INPUT_RECEIVED: X=%.3f, Y=%.3f", joystick_x, joystick_y);
         UI_JoystickInput js_event(joystick_x, joystick_y);
-        m_eventBus.publish(js_event); // Use the member variable
-
-        ret = ESP_OK; // Successfully processed
+        m_eventBus.publish(js_event);
+        ret = ESP_OK;
 
     } else if (type_str == "ping") {
-        // Example: Respond to a custom ping from client
         ESP_LOGD(TAG, "WS: Received ping, sending pong.");
-        httpd_ws_frame_t pong_pkt; memset(&pong_pkt, 0, sizeof(httpd_ws_frame_t));
+        httpd_ws_frame_t pong_pkt;
+        memset(&pong_pkt, 0, sizeof(httpd_ws_frame_t));
         const char *pong_payload = "{\"type\":\"pong\"}";
         pong_pkt.payload = (uint8_t*)pong_payload;
         pong_pkt.len = strlen(pong_payload);
         pong_pkt.type = HTTPD_WS_TYPE_TEXT;
-        ret = httpd_ws_send_frame(req, &pong_pkt); // Send pong back
+        ret = httpd_ws_send_frame(req, &pong_pkt);
         if (ret != ESP_OK) { ESP_LOGE(TAG, "httpd_ws_send_frame (pong) failed: %d", ret); }
-        // Even if send fails, we processed the ping, so maybe return OK? Depends on desired behavior.
         ret = ESP_OK;
 
     } else {

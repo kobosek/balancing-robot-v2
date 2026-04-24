@@ -12,6 +12,8 @@
 #include "esp_log.h"
 #include <cstring>
 #include <algorithm> // For std::max
+#include <cstdio>
+#include <string>
 
 // Constructor takes initial WebServerConfig
 TelemetryHandler::TelemetryHandler(const WebServerConfig& initialWebConfig) :
@@ -64,14 +66,8 @@ esp_err_t TelemetryHandler::handleRequest(httpd_req_t *req) {
     ESP_LOGV(TAG, "Received request for /data");
     esp_err_t final_ret = ESP_FAIL;
 
-    cJSON *root = nullptr;
-    char *json_string = nullptr;
-    auto cjson_deleter = [](cJSON* ptr){ if(ptr) cJSON_Delete(ptr); };
-    auto char_deleter = [](char* ptr){ if(ptr) free(ptr); };
-    std::unique_ptr<cJSON, decltype(cjson_deleter)> root_ptr(nullptr, cjson_deleter);
-    std::unique_ptr<char, decltype(char_deleter)> json_str_ptr(nullptr, char_deleter);
-
     std::vector<TelemetryDataPoint> dataToSend;
+    std::string json;
     // Note: Interval is no longer fetched from ConfigService here. If needed,
     // the interval should also be stored locally and updated via handleConfigUpdate.
     // For now, assuming the JS doesn't strictly *need* the interval from this specific response.
@@ -83,43 +79,47 @@ esp_err_t TelemetryHandler::handleRequest(httpd_req_t *req) {
             m_telemetryBuffer.clear();
         }
 
-        // int intervalMs = m_configService.getMainLoopConfig().interval_ms; // REMOVED
+        json.reserve(12 + dataToSend.size() * 96);
+        json = "{\"data\":[";
 
-        root_ptr.reset(cJSON_CreateObject()); root = root_ptr.get();
-        if (!root) { ESP_LOGE(TAG, "Failed create root JSON"); final_ret = ESP_FAIL; break; }
-        // if (!cJSON_AddNumberToObject(root, "interval_ms", intervalMs)) { ESP_LOGE(TAG, "Failed add interval"); final_ret = ESP_FAIL; break; } // REMOVED
-        cJSON* dataArray = cJSON_AddArrayToObject(root, "data");
-        if (!dataArray) { ESP_LOGE(TAG, "Failed create data array"); final_ret = ESP_FAIL; break; }
-
-        for (const auto& point : dataToSend) {
-            cJSON *pointArray = cJSON_CreateArray();
-            if (!pointArray) { ESP_LOGW(TAG, "Failed create point array, skipping"); continue; }
-            // Add data in the order defined in TelemetryDataPoint.hpp
-            cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.pitch_deg));             // 0
-            cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.speedLeft_dps));         // 1
-            cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.speedRight_dps));        // 2
-            cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.batteryVoltage));        // 3
-            cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.systemState));           // 4
-            cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.speedSetpointLeft_dps)); // 5
-            cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.speedSetpointRight_dps));// 6
-            cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.desiredAngle_deg));      // 7
-            cJSON_AddItemToArray(pointArray, cJSON_CreateNumber(point.yawRate_dps));           // 8
-
-            cJSON_AddItemToArray(dataArray, pointArray);
+        char pointBuffer[192];
+        bool format_failed = false;
+        for (size_t i = 0; i < dataToSend.size(); ++i) {
+            const auto& point = dataToSend[i];
+            const int written = std::snprintf(
+                pointBuffer,
+                sizeof(pointBuffer),
+                "%s[%.3f,%.3f,%.3f,%.3f,%d,%.3f,%.3f,%.3f,%.3f]",
+                i == 0 ? "" : ",",
+                static_cast<double>(point.pitch_deg),
+                static_cast<double>(point.speedLeft_dps),
+                static_cast<double>(point.speedRight_dps),
+                static_cast<double>(point.batteryVoltage),
+                point.systemState,
+                static_cast<double>(point.speedSetpointLeft_dps),
+                static_cast<double>(point.speedSetpointRight_dps),
+                static_cast<double>(point.desiredAngle_deg),
+                static_cast<double>(point.yawRate_dps));
+            if (written < 0 || written >= static_cast<int>(sizeof(pointBuffer))) {
+                ESP_LOGE(TAG, "Failed format telemetry point");
+                format_failed = true;
+                break;
+            }
+            json.append(pointBuffer, written);
         }
+        if (format_failed) { final_ret = ESP_FAIL; break; }
 
-        json_str_ptr.reset(cJSON_PrintUnformatted(root)); json_string = json_str_ptr.get();
-        if (!json_string) { ESP_LOGE(TAG, "Failed print JSON"); final_ret = ESP_FAIL; break; }
+        json += "]}";
         final_ret = ESP_OK;
 
-    } while (false); // End of JSON creation block
+    } while (false);
 
     // --- Send Response or Error ---
     if (final_ret == ESP_OK) {
         httpd_resp_set_type(req, "application/json");
         httpd_resp_set_hdr(req, "Cache-Control", "no-store");
         httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-        esp_err_t send_ret = httpd_resp_send(req, json_string, strlen(json_string));
+        esp_err_t send_ret = httpd_resp_send(req, json.c_str(), json.size());
         if (send_ret == ESP_OK) { ESP_LOGV(TAG, "Sent %zu telemetry points.", dataToSend.size()); final_ret = ESP_OK; }
         else { ESP_LOGE(TAG, "Failed to send telemetry JSON response (%s)", esp_err_to_name(send_ret)); final_ret = ESP_FAIL; }
     } else {

@@ -10,6 +10,7 @@
 #include "EventHandler.hpp"             // For EventHandler base class
 #include "esp_log.h"
 #include <mutex>
+#include <vector>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -53,6 +54,7 @@ private:
 
     // Local copies of relevant config values (updated by handler)
     int m_oversampling_count;
+    std::vector<int> m_raw_samples;
     // TickType_t m_read_interval_ticks; // Task gets interval directly
 
     mutable std::mutex m_status_mutex;

@@ -133,12 +133,32 @@ export function updateCurrentSystemState(newStateData) {
     return false;
 }
 export function updateBatteryState(voltage, percentage) { appState.currentBattery.voltage = voltage; appState.currentBattery.percentage = percentage; }
+function normalizeTelemetryValue(value, fallbackValue) {
+    if (value !== null && value !== undefined) {
+        const parsedValue = parseFloat(value);
+        if (!isNaN(parsedValue)) { return parsedValue; }
+    }
+    return fallbackValue !== null ? fallbackValue : null;
+}
 export function updateTelemetryArray(key, value) {
     if (!appState.telemetryData.hasOwnProperty(key)) { console.warn(`Skipping non-existent telemetry key: ${key}`); return; }
     const targetArray = appState.telemetryData[key];
-    let validValue = null;
-    if (value !== null && value !== undefined) { const parsedValue = parseFloat(value); if (!isNaN(parsedValue)) { validValue = parsedValue; } }
-    if (validValue === null) { const lastVal = targetArray.length > 0 ? targetArray[targetArray.length - 1] : null; if (lastVal !== null) { validValue = lastVal; } }
+    const lastVal = targetArray.length > 0 ? targetArray[targetArray.length - 1] : null;
+    const validValue = normalizeTelemetryValue(value, lastVal);
     targetArray.push(validValue);
-    if (targetArray.length > MAX_DATA_POINTS) { targetArray.shift(); }
+    const overflow = targetArray.length - MAX_DATA_POINTS;
+    if (overflow > 0) { targetArray.splice(0, overflow); }
+}
+export function updateTelemetryArrays(batchValuesByKey) {
+    Object.entries(batchValuesByKey).forEach(([key, values]) => {
+        if (!appState.telemetryData.hasOwnProperty(key)) { console.warn(`Skipping non-existent telemetry key: ${key}`); return; }
+        const targetArray = appState.telemetryData[key];
+        let lastVal = targetArray.length > 0 ? targetArray[targetArray.length - 1] : null;
+        values.forEach((value) => {
+            lastVal = normalizeTelemetryValue(value, lastVal);
+            targetArray.push(lastVal);
+        });
+        const overflow = targetArray.length - MAX_DATA_POINTS;
+        if (overflow > 0) { targetArray.splice(0, overflow); }
+    });
 }

@@ -1,4 +1,4 @@
-import { appState, updateTelemetryJsonCache, updateTelemetryArray, updateBatteryState } from './state.js';
+import { appState, updateTelemetryJsonCache, updateTelemetryArrays, updateBatteryState } from './state.js';
 import { fetchDataApi } from './api.js';
 import { drawAllGraphs } from './graph.js';
 import { updateLegendUI, updateBatteryUI } from './ui.js';
@@ -19,6 +19,8 @@ export async function updateTelemetryData() {
 
     let dataUpdated = false;
     let latestPointMap = null;
+    const telemetryKeys = Object.keys(appState.telemetryData);
+    const batchValuesByKey = Object.fromEntries(telemetryKeys.map(key => [key, []]));
 
     batchData.forEach((point) => {
         // --- MODIFIED: Check length needed for new data format (9 elements) ---
@@ -39,10 +41,9 @@ export async function updateTelemetryData() {
                 joystickY:          appState.joystick.currentData.y,
             };
 
-            // Iterate through known keys in appState.telemetryData and update arrays
-            Object.keys(appState.telemetryData).forEach(key => {
+            telemetryKeys.forEach(key => {
                 if (currentDataMap.hasOwnProperty(key)) {
-                     updateTelemetryArray(key, currentDataMap[key]);
+                     batchValuesByKey[key].push(currentDataMap[key]);
                 }
             });
 
@@ -52,6 +53,10 @@ export async function updateTelemetryData() {
             console.warn(`Skipping invalid point array format or insufficient length (${point?.length || 'null'} < 9):`, point);
         }
     });
+
+    if (dataUpdated) {
+        updateTelemetryArrays(batchValuesByKey);
+    }
 
     // Update Legend and Battery Status using the LATEST point's mapped data
     if (latestPointMap) {

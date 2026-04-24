@@ -30,12 +30,15 @@ public:
     void publish(const BaseEvent& event);
 
 private:
+    using HandlerList = std::vector<std::shared_ptr<EventHandler>>;
+    using HandlerListPtr = std::shared_ptr<const HandlerList>;
+
     EventBus() = default;
     ~EventBus() = default;
 
     void subscribe(EventKey eventKey, const char* eventName, std::shared_ptr<EventHandler> handler);
     
     static constexpr const char* TAG = "EventBus";
-    std::map<EventKey, std::vector<std::shared_ptr<EventHandler>>> m_subscribers;
+    std::map<EventKey, HandlerListPtr> m_subscribers;
     std::mutex m_mutex;
 };
