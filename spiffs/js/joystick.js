@@ -1,9 +1,13 @@
 import { appState } from './state.js';
 import { uiElements } from './ui.js';
-import { sendWebSocketMessage } from './websocket.js';
 import { JOYSTICK_SEND_INTERVAL_MS } from './constants.js';
 
 let sendIntervalTimer = null;
+let sendJoystickPayload = null;
+
+export function setJoystickTransport(sender) {
+    sendJoystickPayload = typeof sender === 'function' ? sender : null;
+}
 
 export function setupJoystick() {
     if (typeof nipplejs === 'undefined' || typeof nipplejs.create !== 'function') {
@@ -167,12 +171,12 @@ function sendJoystickDataIfNeeded() {
     if (shouldSend) {
         const payload = { type: "joystick", x: sendX, y: sendY };
         // console.log("[Joystick] Sending WS:", payload); // Can be noisy
-        if (sendWebSocketMessage(payload)) {
+        if (sendJoystickPayload && sendJoystickPayload(payload)) {
             // Update last sent only on successful send
             appState.joystick.lastSentData.x = sendX;
             appState.joystick.lastSentData.y = sendY;
         } else {
-             console.warn("Failed to send joystick data via WebSocket.");
+             console.warn("Failed to send joystick data via configured transport.");
         }
     }
 }

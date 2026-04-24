@@ -15,16 +15,8 @@
 #include <cstdio>
 
 namespace {
-constexpr float MIN_IDENTIFICATION_TIME_S = 0.02f;
 constexpr float MIN_EXTRA_STEP_DELTA = 0.03f;
 constexpr float MAX_SETTLE_WAIT_S = 1.5f;
-constexpr float MAX_RESPONSE_GAIN_RATIO = 2.5f;
-constexpr float MAX_RESPONSE_TIME_RATIO = 4.0f;
-constexpr float MAX_DIRECTION_GAIN_RATIO = 3.5f;
-
-float averagePositive(float a, float b) {
-    return (a + b) * 0.5f;
-}
 }
 
 PidTuningService::PidTuningService(EventBus& eventBus,
@@ -513,219 +505,35 @@ PidTuningPhase PidTuningService::currentStepPhaseLocked() const {
 }
 
 PidTuningService::StepResult PidTuningService::analyzeCurrentStepLocked() const {
-    StepResult result;
-    if (m_stepSamples.empty()) {
-        return result;
-    }
-
-    const float duration_s = m_config.step_duration_ms / 1000.0f;
-    const float finalWindowStart_s = std::max(duration_s * 0.75f, duration_s - 0.35f);
-    float finalSum = 0.0f;
-    int finalCount = 0;
-    for (const auto& sample : m_stepSamples) {
-        if (sample.time_s >= finalWindowStart_s) {
-            finalSum += sample.speed_dps;
-            ++finalCount;
-        }
-    }
-    if (finalCount == 0) {
-        return result;
-    }
-
-    const float steadySpeed = finalSum / static_cast<float>(finalCount);
-    float maxFinalDeviation = 0.0f;
-    for (const auto& sample : m_stepSamples) {
-        if (sample.time_s >= finalWindowStart_s) {
-            maxFinalDeviation = std::max(maxFinalDeviation, std::fabs(sample.speed_dps - steadySpeed));
-        }
-    }
-    const float delta = steadySpeed - m_stepBaseline_dps;
     if (m_stepIndex >= m_stepPlan.size()) {
-        return result;
+        return StepResult();
     }
 
-    const float effort = m_stepPlan[m_stepIndex].effort;
-    const float absDelta = std::fabs(delta);
-    if (absDelta < m_config.min_response_dps || delta * effort <= 0.0f) {
-        return result;
-    }
-
-    const float maxAllowedDeviation = std::max(20.0f, absDelta * 0.35f);
-    if (maxFinalDeviation > maxAllowedDeviation) {
-        ESP_LOGW(TAG,
-                 "Rejecting unstable step response: final deviation %.1f dps exceeds %.1f dps",
-                 maxFinalDeviation,
-                 maxAllowedDeviation);
-        return result;
-    }
-
-    float t10 = duration_s;
-    float t632 = duration_s;
-    bool found10 = false;
-    bool found632 = false;
-    for (const auto& sample : m_stepSamples) {
-        const float response = std::fabs(sample.speed_dps - m_stepBaseline_dps);
-        if (!found10 && response >= absDelta * 0.10f) {
-            t10 = sample.time_s;
-            found10 = true;
-        }
-        if (!found632 && response >= absDelta * 0.632f) {
-            t632 = sample.time_s;
-            found632 = true;
-        }
-    }
-
-    if (!found10 || !found632) {
-        return result;
-    }
-
-    result.valid = true;
-    result.gain_dps_per_effort = absDelta / std::fabs(effort);
-    result.deadTime_s = std::max(t10, MIN_IDENTIFICATION_TIME_S);
-    result.timeConstant_s = std::max(t632 - result.deadTime_s, MIN_IDENTIFICATION_TIME_S);
-    result.steadySpeed_dps = steadySpeed;
-    return result;
-}
-
-bool PidTuningService::averageStepResultsLocked(bool leftWheel, bool forward, StepResult& averageResult, std::string& error) const {
-    float gainSum = 0.0f;
-    float deadSum = 0.0f;
-    float timeConstantSum = 0.0f;
-    float steadySpeedSum = 0.0f;
-    float minGain = 0.0f;
-    float maxGain = 0.0f;
-    float minDead = 0.0f;
-    float maxDead = 0.0f;
-    float minTimeConstant = 0.0f;
-    float maxTimeConstant = 0.0f;
-    int count = 0;
-
-    for (size_t i = 0; i < m_stepPlan.size() && i < m_stepResults.size(); ++i) {
-        const StepDefinition& step = m_stepPlan[i];
-        const StepResult& result = m_stepResults[i];
-        const bool stepForward = step.effort > 0.0f;
-        if (step.leftWheel != leftWheel || stepForward != forward || !result.valid) {
-            continue;
-        }
-
-        gainSum += result.gain_dps_per_effort;
-        deadSum += result.deadTime_s;
-        timeConstantSum += result.timeConstant_s;
-        steadySpeedSum += result.steadySpeed_dps;
-        if (count == 0) {
-            minGain = maxGain = result.gain_dps_per_effort;
-            minDead = maxDead = result.deadTime_s;
-            minTimeConstant = maxTimeConstant = result.timeConstant_s;
-        } else {
-            minGain = std::min(minGain, result.gain_dps_per_effort);
-            maxGain = std::max(maxGain, result.gain_dps_per_effort);
-            minDead = std::min(minDead, result.deadTime_s);
-            maxDead = std::max(maxDead, result.deadTime_s);
-            minTimeConstant = std::min(minTimeConstant, result.timeConstant_s);
-            maxTimeConstant = std::max(maxTimeConstant, result.timeConstant_s);
-        }
-        ++count;
-    }
-
-    if (count <= 0) {
-        error = "Tuning aborted: missing motor response samples";
-        return false;
-    }
-
-    if (count > 1) {
-        if (minGain <= 0.0f || (maxGain / minGain) > MAX_RESPONSE_GAIN_RATIO) {
-            error = "Tuning aborted: motor gain changed too much between effort levels";
-            return false;
-        }
-        if (minDead <= 0.0f || (maxDead / minDead) > MAX_RESPONSE_TIME_RATIO ||
-            minTimeConstant <= 0.0f || (maxTimeConstant / minTimeConstant) > MAX_RESPONSE_TIME_RATIO) {
-            error = "Tuning aborted: motor timing changed too much between effort levels";
-            return false;
-        }
-    }
-
-    const float invCount = 1.0f / static_cast<float>(count);
-    averageResult.valid = true;
-    averageResult.gain_dps_per_effort = gainSum * invCount;
-    averageResult.deadTime_s = deadSum * invCount;
-    averageResult.timeConstant_s = timeConstantSum * invCount;
-    averageResult.steadySpeed_dps = steadySpeedSum * invCount;
-    return true;
+    return PidTuningStepAnalyzer::analyzeStep(m_stepSamples,
+                                              m_stepBaseline_dps,
+                                              m_stepPlan[m_stepIndex].effort,
+                                              m_config);
 }
 
 bool PidTuningService::computeCandidateLocked(std::string& error) {
-    for (const auto& result : m_stepResults) {
-        if (!result.valid ||
-            !std::isfinite(result.gain_dps_per_effort) ||
-            !std::isfinite(result.deadTime_s) ||
-            !std::isfinite(result.timeConstant_s)) {
-            error = "Tuning aborted: incomplete step response";
-            return false;
-        }
-    }
-
     const bool tuneLeft = isTargetLeftWheelLocked();
-    StepResult forward;
-    StepResult reverse;
-    if (!averageStepResultsLocked(tuneLeft, true, forward, error) ||
-        !averageStepResultsLocked(tuneLeft, false, reverse, error)) {
-        if (error.empty()) {
-            error = "Tuning aborted: missing averaged motor response";
-        }
-        return false;
-    }
-
-    auto directionsAreConsistent = [](const StepResult& forwardResult, const StepResult& reverseResult) -> bool {
-        const float minGain = std::min(forwardResult.gain_dps_per_effort, reverseResult.gain_dps_per_effort);
-        const float maxGain = std::max(forwardResult.gain_dps_per_effort, reverseResult.gain_dps_per_effort);
-        return minGain > 0.0f && (maxGain / minGain) <= MAX_DIRECTION_GAIN_RATIO;
-    };
-
-    if (!directionsAreConsistent(forward, reverse)) {
-        error = "Tuning aborted: forward/reverse motor gains are inconsistent";
-        return false;
-    }
-
-    auto computePid = [&](const StepResult& forwardResult,
-                          const StepResult& reverseResult,
-                          PIDConfig base,
-                          PidTuningResponseMetrics& metrics) -> PIDConfig {
-        const float gain = averagePositive(forwardResult.gain_dps_per_effort, reverseResult.gain_dps_per_effort);
-        const float dead = std::max(averagePositive(forwardResult.deadTime_s, reverseResult.deadTime_s), MIN_IDENTIFICATION_TIME_S);
-        const float timeConstant = std::max(averagePositive(forwardResult.timeConstant_s, reverseResult.timeConstant_s), MIN_IDENTIFICATION_TIME_S);
-        const float kp = m_config.gain_scale * 1.2f * timeConstant / (gain * dead);
-        base.pid_kp = std::max(0.0f, std::min(500.0f, kp));
-        base.pid_ki = std::max(0.0f, std::min(500.0f, base.pid_kp / (2.0f * dead)));
-        base.pid_kd = std::max(0.0f, std::min(500.0f, base.pid_kp * 0.5f * dead));
-
-        metrics.valid = true;
-        metrics.forwardGain_dps_per_effort = forwardResult.gain_dps_per_effort;
-        metrics.reverseGain_dps_per_effort = reverseResult.gain_dps_per_effort;
-        metrics.deadTime_s = dead;
-        metrics.timeConstant_s = timeConstant;
-        metrics.steadySpeedForward_dps = forwardResult.steadySpeed_dps;
-        metrics.steadySpeedReverse_dps = reverseResult.steadySpeed_dps;
-        return base;
-    };
-
-    PidTuningResponseMetrics& metrics = tuneLeft ? m_status.leftMetrics : m_status.rightMetrics;
-    PIDConfig candidate = computePid(forward,
-                                     reverse,
-                                     tuneLeft ? m_originalLeft : m_originalRight,
-                                     metrics);
-
-    if (!std::isfinite(candidate.pid_kp) ||
-        !std::isfinite(candidate.pid_ki) ||
-        !std::isfinite(candidate.pid_kd) ||
-        candidate.pid_kp <= 1e-6f) {
-        error = "Tuning aborted: computed invalid PID gains";
+    const PidTuningCandidateResult result = PidTuningCandidateCalculator::compute(
+        m_stepPlan,
+        m_stepResults,
+        tuneLeft,
+        tuneLeft ? m_originalLeft : m_originalRight,
+        m_config);
+    if (!result.success) {
+        error = result.error;
         return false;
     }
 
     if (tuneLeft) {
-        m_candidateLeft = candidate;
+        m_candidateLeft = result.candidate;
+        m_status.leftMetrics = result.metrics;
     } else {
-        m_candidateRight = candidate;
+        m_candidateRight = result.candidate;
+        m_status.rightMetrics = result.metrics;
     }
     m_status.candidateLeft = m_candidateLeft;
     m_status.candidateRight = m_candidateRight;
@@ -734,19 +542,12 @@ bool PidTuningService::computeCandidateLocked(std::string& error) {
 }
 
 bool PidTuningService::analyzeValidationLocked(float target_dps, const std::string& wheelName, std::string& error) const {
-    if (m_validationFinalCount <= 0) {
-        error = "Tuning aborted: no validation samples";
-        return false;
-    }
-
-    const float averageSpeed = m_validationFinalSum_dps / static_cast<float>(m_validationFinalCount);
-    if (averageSpeed * target_dps <= 0.0f ||
-        std::fabs(averageSpeed) < std::max(m_config.min_response_dps, std::fabs(target_dps) * 0.25f)) {
-        error = "Tuning aborted: " + wheelName + " validation response too weak";
-        return false;
-    }
-
-    return true;
+    return PidTuningStepAnalyzer::analyzeValidation(m_validationFinalSum_dps,
+                                                    m_validationFinalCount,
+                                                    target_dps,
+                                                    m_config.min_response_dps,
+                                                    wheelName,
+                                                    error);
 }
 
 void PidTuningService::updateProgressLocked() {

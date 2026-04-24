@@ -3,6 +3,7 @@
 #include "BalancingAlgorithm.hpp"
 #include "EventHandler.hpp"
 #include "PIDController.hpp"
+#include "PidTuningAnalysis.hpp"
 #include "PidTuningTypes.hpp"
 #include "config/PidTuningConfig.hpp"
 #include "esp_err.h"
@@ -19,16 +20,6 @@ class UI_CancelPidTuning;
 class UI_DiscardPidTuning;
 class UI_SavePidTuning;
 class UI_StartPidTuning;
-
-struct PidTuningResponseMetrics {
-    bool valid = false;
-    float forwardGain_dps_per_effort = 0.0f;
-    float reverseGain_dps_per_effort = 0.0f;
-    float deadTime_s = 0.0f;
-    float timeConstant_s = 0.0f;
-    float steadySpeedForward_dps = 0.0f;
-    float steadySpeedReverse_dps = 0.0f;
-};
 
 struct PidTuningStatus {
     PidTuningState state = PidTuningState::IDLE;
@@ -61,24 +52,9 @@ public:
     std::string getHandlerName() const override { return TAG; }
 
 private:
-    struct StepSample {
-        float time_s = 0.0f;
-        float speed_dps = 0.0f;
-    };
-
-    struct StepResult {
-        bool valid = false;
-        float gain_dps_per_effort = 0.0f;
-        float deadTime_s = 0.0f;
-        float timeConstant_s = 0.0f;
-        float steadySpeed_dps = 0.0f;
-    };
-
-    struct StepDefinition {
-        bool leftWheel = true;
-        float effort = 0.0f;
-        PidTuningPhase phase = PidTuningPhase::IDLE;
-    };
+    using StepSample = PidTuningStepSample;
+    using StepResult = PidTuningStepResult;
+    using StepDefinition = PidTuningStepDefinition;
 
     static constexpr const char* TAG = "PidTuning";
 
@@ -146,7 +122,6 @@ private:
     float currentStepActiveSpeed(float left_dps, float right_dps) const;
     PidTuningPhase currentStepPhaseLocked() const;
     StepResult analyzeCurrentStepLocked() const;
-    bool averageStepResultsLocked(bool leftWheel, bool forward, StepResult& averageResult, std::string& error) const;
     bool computeCandidateLocked(std::string& error);
     bool analyzeValidationLocked(float target_dps, const std::string& wheelName, std::string& error) const;
     bool isTargetLeftWheelLocked() const;

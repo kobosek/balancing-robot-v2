@@ -3,8 +3,8 @@
 // Import necessary modules and functions
 import { appState } from './state.js';
 import { assignElements, uiElements, updateStatusSectionUI, disableCommandButton } from './ui.js';
-import { setupWebSocket, setWebSocketDisconnectHandler } from './websocket.js';
-import { setupJoystick, stopJoystickSendInterval } from './joystick.js'; // Import stop function
+import { setupWebSocket, setWebSocketDisconnectHandler, sendWebSocketMessage } from './websocket.js';
+import { setupJoystick, setJoystickTransport, stopJoystickSendInterval } from './joystick.js'; // Import stop function
 import { setupGraphs, drawAllGraphs } from './graph.js'; // Use new names
 import { createConfigForms, toggleConfigMenu, showConfigForm, showGeneralConfigForm } from './configUI.js'; // Import showGeneralConfigForm
 import { sendCommandApi, fetchConfigApi, fetchStateApi, postConfigApi, uploadOtaFirmware } from './api.js';
@@ -32,6 +32,7 @@ function initialize() {
         createConfigForms(); // Create config forms and their dynamic controls
         setupEventListeners(); // Set up basic UI event listeners
         setWebSocketDisconnectHandler(stopJoystickSendInterval);
+        setJoystickTransport(sendWebSocketMessage);
         setupWebSocket();    // Establish WebSocket connection
         setupJoystick();     // Initialize the joystick controller
         setupGraphs();     // Setup multiple graphs

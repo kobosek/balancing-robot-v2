@@ -39,6 +39,7 @@ idf_component_register(SRCS # --- Tasks ---
                             "services/WiFiManager.cpp"
                             "services/EncoderService.cpp"
                             "services/MotorService.cpp"
+                            "services/PidTuningAnalysis.cpp"
                             "services/PidTuningService.cpp"
                             "services/OTAService.cpp"
                             "services/GuidedCalibrationService.cpp"
