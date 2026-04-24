@@ -230,7 +230,6 @@ esp_err_t ApplicationContext::initializeControlSubsystem()
         *m_encoderService,
         *m_motorService,
         *m_balancingAlgorithm,
-        *m_stateManager,
         *m_batteryService,
         *m_pidTuningService,
         *m_guidedCalibrationService,
@@ -258,7 +257,6 @@ esp_err_t ApplicationContext::initializeConnectivitySubsystem()
     auto commandApiHandler = std::make_unique<CommandApiHandler>(*m_eventBus);
     auto stateApiHandler = std::make_unique<StateApiHandler>(
         *m_stateManager,
-        *m_balanceMonitor,
         *m_batteryService,
         *m_pidTuningService,
         *m_guidedCalibrationService,

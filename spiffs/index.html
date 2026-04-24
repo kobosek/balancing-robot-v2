@@ -69,6 +69,18 @@
                      <div id="speedRightConfigFormContainer" class="form-container" style="display: none;"></div>
                      <div id="yawRateConfigFormContainer" class="form-container" style="display: none;"></div> <!-- <<< ADDED Yaw Rate Container -->
                      <div id="generalConfigFormContainer" class="form-container" style="display: none;"></div>
+                     <div class="ota-panel">
+                        <h3>OTA Update</h3>
+                        <div class="ota-file-row">
+                            <label for="otaSpiffsFileInput">SPIFFS</label>
+                            <input id="otaSpiffsFileInput" type="file" accept=".bin,application/octet-stream">
+                        </div>
+                        <div class="ota-file-row">
+                            <label for="otaFirmwareFileInput">Firmware</label>
+                            <input id="otaFirmwareFileInput" type="file" accept=".bin,application/octet-stream">
+                        </div>
+                        <button id="otaUploadBtn" class="toggle-button">Upload OTA Bundle</button>
+                     </div>
                 </div>
             </div>
 
@@ -85,14 +97,6 @@
                     <button id="toggleCriticalBatteryShutdownBtn" class="toggle-button">Critical Battery Shutdown</button>
                     <button id="startGuidedCalibrationBtn" class="calibrate">Guided Calibration</button>
                     <button id="cancelGuidedCalibrationBtn" class="stop">Cancel Guided Cal</button>
-                </div>
-                <div class="ota-panel">
-                    <select id="otaTargetSelect">
-                        <option value="app">App firmware</option>
-                        <option value="spiffs">SPIFFS image</option>
-                    </select>
-                    <input id="otaFileInput" type="file" accept=".bin,application/octet-stream">
-                    <button id="otaUploadBtn" class="toggle-button">Upload OTA</button>
                 </div>
                 <!-- Joystick Zone -->
                 <div id="joystickZone"></div> <!-- NippleJS target -->

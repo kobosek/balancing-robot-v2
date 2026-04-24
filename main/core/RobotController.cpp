@@ -5,11 +5,10 @@
 #include "EncoderService.hpp"
 #include "MotorService.hpp"
 #include "BatteryService.hpp"
-#include "StateManager.hpp"
-#include "SystemState.hpp"
 #include "PidTuningService.hpp"
 #include "GuidedCalibrationService.hpp"
 #include "ControlEventDispatcher.hpp"
+#include "CONTROL_RunModeChanged.hpp"
 #include "MOTION_TargetMovement.hpp"
 #include "TelemetryDataPoint.hpp"
 
@@ -22,7 +21,6 @@ RobotController::RobotController(
     EncoderService& encoderService,
     MotorService& motorService,
     BalancingAlgorithm& algorithm,
-    StateManager& stateManager,
     BatteryService& batteryService,
     PidTuningService& pidTuningService,
     GuidedCalibrationService& guidedCalibrationService,
@@ -32,7 +30,6 @@ RobotController::RobotController(
     m_encoderService(encoderService),
     m_motorService(motorService),
     m_algorithm(algorithm),
-    m_stateManager(stateManager),
     m_batteryService(batteryService),
     m_pidTuningService(pidTuningService),
     m_guidedCalibrationService(guidedCalibrationService),
@@ -47,6 +44,8 @@ RobotController::RobotController(
 void RobotController::handleEvent(const BaseEvent& event) {
     if (event.is<MOTION_TargetMovement>()) {
         handleTargetMovementCommand(event.as<MOTION_TargetMovement>());
+    } else if (event.is<CONTROL_RunModeChanged>()) {
+        handleControlRunModeChanged(event.as<CONTROL_RunModeChanged>());
     } else {
         ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
                  getHandlerName().c_str(), event.eventName());
@@ -63,13 +62,30 @@ void RobotController::handleTargetMovementCommand(const MOTION_TargetMovement& e
     ESP_LOGV(TAG, "RC Handler: Updated targets: PitchOffset=%.2f, AngVel=%.2f", event.targetPitchOffset_deg, event.targetAngularVelocity_dps);
 }
 
+void RobotController::handleControlRunModeChanged(const CONTROL_RunModeChanged& event) {
+    std::lock_guard<std::mutex> lock(m_control_mode_mutex);
+    m_controlMode = event.mode;
+    m_telemetryStateCode = event.telemetryStateCode;
+    m_telemetryEnabled = event.telemetryEnabled;
+    ESP_LOGI(TAG, "Control run mode changed to %d", static_cast<int>(event.mode));
+}
+
 void RobotController::runControlStep(float dt) {
     const int64_t startTimeMicros = esp_timer_get_time();
 
-    const SystemState currentState = m_stateManager.getCurrentState();
-    if (currentState == SystemState::FATAL_ERROR || currentState == SystemState::INIT || currentState == SystemState::SHUTDOWN) {
+    ControlRunMode currentMode = ControlRunMode::DISABLED;
+    int telemetryStateCode = 0;
+    bool telemetryEnabled = false;
+    {
+        std::lock_guard<std::mutex> lock(m_control_mode_mutex);
+        currentMode = m_controlMode;
+        telemetryStateCode = m_telemetryStateCode;
+        telemetryEnabled = m_telemetryEnabled;
+    }
+
+    if (!telemetryEnabled) {
         stopControlLoop();
-        ESP_LOGV(TAG, "Skipping control step due to state: %d", static_cast<int>(currentState));
+        ESP_LOGV(TAG, "Skipping control step because telemetry is disabled");
         return;
     }
 
@@ -94,7 +110,7 @@ void RobotController::runControlStep(float dt) {
         currentTargetAngVel_dps = m_latestTargetAngVel_dps;
     }
 
-    const MotorEffort effort = executeControlMode(currentState,
+    const MotorEffort effort = executeControlMode(currentMode,
                                                   dt,
                                                   pitch_deg,
                                                   pitch_rate_dps,
@@ -107,7 +123,8 @@ void RobotController::runControlStep(float dt) {
     m_motorService.setMotorEffort(effort.left, effort.right);
 
     const TelemetryDataPoint snapshot = buildTelemetrySnapshot(startTimeMicros,
-                                                               currentState,
+                                                               currentMode,
+                                                               telemetryStateCode,
                                                                pitch_deg,
                                                                yaw_rate_dps,
                                                                speedL_dps,
@@ -126,7 +143,7 @@ void RobotController::stopControlLoop() {
     m_algorithm.resetState();
 }
 
-MotorEffort RobotController::executeControlMode(SystemState currentState,
+MotorEffort RobotController::executeControlMode(ControlRunMode currentMode,
                                                 float dt,
                                                 float pitch_deg,
                                                 float pitch_rate_dps,
@@ -135,8 +152,8 @@ MotorEffort RobotController::executeControlMode(SystemState currentState,
                                                 float speedR_dps,
                                                 float& currentTargetPitchOffset_deg,
                                                 float& currentTargetAngVel_dps) {
-    switch (currentState) {
-        case SystemState::BALANCING:
+    switch (currentMode) {
+        case ControlRunMode::BALANCING:
             return m_algorithm.update(dt,
                                       pitch_deg,
                                       pitch_rate_dps,
@@ -146,13 +163,13 @@ MotorEffort RobotController::executeControlMode(SystemState currentState,
                                       currentTargetPitchOffset_deg,
                                       currentTargetAngVel_dps);
 
-        case SystemState::PID_TUNING:
+        case ControlRunMode::PID_TUNING:
             m_algorithm.resetState();
             currentTargetPitchOffset_deg = 0.0f;
             currentTargetAngVel_dps = 0.0f;
             return m_pidTuningService.update(dt, speedL_dps, speedR_dps);
 
-        case SystemState::GUIDED_CALIBRATION:
+        case ControlRunMode::GUIDED_CALIBRATION:
             m_algorithm.resetState();
             currentTargetPitchOffset_deg = 0.0f;
             currentTargetAngVel_dps = 0.0f;
@@ -178,7 +195,8 @@ MotorEffort RobotController::executeGuidedCalibrationMode(float dt,
 }
 
 TelemetryDataPoint RobotController::buildTelemetrySnapshot(int64_t timestamp_us,
-                                                           SystemState currentState,
+                                                           ControlRunMode currentMode,
+                                                           int telemetryStateCode,
                                                            float pitch_deg,
                                                            float yaw_rate_dps,
                                                            float speedL_dps,
@@ -190,17 +208,17 @@ TelemetryDataPoint RobotController::buildTelemetrySnapshot(int64_t timestamp_us,
     snapshot.speedLeft_dps = speedL_dps;
     snapshot.speedRight_dps = speedR_dps;
     snapshot.batteryVoltage = m_batteryService.getLatestStatus().voltage;
-    snapshot.systemState = static_cast<int>(currentState);
+    snapshot.systemState = telemetryStateCode;
     snapshot.desiredAngle_deg = currentTargetPitchOffset_deg;
     snapshot.yawRate_dps = yaw_rate_dps;
 
-    switch (currentState) {
-        case SystemState::PID_TUNING:
+    switch (currentMode) {
+        case ControlRunMode::PID_TUNING:
             snapshot.speedSetpointLeft_dps = m_pidTuningService.getLastSpeedSetpointLeftDPS();
             snapshot.speedSetpointRight_dps = m_pidTuningService.getLastSpeedSetpointRightDPS();
             break;
 
-        case SystemState::GUIDED_CALIBRATION:
+        case ControlRunMode::GUIDED_CALIBRATION:
             snapshot.speedSetpointLeft_dps = 0.0f;
             snapshot.speedSetpointRight_dps = 0.0f;
             break;

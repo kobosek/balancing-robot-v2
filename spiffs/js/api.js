@@ -115,6 +115,7 @@ export async function fetchStateApi() {
             ota: {
                 available: false,
                 spiffs_available: false,
+                update_allowed: false,
                 update_in_progress: false,
                 reboot_required: false,
                 active_target: 'none',
@@ -147,7 +148,7 @@ async function parseJsonOrText(response) {
     }
 }
 
-export async function uploadOtaImage(file, target = 'app') {
+export async function uploadOtaImage(file, target) {
     if (!file) {
         alert("Select a .bin file first.");
         return null;

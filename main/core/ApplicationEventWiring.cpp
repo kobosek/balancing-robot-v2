@@ -3,6 +3,7 @@
 #include "ApplicationContext.hpp"
 #include "BALANCE_AutoBalanceReady.hpp"
 #include "BALANCE_FallDetected.hpp"
+#include "BALANCE_MonitorModeChanged.hpp"
 #include "BalancingAlgorithm.hpp"
 #include "BalanceMonitor.hpp"
 #include "BATTERY_StatusUpdate.hpp"
@@ -11,10 +12,13 @@
 #include "CONFIG_FullConfigUpdate.hpp"
 #include "CONFIG_ImuConfigUpdate.hpp"
 #include "CONFIG_PidConfigUpdate.hpp"
+#include "COMMAND_InputModeChanged.hpp"
+#include "CONTROL_RunModeChanged.hpp"
 #include "ConfigurationService.hpp"
 #include "EventBus.hpp"
 #include "EventHandler.hpp"
 #include "GUIDED_CalibrationFinished.hpp"
+#include "GUIDED_CalibrationRunModeChanged.hpp"
 #include "GuidedCalibrationService.hpp"
 #include "IMU_AttachRequested.hpp"
 #include "IMU_AvailabilityChanged.hpp"
@@ -24,13 +28,17 @@
 #include "IMU_CommunicationError.hpp"
 #include "IMU_GyroOffsetsUpdated.hpp"
 #include "IMU_OrientationData.hpp"
+#include "IMU_SystemPolicyChanged.hpp"
 #include "IMUService.hpp"
 #include "MOTION_TargetMovement.hpp"
+#include "MOTOR_OutputEnabledChanged.hpp"
 #include "MotorService.hpp"
+#include "OTAService.hpp"
+#include "OTA_UpdatePolicyChanged.hpp"
 #include "PID_TuningFinished.hpp"
+#include "PID_TuningRunModeChanged.hpp"
 #include "PidTuningService.hpp"
 #include "RobotController.hpp"
-#include "SYSTEM_StateChanged.hpp"
 #include "StateManager.hpp"
 #include "TELEMETRY_Snapshot.hpp"
 #include "UI_CalibrateImu.hpp"
@@ -61,30 +69,32 @@ esp_err_t ApplicationEventWiring::wire(const ApplicationContext& context) const
 {
     EventBus& eventBus = context.eventBus();
 
-    eventBus.subscribe<SYSTEM_StateChanged, UI_JoystickInput, CONFIG_FullConfigUpdate>(asHandler(context.commandProcessorHandle()));
+    eventBus.subscribe<COMMAND_InputModeChanged,
+                       UI_JoystickInput,
+                       CONFIG_FullConfigUpdate>(asHandler(context.commandProcessorHandle()));
     eventBus.subscribe<CONFIG_FullConfigUpdate, CONFIG_PidConfigUpdate>(asHandler(context.balancingAlgorithmHandle()));
     eventBus.subscribe<IMU_OrientationData,
-                       SYSTEM_StateChanged,
-                       CONFIG_FullConfigUpdate,
-                       UI_EnableAutoBalancing,
-                       UI_DisableAutoBalancing,
-                       UI_EnableFallDetection,
-                       UI_DisableFallDetection>(asHandler(context.balanceMonitorHandle()));
-    eventBus.subscribe<SYSTEM_StateChanged>(asHandler(context.motorServiceHandle()));
+                       BALANCE_MonitorModeChanged,
+                       CONFIG_FullConfigUpdate>(asHandler(context.balanceMonitorHandle()));
+    eventBus.subscribe<MOTOR_OutputEnabledChanged>(asHandler(context.motorServiceHandle()));
     eventBus.subscribe<UI_StartPidTuning,
                        UI_CancelPidTuning,
                        UI_SavePidTuning,
                        UI_DiscardPidTuning,
-                       SYSTEM_StateChanged>(asHandler(context.pidTuningServiceHandle()));
+                       PID_TuningRunModeChanged>(asHandler(context.pidTuningServiceHandle()));
     eventBus.subscribe<UI_StartGuidedCalibration,
                        UI_CancelGuidedCalibration,
-                       SYSTEM_StateChanged,
+                       GUIDED_CalibrationRunModeChanged,
                        CONFIG_FullConfigUpdate>(asHandler(context.guidedCalibrationServiceHandle()));
     eventBus.subscribe<CONFIG_FullConfigUpdate>(asHandler(context.batteryServiceHandle()));
     eventBus.subscribe<BALANCE_FallDetected,
                        BALANCE_AutoBalanceReady,
                        UI_StartBalancing,
                        UI_Stop,
+                       UI_EnableAutoBalancing,
+                       UI_DisableAutoBalancing,
+                       UI_EnableFallDetection,
+                       UI_DisableFallDetection,
                        BATTERY_StatusUpdate,
                        UI_CalibrateImu,
                        UI_StartPidTuning,
@@ -103,8 +113,10 @@ esp_err_t ApplicationEventWiring::wire(const ApplicationContext& context) const
                        CONFIG_ImuConfigUpdate,
                        IMU_CalibrationRequest,
                        IMU_AttachRequested,
-                       SYSTEM_StateChanged>(asHandler(context.imuServiceHandle()));
-    eventBus.subscribe<MOTION_TargetMovement>(asHandler(context.robotControllerHandle()));
+                       IMU_SystemPolicyChanged>(asHandler(context.imuServiceHandle()));
+    eventBus.subscribe<MOTION_TargetMovement,
+                       CONTROL_RunModeChanged>(asHandler(context.robotControllerHandle()));
+    eventBus.subscribe<OTA_UpdatePolicyChanged>(asHandler(context.otaServiceHandle()));
     eventBus.subscribe<CONFIG_FullConfigUpdate, TELEMETRY_Snapshot>(asHandler(context.webServerHandle()));
 
     return ESP_OK;

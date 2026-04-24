@@ -14,7 +14,7 @@ class BaseEvent;
 class ConfigurationService;
 class EncoderService;
 class EventBus;
-class SYSTEM_StateChanged;
+class PID_TuningRunModeChanged;
 class UI_CancelPidTuning;
 class UI_DiscardPidTuning;
 class UI_SavePidTuning;
@@ -128,7 +128,7 @@ private:
     void handleCancelCommand(const UI_CancelPidTuning& event);
     void handleSaveCommand(const UI_SavePidTuning& event);
     void handleDiscardCommand(const UI_DiscardPidTuning& event);
-    void handleSystemStateChanged(const SYSTEM_StateChanged& event);
+    void handleRunModeChanged(const PID_TuningRunModeChanged& event);
 
     void beginRunLocked(PidTuningTarget target);
     void cancelRunLocked(const std::string& message);

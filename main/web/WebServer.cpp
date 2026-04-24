@@ -82,6 +82,7 @@ esp_err_t WebServer::init() {
     config.max_uri_handlers = 24;
     config.stack_size = 8192; // Increase stack size to prevent overflow in HTTP server task
     config.global_user_ctx = this; // Pass 'this' WebServer instance
+    config.uri_match_fn = httpd_uri_match_wildcard;
 
     ESP_RETURN_ON_ERROR(httpd_start(&server, &config), TAG, "Error starting httpd server");
     ESP_LOGI(TAG, "HTTPD server started.");
@@ -90,24 +91,6 @@ esp_err_t WebServer::init() {
     esp_err_t ret = httpd_register_uri_handler(server, &root_uri);
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed register root URI");
     ESP_LOGI(TAG, "Registered handler for: / (GET)");
-
-    const httpd_uri_t style_uri = { "/style.css", HTTP_GET, static_get_handler, nullptr };
-    ret = httpd_register_uri_handler(server, &style_uri);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register style URI");
-    ESP_LOGI(TAG, "Registered handler for: /style.css (GET)");
-
-    // Register all JS files explicitly
-    const char* js_files[] = {
-        "/js/main.js", "/js/api.js", "/js/configUI.js", "/js/constants.js",
-        "/js/graph.js", "/js/joystick.js", "/js/state.js", "/js/telemetry.js",
-        "/js/ui.js", "/js/websocket.js"
-    };
-    for (const char* js_file : js_files) {
-        httpd_uri_t js_uri = { js_file, HTTP_GET, static_get_handler, nullptr };
-        ret = httpd_register_uri_handler(server, &js_uri);
-        if (ret != ESP_OK) { ESP_LOGE(TAG, "Failed register JS URI: %s (%s)", js_file, esp_err_to_name(ret)); }
-        else { ESP_LOGI(TAG, "Registered handler for: %s (GET)", js_file); }
-    }
 
     const httpd_uri_t data_uri = { "/data", HTTP_GET, data_get_handler, nullptr };
     ret = httpd_register_uri_handler(server, &data_uri);

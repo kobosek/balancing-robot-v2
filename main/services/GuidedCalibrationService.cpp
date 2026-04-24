@@ -3,7 +3,7 @@
 #include "CONFIG_FullConfigUpdate.hpp"
 #include "EventBus.hpp"
 #include "GUIDED_CalibrationFinished.hpp"
-#include "SYSTEM_StateChanged.hpp"
+#include "GUIDED_CalibrationRunModeChanged.hpp"
 #include "UI_CancelGuidedCalibration.hpp"
 #include "UI_StartGuidedCalibration.hpp"
 #include "esp_log.h"
@@ -45,8 +45,8 @@ void GuidedCalibrationService::handleEvent(const BaseEvent& event) {
         handleStartCommand(event.as<UI_StartGuidedCalibration>());
     } else if (event.is<UI_CancelGuidedCalibration>()) {
         handleCancelCommand(event.as<UI_CancelGuidedCalibration>());
-    } else if (event.is<SYSTEM_StateChanged>()) {
-        handleSystemStateChanged(event.as<SYSTEM_StateChanged>());
+    } else if (event.is<GUIDED_CalibrationRunModeChanged>()) {
+        handleRunModeChanged(event.as<GUIDED_CalibrationRunModeChanged>());
     } else if (event.is<CONFIG_FullConfigUpdate>()) {
         handleConfigUpdate(event.as<CONFIG_FullConfigUpdate>());
     }
@@ -183,18 +183,16 @@ void GuidedCalibrationService::handleConfigUpdate(const CONFIG_FullConfigUpdate&
     applyConfig(event.configData.pid_tuning, event.configData.motor);
 }
 
-void GuidedCalibrationService::handleSystemStateChanged(const SYSTEM_StateChanged& event) {
+void GuidedCalibrationService::handleRunModeChanged(const GUIDED_CalibrationRunModeChanged& event) {
     bool shouldPublishCanceled = false;
     std::string message;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        m_systemState = event.newState;
-        if (event.newState == SystemState::GUIDED_CALIBRATION) {
+        if (event.active) {
             beginRunLocked();
             return;
         }
-        if (event.previousState == SystemState::GUIDED_CALIBRATION &&
-            m_status.state == GuidedCalibrationState::RUNNING) {
+        if (m_status.state == GuidedCalibrationState::RUNNING) {
             cancelRunLocked("Guided calibration stopped");
             shouldPublishCanceled = true;
             message = m_status.message;

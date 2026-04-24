@@ -2,9 +2,8 @@
 // File: main/algorithms/CommandProcessor.cpp
 // ================================================
 #include "CommandProcessor.hpp"
-#include "SYSTEM_StateChanged.hpp"
+#include "COMMAND_InputModeChanged.hpp"
 #include "MOTION_TargetMovement.hpp"
-#include "SystemState.hpp"
 #include "EventBus.hpp"
 #include "BaseEvent.hpp"
 #include "UI_JoystickInput.hpp"
@@ -22,11 +21,11 @@ static const char* TAG = "CommandProc";
 CommandProcessor::CommandProcessor(EventBus& bus, const ControlConfig& initialControl, const SystemBehaviorConfig& initialBehavior) :
     m_eventBus(bus),                                // 1
     // m_configService removed                   // 2
-    m_current_state(SystemState::INIT),             // 3
-    m_target_pitch_offset_deg(0.0f),                // 4
-    m_target_angular_velocity_dps(0.0f),            // 5
-    // m_target_mutex default initialized          // 6
-    m_last_input_time_us(0),                        // 7
+    m_target_pitch_offset_deg(0.0f),                // 3
+    m_target_angular_velocity_dps(0.0f),            // 4
+    // m_target_mutex default initialized          // 5
+    m_last_input_time_us(0),                        // 6
+    m_accepting_input(false),                       // 7
     m_input_timed_out(true),                        // 8
     m_timeout_timer(nullptr),                       // 9
     // Configurable parameters initialized by applyConfig later
@@ -68,19 +67,13 @@ esp_err_t CommandProcessor::init() {
         return ret;
     }
 
-    // Start the timer running
-    ret = startTimeoutTimer();
-    if (ret != ESP_OK) {
-        return ret;
-    }
-
     ESP_LOGI(TAG, "Command Processor Initialized.");
     return ESP_OK;
 }
 
 void CommandProcessor::handleEvent(const BaseEvent& event) {
-    if (event.is<SYSTEM_StateChanged>()) {
-        handleSystemStateChange(event.as<SYSTEM_StateChanged>());
+    if (event.is<COMMAND_InputModeChanged>()) {
+        handleInputModeChange(event.as<COMMAND_InputModeChanged>());
     } else if (event.is<UI_JoystickInput>()) {
         handleJoystickInput(event.as<UI_JoystickInput>());
     } else if (event.is<CONFIG_FullConfigUpdate>()) {
@@ -125,13 +118,13 @@ void CommandProcessor::handleConfigUpdate(const CONFIG_FullConfigUpdate& event) 
     applyConfig(event.configData.control, event.configData.behavior);
 }
 
-void CommandProcessor::handleSystemStateChange(const SYSTEM_StateChanged& event) {
-    SystemState previous_state = event.previousState;
-    m_current_state = event.newState;
+void CommandProcessor::handleInputModeChange(const COMMAND_InputModeChanged& event) {
+    const bool was_accepting_input = m_accepting_input;
+    m_accepting_input = event.acceptingInput;
 
     // --- Stop/Start Timer based on Balancing State ---
-    if (m_current_state == SystemState::BALANCING && previous_state != SystemState::BALANCING) {
-        ESP_LOGI(TAG, "CP: Entering BALANCING, resetting targets, starting timeout timer.");
+    if (m_accepting_input && !was_accepting_input) {
+        ESP_LOGI(TAG, "CP: Enabling command input, resetting targets, starting timeout timer.");
         {
             std::lock_guard<std::mutex> lock(m_target_mutex);
             m_target_pitch_offset_deg = 0.0f;
@@ -142,8 +135,8 @@ void CommandProcessor::handleSystemStateChange(const SYSTEM_StateChanged& event)
         publishTargetCommand(0.0f, 0.0f);
         startTimeoutTimer();
 
-    } else if (m_current_state != SystemState::BALANCING && previous_state == SystemState::BALANCING) {
-        ESP_LOGI(TAG, "CP: Leaving BALANCING, stopping timeout timer, resetting targets.");
+    } else if (!m_accepting_input && was_accepting_input) {
+        ESP_LOGI(TAG, "CP: Disabling command input, stopping timeout timer, resetting targets.");
         stopTimeoutTimer();
         bool had_velocity = false;
         {
@@ -172,7 +165,7 @@ void CommandProcessor::handleJoystickInput(const UI_JoystickInput& event) {
         m_input_timed_out = false;
     }
 
-    if (m_current_state != SystemState::BALANCING) {
+    if (!m_accepting_input) {
         return; // Only process input when balancing
     }
 
@@ -207,7 +200,7 @@ void CommandProcessor::handleJoystickInput(const UI_JoystickInput& event) {
 }
 
 void CommandProcessor::periodicTimeoutCheck() {
-    if (m_current_state != SystemState::BALANCING) {
+    if (!m_accepting_input) {
         return;
     }
 

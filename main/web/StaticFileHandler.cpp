@@ -107,6 +107,7 @@ esp_err_t StaticFileHandler::handleRequest(httpd_req_t *req) {
     // --- File Opened Successfully ---
     ESP_LOGD(TAG, "File opened successfully: %s", filepath);
     set_content_type_from_file(req, filepath);
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
 
     // --- Allocate Buffer ---
     std::unique_ptr<char[]> chunk_ptr(new (std::nothrow) char[SCRATCH_BUFSIZE]);

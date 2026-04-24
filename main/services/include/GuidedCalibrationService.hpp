@@ -2,7 +2,6 @@
 
 #include "EventHandler.hpp"
 #include "BalancingAlgorithm.hpp"
-#include "SystemState.hpp"
 #include "config/MotorConfig.hpp"
 #include "config/PidTuningConfig.hpp"
 #include "esp_err.h"
@@ -12,7 +11,7 @@
 class EventBus;
 class BaseEvent;
 class CONFIG_FullConfigUpdate;
-class SYSTEM_StateChanged;
+class GUIDED_CalibrationRunModeChanged;
 class UI_StartGuidedCalibration;
 class UI_CancelGuidedCalibration;
 
@@ -73,7 +72,6 @@ private:
     GuidedCalibrationStatus m_status;
     PidTuningConfig m_tuningConfig;
     MotorConfig m_motorConfig;
-    SystemState m_systemState = SystemState::INIT;
     bool m_startRequested = false;
     bool m_cancelRequested = false;
     float m_phaseElapsed_s = 0.0f;
@@ -82,7 +80,7 @@ private:
 
     void applyConfig(const PidTuningConfig& tuningConfig, const MotorConfig& motorConfig);
     void handleConfigUpdate(const CONFIG_FullConfigUpdate& event);
-    void handleSystemStateChanged(const SYSTEM_StateChanged& event);
+    void handleRunModeChanged(const GUIDED_CalibrationRunModeChanged& event);
     void handleStartCommand(const UI_StartGuidedCalibration& event);
     void handleCancelCommand(const UI_CancelGuidedCalibration& event);
 

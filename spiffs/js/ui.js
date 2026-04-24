@@ -88,18 +88,18 @@ export function updateOtaUI() {
     const ota = appState.currentSystemState?.ota || {};
     const statusEl = uiElements.otaStatusValue;
     const uploadBtn = uiElements.otaUploadBtn;
-    const targetSelect = uiElements.otaTargetSelect;
-    const target = targetSelect?.value || 'app';
-    const targetAvailable = target === 'spiffs' ? !!ota.spiffs_available : !!ota.available;
+    const bundleAvailable = !!ota.available && !!ota.spiffs_available;
+    const updateAllowed = !!ota.update_allowed;
     const text = ota.reboot_required
         ? 'REBOOT REQUIRED'
-        : (ota.update_in_progress ? `UPLOADING ${String(ota.active_target || '').toUpperCase()}` : (targetAvailable ? (ota.message || 'READY') : 'UNAVAILABLE'));
+        : (ota.update_in_progress
+            ? `UPLOADING ${String(ota.active_target || '').toUpperCase()}`
+            : (!updateAllowed ? 'IDLE REQUIRED' : (bundleAvailable ? (ota.message || 'READY') : 'UNAVAILABLE')));
     if (statusEl) statusEl.textContent = text;
     if (uploadBtn) {
-        uploadBtn.textContent = target === 'spiffs' ? 'Upload SPIFFS' : 'Upload App';
-        uploadBtn.disabled = !targetAvailable || !!ota.update_in_progress;
+        uploadBtn.textContent = 'Upload OTA Bundle';
+        uploadBtn.disabled = !bundleAvailable || !updateAllowed || !!ota.update_in_progress;
     }
-    if (targetSelect) targetSelect.disabled = !!ota.update_in_progress;
 }
 export function updateGuidedCalibrationUI() {
     const guided = appState.currentSystemState?.guided_calibration || {};

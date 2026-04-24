@@ -3,7 +3,7 @@
 // Import necessary modules and functions
 import { appState } from './state.js';
 import { assignElements, uiElements, updateStatusSectionUI, disableCommandButton } from './ui.js';
-import { setupWebSocket } from './websocket.js';
+import { setupWebSocket, setWebSocketDisconnectHandler } from './websocket.js';
 import { setupJoystick, stopJoystickSendInterval } from './joystick.js'; // Import stop function
 import { setupGraphs, drawAllGraphs } from './graph.js'; // Use new names
 import { createConfigForms, toggleConfigMenu, showConfigForm, showGeneralConfigForm } from './configUI.js'; // Import showGeneralConfigForm
@@ -31,6 +31,7 @@ function initialize() {
         assignElements(); // Assign static DOM elements to uiElements cache
         createConfigForms(); // Create config forms and their dynamic controls
         setupEventListeners(); // Set up basic UI event listeners
+        setWebSocketDisconnectHandler(stopJoystickSendInterval);
         setupWebSocket();    // Establish WebSocket connection
         setupJoystick();     // Initialize the joystick controller
         setupGraphs();     // Setup multiple graphs
@@ -74,7 +75,6 @@ function setupEventListeners() {
     uiElements.toggleCriticalBatteryShutdownBtn?.addEventListener('click', handleToggleCriticalBatteryShutdown);
     uiElements.startGuidedCalibrationBtn?.addEventListener('click', () => handleCommandClick('start_guided_calibration', uiElements.startGuidedCalibrationBtn));
     uiElements.cancelGuidedCalibrationBtn?.addEventListener('click', () => handleCommandClick('cancel_guided_calibration', uiElements.cancelGuidedCalibrationBtn));
-    uiElements.otaTargetSelect?.addEventListener('change', updateStatusSectionUI);
     uiElements.otaUploadBtn?.addEventListener('click', handleOtaUpload);
 
     console.log("Event listeners setup complete.");
@@ -234,14 +234,20 @@ async function handleToggleCriticalBatteryShutdown() {
 }
 
 async function handleOtaUpload() {
-    const file = uiElements.otaFileInput?.files?.[0];
-    const target = uiElements.otaTargetSelect?.value || 'app';
-    if (!file) {
-        alert("Select a .bin file first.");
+    const firmwareFile = uiElements.otaFirmwareFileInput?.files?.[0];
+    const spiffsFile = uiElements.otaSpiffsFileInput?.files?.[0];
+    const ota = appState.currentSystemState?.ota || {};
+
+    if (!ota.update_allowed) {
+        alert("OTA update is allowed only while the robot is IDLE.");
         return;
     }
-    if (target === 'spiffs' && file.name && file.name.toLowerCase() !== 'storage.bin') {
-        const proceed = confirm("SPIFFS OTA expects build/storage.bin. Continue with the selected file?");
+    if (!spiffsFile || !firmwareFile) {
+        alert("Select both storage.bin and firmware .bin files.");
+        return;
+    }
+    if (spiffsFile.name && spiffsFile.name.toLowerCase() !== 'storage.bin') {
+        const proceed = confirm("SPIFFS OTA expects build/storage.bin. Continue with the selected SPIFFS file?");
         if (!proceed) {
             return;
         }
@@ -249,22 +255,23 @@ async function handleOtaUpload() {
 
     disableCommandButton(uiElements.otaUploadBtn, true);
     try {
-        const result = await uploadOtaFirmware(file, target);
-        if (result) {
+        const spiffsResult = await uploadOtaFirmware(spiffsFile, 'spiffs');
+        if (!spiffsResult) {
+            return;
+        }
+
+        await fetchStateApi();
+        const firmwareResult = await uploadOtaFirmware(firmwareFile, 'app');
+        if (firmwareResult) {
             await fetchStateApi();
             updateStatusSectionUI();
-            
-            // --- NEW: Clear the file input from the UI ---
-            if (uiElements.otaFileInput) {
-                uiElements.otaFileInput.value = '';
-            }
 
-            // --- MODIFIED: Inform the user of the automatic restart ---
-            if (target === 'spiffs') {
-                alert(result.reboot_required ? "SPIFFS image uploaded successfully! The robot will now restart automatically." : "SPIFFS image uploaded.");
-            } else {
-                alert(result.reboot_required ? "Firmware uploaded successfully! The robot will now restart automatically." : "Firmware uploaded.");
-            }
+            if (uiElements.otaSpiffsFileInput) uiElements.otaSpiffsFileInput.value = '';
+            if (uiElements.otaFirmwareFileInput) uiElements.otaFirmwareFileInput.value = '';
+
+            alert(firmwareResult.reboot_required
+                ? "OTA bundle uploaded successfully. The robot will now restart automatically."
+                : "OTA bundle uploaded.");
         }
     } finally {
         disableCommandButton(uiElements.otaUploadBtn, false);

@@ -4,7 +4,6 @@
 #include "IIMUFaultSink.hpp"
 #include "IMUState.hpp"
 #include "MPU6050Profile.hpp"
-#include "SystemState.hpp"
 #include "config/MPU6050Config.hpp"
 #include "config/SystemBehaviorConfig.hpp"
 #include "esp_err.h"
@@ -25,11 +24,11 @@ class IMUCalibration;
 class IMUHealthMonitor;
 class IMU_AttachRequested;
 class IMU_CalibrationRequest;
+class IMU_SystemPolicyChanged;
 class MPU6050Driver;
 class MPU6050HardwareController;
 class OrientationEstimator;
 class EventBus;
-class SYSTEM_StateChanged;
 
 class IMUService : public EventHandler, public IIMUFaultSink {
 public:
@@ -49,8 +48,6 @@ public:
     void pollBackgroundMaintenance();
 
     IMUState getCurrentState() const;
-    SystemState getSystemState() const;
-    void updateSystemState(SystemState newState);
     bool isAvailable() const;
 
     static const char* stateToString(IMUState state);
@@ -74,7 +71,9 @@ private:
 
     std::atomic<bool> m_is_calibrating_flag;
     IMUState m_current_state;
-    std::atomic<SystemState> m_system_state;
+    std::atomic<bool> m_calibration_allowed;
+    std::atomic<bool> m_auto_attach_allowed;
+    std::atomic<bool> m_hardware_config_apply_allowed;
     std::atomic<bool> m_pending_hardware_apply;
     std::atomic<bool> m_fault_reported;
     std::atomic<int64_t> m_next_auto_attach_time_us;
@@ -116,7 +115,7 @@ private:
     void handleIMUConfigUpdate(const CONFIG_ImuConfigUpdate& event);
     void handleCalibrationRequest(const IMU_CalibrationRequest& event);
     void handleAttachRequested(const IMU_AttachRequested& event);
-    void handleSystemStateChanged(const SYSTEM_StateChanged& event);
+    void handleSystemPolicyChanged(const IMU_SystemPolicyChanged& event);
 
     void safeConfigUpdate(const std::function<void()>& updateFunc);
 };

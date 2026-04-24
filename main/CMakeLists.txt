@@ -5,6 +5,7 @@ idf_component_register(SRCS # --- Tasks ---
                             # --- Core ---
                             "core/EventBus.cpp"
                             "core/ControlEventDispatcher.cpp"
+                            "core/StateManagerPolicy.cpp"
                             "core/StateManager.cpp"
                             "core/RobotController.cpp" 
                             "core/Application.cpp"

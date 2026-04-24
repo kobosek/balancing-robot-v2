@@ -7,7 +7,6 @@
 
 // Forward declare dependencies
 class StateManager;
-class BalanceMonitor;
 class BatteryService;
 class PidTuningService;
 class GuidedCalibrationService;
@@ -17,7 +16,6 @@ class OTAService;
 class StateApiHandler : public EventHandler {
 public:
     StateApiHandler(StateManager& stateManager,
-                    BalanceMonitor& balanceMonitor,
                     BatteryService& batteryService,
                     PidTuningService& pidTuningService,
                     GuidedCalibrationService& guidedCalibrationService,
@@ -32,7 +30,6 @@ public:
 private:
     static constexpr const char* TAG = "StateApiHandler";
     StateManager& m_stateManager;
-    BalanceMonitor& m_balanceMonitor;
     BatteryService& m_batteryService;
     PidTuningService& m_pidTuningService;
     GuidedCalibrationService& m_guidedCalibrationService;

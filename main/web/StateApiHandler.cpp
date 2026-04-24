@@ -1,13 +1,11 @@
 // main/web/StateApiHandler.cpp
 #include "StateApiHandler.hpp"
 #include "StateManager.hpp"
-#include "BalanceMonitor.hpp"
 #include "BatteryService.hpp"
 #include "PidTuningService.hpp"
 #include "GuidedCalibrationService.hpp"
 #include "ConfigurationService.hpp"
 #include "OTAService.hpp"
-#include "SystemState.hpp"
 #include "BaseEvent.hpp"
 #include "cJSON.h"
 #include <memory>
@@ -16,14 +14,12 @@
 #include "esp_http_server.h"
 
 StateApiHandler::StateApiHandler(StateManager& stateManager,
-                                 BalanceMonitor& balanceMonitor,
                                  BatteryService& batteryService,
                                  PidTuningService& pidTuningService,
                                  GuidedCalibrationService& guidedCalibrationService,
                                  ConfigurationService& configService,
                                  OTAService& otaService)
     : m_stateManager(stateManager),
-      m_balanceMonitor(balanceMonitor),
       m_batteryService(batteryService),
       m_pidTuningService(pidTuningService),
       m_guidedCalibrationService(guidedCalibrationService),
@@ -36,21 +32,6 @@ StateApiHandler::StateApiHandler(StateManager& stateManager,
 void StateApiHandler::handleEvent(const BaseEvent& event) {
     ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
              getHandlerName().c_str(), event.eventName());
-}
-
-// Helper function remains the same
-static const char* stateToString(SystemState state) {
-    switch(state) {
-        case SystemState::INIT:             return "INITIALIZING";
-        case SystemState::IDLE:             return "IDLE";
-        case SystemState::BALANCING:        return "BALANCING";
-        case SystemState::PID_TUNING:       return "PID_TUNING";
-        case SystemState::GUIDED_CALIBRATION: return "GUIDED_CALIBRATION";
-        case SystemState::FALLEN:           return "FALLEN";
-        case SystemState::SHUTDOWN:         return "SHUTDOWN";
-        case SystemState::FATAL_ERROR:      return "ERROR";
-        default:                            return "UNKNOWN";
-    }
 }
 
 static const char* pidTuningStateToString(PidTuningState state) {
@@ -144,16 +125,12 @@ static cJSON* createMetricsJson(const PidTuningResponseMetrics& metrics) {
 
 esp_err_t StateApiHandler::handleRequest(httpd_req_t *req) {
     ESP_LOGD(TAG, "Received request for /api/state (GET)");
-    SystemState currentState = m_stateManager.getCurrentState();
-    bool autoBalancingEnabled = m_balanceMonitor.isAutoBalancingEnabled();
-    bool fallDetectionEnabled = m_balanceMonitor.isFallDetectionEnabled();
-    bool criticalBatteryMotorShutdownEnabled = m_stateManager.isCriticalBatteryMotorShutdownEnabled();
+    const SystemStatusSnapshot systemStatus = m_stateManager.getStatusSnapshot();
     const ConfigData configData = m_configService.getConfigData();
     const BatteryStatus batteryStatus = m_batteryService.getLatestStatus();
     const PidTuningStatus pidTuningStatus = m_pidTuningService.getStatus();
     const GuidedCalibrationStatus guidedStatus = m_guidedCalibrationService.getStatus();
     const OTAStatus otaStatus = m_otaService.getStatus();
-    const char* stateStr = stateToString(currentState);
 
     auto cjson_deleter = [](cJSON* ptr){ if(ptr) cJSON_Delete(ptr); };
     auto char_deleter = [](char* ptr){ if(ptr) free(ptr); };
@@ -163,11 +140,11 @@ esp_err_t StateApiHandler::handleRequest(httpd_req_t *req) {
         httpd_resp_send_500(req); return ESP_FAIL;
     }
 
-    cJSON_AddNumberToObject(root, "state_id", static_cast<int>(currentState));
-    cJSON_AddStringToObject(root, "state_name", stateStr);
-    cJSON_AddBoolToObject(root, "auto_balancing_enabled", autoBalancingEnabled);
-    cJSON_AddBoolToObject(root, "fall_detection_enabled", fallDetectionEnabled);
-    cJSON_AddBoolToObject(root, "critical_battery_motor_shutdown_enabled", criticalBatteryMotorShutdownEnabled);
+    cJSON_AddNumberToObject(root, "state_id", systemStatus.stateId);
+    cJSON_AddStringToObject(root, "state_name", systemStatus.stateName);
+    cJSON_AddBoolToObject(root, "auto_balancing_enabled", systemStatus.autoBalancingEnabled);
+    cJSON_AddBoolToObject(root, "fall_detection_enabled", systemStatus.fallDetectionEnabled);
+    cJSON_AddBoolToObject(root, "critical_battery_motor_shutdown_enabled", systemStatus.criticalBatteryMotorShutdownEnabled);
     cJSON_AddBoolToObject(root, "yaw_control_enabled", configData.control.yaw_control_enabled);
     cJSON_AddNumberToObject(root, "battery_voltage", batteryStatus.voltage);
     cJSON_AddNumberToObject(root, "battery_adc_pin_voltage", batteryStatus.adcPinVoltage);
@@ -180,6 +157,7 @@ esp_err_t StateApiHandler::handleRequest(httpd_req_t *req) {
     if (otaObj) {
         cJSON_AddBoolToObject(otaObj, "available", otaStatus.available);
         cJSON_AddBoolToObject(otaObj, "spiffs_available", otaStatus.spiffsAvailable);
+        cJSON_AddBoolToObject(otaObj, "update_allowed", otaStatus.updateAllowed);
         cJSON_AddBoolToObject(otaObj, "update_in_progress", otaStatus.updateInProgress);
         cJSON_AddBoolToObject(otaObj, "reboot_required", otaStatus.rebootRequired);
         cJSON_AddNumberToObject(otaObj, "bytes_written", static_cast<double>(otaStatus.bytesWritten));

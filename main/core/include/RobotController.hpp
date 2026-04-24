@@ -3,7 +3,7 @@
 #include <mutex>
 #include "esp_err.h"
 #include "EventHandler.hpp"
-#include "SystemState.hpp"
+#include "CONTROL_RunModeChanged.hpp"
 #include <memory>
 
 // Forward Declarations
@@ -12,7 +12,6 @@ class BalancingAlgorithm;
 class EncoderService;
 class MotorService;
 class BatteryService;
-class StateManager;
 class PidTuningService;
 class GuidedCalibrationService;
 class ControlEventDispatcher;
@@ -29,7 +28,6 @@ public:
         EncoderService& encoderService,
         MotorService& motorService,
         BalancingAlgorithm& algorithm,
-        StateManager& stateManager,
         BatteryService& batteryService,
         PidTuningService& pidTuningService,
         GuidedCalibrationService& guidedCalibrationService,
@@ -50,7 +48,6 @@ private:
     EncoderService& m_encoderService;
     MotorService& m_motorService;
     BalancingAlgorithm& m_algorithm;
-    StateManager& m_stateManager;
     BatteryService& m_batteryService;
     PidTuningService& m_pidTuningService;
     GuidedCalibrationService& m_guidedCalibrationService;
@@ -60,9 +57,13 @@ private:
     float m_latestTargetPitchOffset_deg = 0.0f;
     float m_latestTargetAngVel_dps = 0.0f;
     std::mutex m_target_values_mutex;
+    ControlRunMode m_controlMode = ControlRunMode::DISABLED;
+    int m_telemetryStateCode = 0;
+    bool m_telemetryEnabled = false;
+    std::mutex m_control_mode_mutex;
 
     void stopControlLoop();
-    MotorEffort executeControlMode(SystemState currentState,
+    MotorEffort executeControlMode(ControlRunMode currentMode,
                                    float dt,
                                    float pitch_deg,
                                    float pitch_rate_dps,
@@ -76,11 +77,13 @@ private:
                                              float speedL_dps,
                                              float speedR_dps) const;
     TelemetryDataPoint buildTelemetrySnapshot(int64_t timestamp_us,
-                                              SystemState currentState,
+                                              ControlRunMode currentMode,
+                                              int telemetryStateCode,
                                               float pitch_deg,
                                               float yaw_rate_dps,
                                               float speedL_dps,
                                               float speedR_dps,
                                               float currentTargetPitchOffset_deg) const;
     void handleTargetMovementCommand(const MOTION_TargetMovement& event);
+    void handleControlRunModeChanged(const CONTROL_RunModeChanged& event);
 };

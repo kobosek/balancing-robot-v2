@@ -5,16 +5,24 @@
 
 #include "BALANCE_FallDetected.hpp"
 #include "BALANCE_AutoBalanceReady.hpp"
+#include "BALANCE_MonitorModeChanged.hpp"
 #include "BATTERY_StatusUpdate.hpp"
 #include "BaseEvent.hpp"
 #include "CONFIG_FullConfigUpdate.hpp"
+#include "COMMAND_InputModeChanged.hpp"
+#include "CONTROL_RunModeChanged.hpp"
 #include "EventBus.hpp"
+#include "GUIDED_CalibrationRunModeChanged.hpp"
 #include "IMU_AttachRequested.hpp"
 #include "IMU_AvailabilityChanged.hpp"
 #include "IMU_CalibrationCompleted.hpp"
 #include "IMU_CalibrationRequest.hpp"
 #include "IMU_CalibrationRequestRejected.hpp"
 #include "IMU_CommunicationError.hpp"
+#include "IMU_SystemPolicyChanged.hpp"
+#include "MOTOR_OutputEnabledChanged.hpp"
+#include "OTA_UpdatePolicyChanged.hpp"
+#include "PID_TuningRunModeChanged.hpp"
 #include "SYSTEM_StateChanged.hpp"
 #include "UI_CalibrateImu.hpp"
 #include "UI_CancelPidTuning.hpp"
@@ -23,10 +31,43 @@
 #include "UI_StartGuidedCalibration.hpp"
 #include "UI_StartBalancing.hpp"
 #include "UI_Stop.hpp"
+#include "UI_DisableAutoBalancing.hpp"
+#include "UI_DisableFallDetection.hpp"
+#include "UI_EnableAutoBalancing.hpp"
+#include "UI_EnableFallDetection.hpp"
 #include "PID_TuningFinished.hpp"
 #include "GUIDED_CalibrationFinished.hpp"
+#include "StateManagerPolicy.hpp"
+#include "SystemState.hpp"
 #include "esp_err.h"
 #include "esp_log.h"
+
+namespace policy = state_manager_policy;
+
+namespace {
+const char* toApiStateName(SystemState state) {
+    switch (state) {
+        case SystemState::INIT:
+            return "INITIALIZING";
+        case SystemState::IDLE:
+            return "IDLE";
+        case SystemState::BALANCING:
+            return "BALANCING";
+        case SystemState::PID_TUNING:
+            return "PID_TUNING";
+        case SystemState::GUIDED_CALIBRATION:
+            return "GUIDED_CALIBRATION";
+        case SystemState::FALLEN:
+            return "FALLEN";
+        case SystemState::SHUTDOWN:
+            return "SHUTDOWN";
+        case SystemState::FATAL_ERROR:
+            return "ERROR";
+        default:
+            return "UNKNOWN";
+    }
+}
+}
 
 StateManager::StateManager(EventBus& eventBus, const SystemBehaviorConfig& initialBehaviorConfig, const BatteryConfig& initialBatteryConfig) :
     m_eventBus(eventBus),
@@ -49,27 +90,22 @@ SystemState StateManager::getCurrentState() const {
     return m_currentState;
 }
 
-std::string StateManager::stateToString(SystemState state) const {
-    switch (state) {
-        case SystemState::INIT:
-            return "INIT";
-        case SystemState::IDLE:
-            return "IDLE";
-        case SystemState::BALANCING:
-            return "BALANCING";
-        case SystemState::PID_TUNING:
-            return "PID_TUNING";
-        case SystemState::GUIDED_CALIBRATION:
-            return "GUIDED_CALIBRATION";
-        case SystemState::FALLEN:
-            return "FALLEN";
-        case SystemState::SHUTDOWN:
-            return "SHUTDOWN";
-        case SystemState::FATAL_ERROR:
-            return "FATAL_ERROR";
-        default:
-            return "UNKNOWN";
-    }
+SystemStatusSnapshot StateManager::getStatusSnapshot() const {
+    return {
+        static_cast<int>(m_currentState),
+        toApiStateName(m_currentState),
+        m_autoBalancingEnabled,
+        m_fallDetectionEnabled,
+        m_criticalBatteryMotorShutdownEnabled
+    };
+}
+
+void StateManager::markReady() {
+    setState(SystemState::IDLE);
+}
+
+void StateManager::markFatalError() {
+    setState(SystemState::FATAL_ERROR);
 }
 
 void StateManager::setState(SystemState newState) {
@@ -79,18 +115,26 @@ void StateManager::setState(SystemState newState) {
         m_currentState = newState;
         stateChanged = true;
         ESP_LOGI(TAG, "State changed from %d (%s) to %d (%s)",
-                 static_cast<int>(previousState), stateToString(previousState).c_str(),
-                 static_cast<int>(newState), stateToString(newState).c_str());
+                 static_cast<int>(previousState), policy::toString(previousState),
+                 static_cast<int>(newState), policy::toString(newState));
 
-        if (previousState != SystemState::IDLE && newState == SystemState::IDLE && m_pending_calibration) {
-            ESP_LOGD(TAG, "Entering IDLE state, checking for pending calibration.");
-            initiateCalibration(true);
-        }
     }
 
     if (stateChanged) {
         SYSTEM_StateChanged event(previousState, newState);
         m_eventBus.publish(event);
+        publishBalanceMonitorMode();
+        publishMotorOutputMode();
+        publishRoutineRunModes();
+        publishCommandInputMode();
+        publishControlRunMode();
+        publishImuSystemPolicy();
+        publishOtaUpdatePolicy();
+
+        if (previousState != SystemState::IDLE && newState == SystemState::IDLE && m_pending_calibration) {
+            ESP_LOGD(TAG, "Entering IDLE state, checking for pending calibration.");
+            initiateCalibration(true);
+        }
     }
 }
 
@@ -103,6 +147,14 @@ void StateManager::handleEvent(const BaseEvent& event) {
         handleStartBalancing(event.as<UI_StartBalancing>());
     } else if (event.is<UI_Stop>()) {
         handleStop(event.as<UI_Stop>());
+    } else if (event.is<UI_EnableAutoBalancing>()) {
+        handleEnableAutoBalancing(event.as<UI_EnableAutoBalancing>());
+    } else if (event.is<UI_DisableAutoBalancing>()) {
+        handleDisableAutoBalancing(event.as<UI_DisableAutoBalancing>());
+    } else if (event.is<UI_EnableFallDetection>()) {
+        handleEnableFallDetect(event.as<UI_EnableFallDetection>());
+    } else if (event.is<UI_DisableFallDetection>()) {
+        handleDisableFallDetect(event.as<UI_DisableFallDetection>());
     } else if (event.is<BATTERY_StatusUpdate>()) {
         handleBatteryUpdate(event.as<BATTERY_StatusUpdate>());
     } else if (event.is<UI_CalibrateImu>()) {
@@ -156,7 +208,7 @@ void StateManager::handleAutoBalanceReady(const BALANCE_AutoBalanceReady& event)
     (void)event;
     ESP_LOGI(TAG, "Auto balance ready event received.");
 
-    if (m_currentState != SystemState::IDLE && m_currentState != SystemState::FALLEN) {
+    if (!policy::canStartBalancingFrom(m_currentState)) {
         return;
     }
 
@@ -165,7 +217,7 @@ void StateManager::handleAutoBalanceReady(const BALANCE_AutoBalanceReady& event)
         return;
     }
 
-    if (m_criticalBatteryMotorShutdownEnabled && m_battery_critical) {
+    if (policy::batteryBlocksMotion(m_criticalBatteryMotorShutdownEnabled, m_battery_critical)) {
         ESP_LOGW(TAG, "Ignoring auto balance trigger because battery is critical and shutdown is enabled.");
         m_pending_start = false;
         if (m_currentState == SystemState::FALLEN) {
@@ -174,7 +226,7 @@ void StateManager::handleAutoBalanceReady(const BALANCE_AutoBalanceReady& event)
         return;
     }
 
-    if (m_currentState == SystemState::FALLEN || m_currentState == SystemState::IDLE) {
+    if (policy::canStartBalancingFrom(m_currentState)) {
         setState(SystemState::BALANCING);
     }
 }
@@ -183,12 +235,12 @@ void StateManager::handleStartBalancing(const UI_StartBalancing& event) {
     (void)event;
     ESP_LOGI(TAG, "Start Balancing Command Received by StateManager.");
 
-    if (m_currentState != SystemState::IDLE && m_currentState != SystemState::FALLEN) {
-        ESP_LOGW(TAG, "Cannot start balancing from current state: %s", stateToString(m_currentState).c_str());
+    if (!policy::canStartBalancingFrom(m_currentState)) {
+        ESP_LOGW(TAG, "Cannot start balancing from current state: %s", policy::toString(m_currentState));
         return;
     }
 
-    if (m_criticalBatteryMotorShutdownEnabled && m_battery_critical) {
+    if (policy::batteryBlocksMotion(m_criticalBatteryMotorShutdownEnabled, m_battery_critical)) {
         ESP_LOGW(TAG, "Cannot start balancing because battery is critical and motor shutdown is enabled.");
         m_pending_start = false;
         if (m_currentState == SystemState::FALLEN) {
@@ -216,14 +268,36 @@ void StateManager::handleStop(const UI_Stop& event) {
     setState(SystemState::IDLE);
 }
 
+void StateManager::handleEnableAutoBalancing(const UI_EnableAutoBalancing& event) {
+    (void)event;
+    m_autoBalancingEnabled = true;
+    publishBalanceMonitorMode();
+}
+
+void StateManager::handleDisableAutoBalancing(const UI_DisableAutoBalancing& event) {
+    (void)event;
+    m_autoBalancingEnabled = false;
+    publishBalanceMonitorMode();
+}
+
+void StateManager::handleEnableFallDetect(const UI_EnableFallDetection& event) {
+    (void)event;
+    m_fallDetectionEnabled = true;
+    publishBalanceMonitorMode();
+}
+
+void StateManager::handleDisableFallDetect(const UI_DisableFallDetection& event) {
+    (void)event;
+    m_fallDetectionEnabled = false;
+    publishBalanceMonitorMode();
+}
+
 void StateManager::handleBatteryUpdate(const BATTERY_StatusUpdate& event) {
     m_battery_critical = event.status.isCritical;
 
-    if (m_criticalBatteryMotorShutdownEnabled && event.status.isCritical) {
+    if (policy::batteryBlocksMotion(m_criticalBatteryMotorShutdownEnabled, event.status.isCritical)) {
         m_pending_start = false;
-        if (m_currentState == SystemState::BALANCING ||
-            m_currentState == SystemState::PID_TUNING ||
-            m_currentState == SystemState::GUIDED_CALIBRATION) {
+        if (policy::isMotorActiveState(m_currentState)) {
             ESP_LOGW(TAG, "Battery level CRITICAL while motors active. Transitioning to IDLE.");
             setState(SystemState::IDLE);
         }
@@ -240,12 +314,12 @@ void StateManager::handleStartPidTuning(const UI_StartPidTuning& event) {
     (void)event;
     ESP_LOGI(TAG, "PID tuning command received.");
 
-    if (m_currentState != SystemState::IDLE) {
-        ESP_LOGW(TAG, "Cannot start PID tuning from current state: %s", stateToString(m_currentState).c_str());
+    if (!policy::canStartPidTuningFrom(m_currentState)) {
+        ESP_LOGW(TAG, "Cannot start PID tuning from current state: %s", policy::toString(m_currentState));
         return;
     }
 
-    if (m_criticalBatteryMotorShutdownEnabled && m_battery_critical) {
+    if (policy::batteryBlocksMotion(m_criticalBatteryMotorShutdownEnabled, m_battery_critical)) {
         ESP_LOGW(TAG, "Cannot start PID tuning because battery is critical and motor shutdown is enabled.");
         return;
     }
@@ -274,8 +348,8 @@ void StateManager::handleStartGuidedCalibration(const UI_StartGuidedCalibration&
     (void)event;
     ESP_LOGI(TAG, "Guided calibration command received.");
 
-    if (m_currentState != SystemState::IDLE) {
-        ESP_LOGW(TAG, "Cannot start guided calibration from current state: %s", stateToString(m_currentState).c_str());
+    if (!policy::canStartGuidedCalibrationFrom(m_currentState)) {
+        ESP_LOGW(TAG, "Cannot start guided calibration from current state: %s", policy::toString(m_currentState));
         return;
     }
 
@@ -285,7 +359,7 @@ void StateManager::handleStartGuidedCalibration(const UI_StartGuidedCalibration&
         return;
     }
 
-    if (m_criticalBatteryMotorShutdownEnabled && m_battery_critical) {
+    if (policy::batteryBlocksMotion(m_criticalBatteryMotorShutdownEnabled, m_battery_critical)) {
         ESP_LOGW(TAG, "Cannot start guided calibration because battery is critical and shutdown is enabled.");
         return;
     }
@@ -318,7 +392,7 @@ void StateManager::handleImuCommunicationError(const IMU_CommunicationError& eve
     ESP_LOGE(TAG, "IMU communication error: %s (%d)", esp_err_to_name(event.errorCode), event.errorCode);
     m_pending_start = false;
 
-    if (m_currentState == SystemState::BALANCING || m_currentState == SystemState::FALLEN || m_currentState == SystemState::PID_TUNING) {
+    if (policy::shouldReturnToIdleOnImuError(m_currentState)) {
         setState(SystemState::IDLE);
     }
 }
@@ -339,16 +413,14 @@ void StateManager::handleImuAvailabilityChanged(const IMU_AvailabilityChanged& e
 void StateManager::initiateCalibration(bool force) {
     ESP_LOGI(TAG, "Initiating calibration (force: %s)", force ? "true" : "false");
 
-    if (m_currentState == SystemState::IDLE || force) {
+    if (policy::shouldRequestCalibrationNow(m_currentState, force)) {
         IMU_CalibrationRequest requestEvent;
         m_eventBus.publish(requestEvent);
         m_pending_calibration = false;
         return;
     }
 
-    if ((m_currentState == SystemState::BALANCING ||
-         m_currentState == SystemState::PID_TUNING ||
-         m_currentState == SystemState::GUIDED_CALIBRATION) && !force) {
+    if (policy::canDeferCalibration(m_currentState, force)) {
         m_pending_calibration = true;
         IMU_CalibrationRequestRejected rejectEvent(IMU_CalibrationRequestRejected::Reason::NOT_IDLE, true);
         m_eventBus.publish(rejectEvent);
@@ -364,4 +436,73 @@ void StateManager::handleCalibrationRejected(const IMU_CalibrationRequestRejecte
     if (event.retryWhenPossible) {
         m_pending_calibration = true;
     }
+}
+
+void StateManager::publishBalanceMonitorMode() {
+    const bool fallDetectionActive =
+        m_fallDetectionEnabled &&
+        m_currentState == SystemState::BALANCING;
+    const bool autoBalancingActive =
+        m_autoBalancingEnabled &&
+        (m_currentState == SystemState::IDLE || m_currentState == SystemState::FALLEN);
+
+    BALANCE_MonitorModeChanged event(fallDetectionActive, autoBalancingActive);
+    m_eventBus.publish(event);
+}
+
+void StateManager::publishMotorOutputMode() {
+    MOTOR_OutputEnabledChanged event(policy::isMotorActiveState(m_currentState));
+    m_eventBus.publish(event);
+}
+
+void StateManager::publishRoutineRunModes() {
+    PID_TuningRunModeChanged pidEvent(m_currentState == SystemState::PID_TUNING);
+    m_eventBus.publish(pidEvent);
+
+    GUIDED_CalibrationRunModeChanged guidedEvent(m_currentState == SystemState::GUIDED_CALIBRATION);
+    m_eventBus.publish(guidedEvent);
+}
+
+void StateManager::publishCommandInputMode() {
+    COMMAND_InputModeChanged event(m_currentState == SystemState::BALANCING);
+    m_eventBus.publish(event);
+}
+
+void StateManager::publishControlRunMode() {
+    ControlRunMode mode = ControlRunMode::DISABLED;
+    switch (m_currentState) {
+        case SystemState::BALANCING:
+            mode = ControlRunMode::BALANCING;
+            break;
+        case SystemState::PID_TUNING:
+            mode = ControlRunMode::PID_TUNING;
+            break;
+        case SystemState::GUIDED_CALIBRATION:
+            mode = ControlRunMode::GUIDED_CALIBRATION;
+            break;
+        default:
+            mode = ControlRunMode::DISABLED;
+            break;
+    }
+
+    const bool telemetryEnabled =
+        m_currentState != SystemState::INIT &&
+        m_currentState != SystemState::SHUTDOWN &&
+        m_currentState != SystemState::FATAL_ERROR;
+
+    CONTROL_RunModeChanged event(mode, static_cast<int>(m_currentState), telemetryEnabled);
+    m_eventBus.publish(event);
+}
+
+void StateManager::publishImuSystemPolicy() {
+    IMU_SystemPolicyChanged event(
+        m_currentState == SystemState::IDLE,
+        m_currentState == SystemState::IDLE,
+        m_currentState != SystemState::BALANCING);
+    m_eventBus.publish(event);
+}
+
+void StateManager::publishOtaUpdatePolicy() {
+    OTA_UpdatePolicyChanged event(m_currentState == SystemState::IDLE);
+    m_eventBus.publish(event);
 }

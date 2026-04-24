@@ -1,14 +1,10 @@
 #include "BalanceMonitor.hpp"
 #include "BALANCE_FallDetected.hpp"
 #include "BALANCE_AutoBalanceReady.hpp"
-#include "SYSTEM_StateChanged.hpp"
+#include "BALANCE_MonitorModeChanged.hpp"
 #include "EventBus.hpp"
 #include "CONFIG_FullConfigUpdate.hpp"
 #include "IMU_OrientationData.hpp"
-#include "UI_DisableFallDetection.hpp"
-#include "UI_EnableFallDetection.hpp"
-#include "UI_DisableAutoBalancing.hpp"
-#include "UI_EnableAutoBalancing.hpp"
 #include "BaseEvent.hpp"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -25,9 +21,7 @@ BalanceMonitor::BalanceMonitor(EventBus& bus, const SystemBehaviorConfig& config
       m_pitch_threshold_rad(0.785f),
       m_threshold_duration_us(500000),
       m_auto_balance_angle_threshold_rad(0.087f),
-      m_auto_balance_hold_time_us(2000000),
-      m_autoBalancingEnabled(true),
-      m_fallDetectionEnabled(true)
+      m_auto_balance_hold_time_us(2000000)
 {
     applyConfig(config);
     reset();
@@ -37,18 +31,10 @@ BalanceMonitor::BalanceMonitor(EventBus& bus, const SystemBehaviorConfig& config
 void BalanceMonitor::handleEvent(const BaseEvent& event) {
     if (event.is<IMU_OrientationData>()) {
         handleOrientationData(event.as<IMU_OrientationData>());
-    } else if (event.is<SYSTEM_StateChanged>()) {
-        handleStateChanged(event.as<SYSTEM_StateChanged>());
+    } else if (event.is<BALANCE_MonitorModeChanged>()) {
+        handleMonitorModeChanged(event.as<BALANCE_MonitorModeChanged>());
     } else if (event.is<CONFIG_FullConfigUpdate>()) {
         handleConfigUpdate(event.as<CONFIG_FullConfigUpdate>());
-    } else if (event.is<UI_EnableAutoBalancing>()) {
-        handleEnableAutoBalancing(event.as<UI_EnableAutoBalancing>());
-    } else if (event.is<UI_DisableAutoBalancing>()) {
-        handleDisableAutoBalancing(event.as<UI_DisableAutoBalancing>());
-    } else if (event.is<UI_EnableFallDetection>()) {
-        handleEnableFallDetect(event.as<UI_EnableFallDetection>());
-    } else if (event.is<UI_DisableFallDetection>()) {
-        handleDisableFallDetect(event.as<UI_DisableFallDetection>());
     }
 }
 
@@ -76,12 +62,11 @@ void BalanceMonitor::reset() {
 }
 
 void BalanceMonitor::handleOrientationData(const IMU_OrientationData& event) {
-    if (m_currentState == SystemState::BALANCING && m_fallDetectionEnabled) {
+    if (m_fallDetectionActive) {
         checkFall(event.pitch_rad);
     }
 
-    if (m_autoBalancingEnabled &&
-        (m_currentState == SystemState::IDLE || m_currentState == SystemState::FALLEN)) {
+    if (m_autoBalancingActive) {
         checkAutoBalancing(event.pitch_rad);
     } else if (m_within_auto_balance_angle) {
         m_within_auto_balance_angle = false;
@@ -89,16 +74,20 @@ void BalanceMonitor::handleOrientationData(const IMU_OrientationData& event) {
     }
 }
 
-void BalanceMonitor::handleStateChanged(const SYSTEM_StateChanged& event) {
-    m_currentState = event.newState;
+void BalanceMonitor::handleMonitorModeChanged(const BALANCE_MonitorModeChanged& event) {
+    const bool fallDetectionWasActive = m_fallDetectionActive;
+    const bool autoBalancingWasActive = m_autoBalancingActive;
 
-    if (event.newState != SystemState::BALANCING) {
+    m_fallDetectionActive = event.fallDetectionActive;
+    m_autoBalancingActive = event.autoBalancingActive;
+
+    if (fallDetectionWasActive != m_fallDetectionActive && !m_fallDetectionActive) {
         m_potentially_fallen = false;
         m_fall_start_time_us = 0;
         m_fall_event_published = false;
     }
 
-    if (event.newState != SystemState::IDLE && event.newState != SystemState::FALLEN) {
+    if (autoBalancingWasActive != m_autoBalancingActive && !m_autoBalancingActive) {
         m_within_auto_balance_angle = false;
         m_auto_balance_angle_start_time_us = 0;
     }
@@ -142,7 +131,7 @@ void BalanceMonitor::checkAutoBalancing(float pitch_rad) {
             ESP_LOGI(TAG, "Robot upright enough for auto balancing (%.1f deg), starting timer (%llu us)...",
                      pitch_rad * RAD_TO_DEG, m_auto_balance_hold_time_us);
         } else if ((uint64_t)(now - m_auto_balance_angle_start_time_us) >= m_auto_balance_hold_time_us) {
-            ESP_LOGI(TAG, "Auto balance conditions met while state=%d.", static_cast<int>(m_currentState));
+            ESP_LOGI(TAG, "Auto balance conditions met.");
             m_within_auto_balance_angle = false;
             m_auto_balance_angle_start_time_us = 0;
             BALANCE_AutoBalanceReady auto_balance_event;
@@ -155,34 +144,4 @@ void BalanceMonitor::checkAutoBalancing(float pitch_rad) {
             m_auto_balance_angle_start_time_us = 0;
         }
     }
-}
-
-void BalanceMonitor::handleEnableAutoBalancing(const UI_EnableAutoBalancing& event) {
-    (void)event;
-    m_autoBalancingEnabled = true;
-    m_within_auto_balance_angle = false;
-    m_auto_balance_angle_start_time_us = 0;
-}
-
-void BalanceMonitor::handleDisableAutoBalancing(const UI_DisableAutoBalancing& event) {
-    (void)event;
-    m_autoBalancingEnabled = false;
-    m_within_auto_balance_angle = false;
-    m_auto_balance_angle_start_time_us = 0;
-}
-
-void BalanceMonitor::handleEnableFallDetect(const UI_EnableFallDetection& event) {
-    (void)event;
-    m_fallDetectionEnabled = true;
-    m_potentially_fallen = false;
-    m_fall_start_time_us = 0;
-    m_fall_event_published = false;
-}
-
-void BalanceMonitor::handleDisableFallDetect(const UI_DisableFallDetection& event) {
-    (void)event;
-    m_fallDetectionEnabled = false;
-    m_potentially_fallen = false;
-    m_fall_start_time_us = 0;
-    m_fall_event_published = false;
 }

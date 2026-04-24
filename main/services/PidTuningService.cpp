@@ -4,8 +4,7 @@
 #include "EncoderService.hpp"
 #include "EventBus.hpp"
 #include "PID_TuningFinished.hpp"
-#include "SYSTEM_StateChanged.hpp"
-#include "SystemState.hpp"
+#include "PID_TuningRunModeChanged.hpp"
 #include "UI_CancelPidTuning.hpp"
 #include "UI_DiscardPidTuning.hpp"
 #include "UI_SavePidTuning.hpp"
@@ -60,8 +59,8 @@ void PidTuningService::handleEvent(const BaseEvent& event) {
         handleSaveCommand(event.as<UI_SavePidTuning>());
     } else if (event.is<UI_DiscardPidTuning>()) {
         handleDiscardCommand(event.as<UI_DiscardPidTuning>());
-    } else if (event.is<SYSTEM_StateChanged>()) {
-        handleSystemStateChanged(event.as<SYSTEM_StateChanged>());
+    } else if (event.is<PID_TuningRunModeChanged>()) {
+        handleRunModeChanged(event.as<PID_TuningRunModeChanged>());
     } else {
         ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
                  getHandlerName().c_str(), event.eventName());
@@ -346,18 +345,16 @@ void PidTuningService::handleDiscardCommand(const UI_DiscardPidTuning& event) {
     }
 }
 
-void PidTuningService::handleSystemStateChanged(const SYSTEM_StateChanged& event) {
+void PidTuningService::handleRunModeChanged(const PID_TuningRunModeChanged& event) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    if (event.newState == SystemState::PID_TUNING) {
+    if (event.active) {
         const PidTuningTarget target = m_startRequested ? m_requestedTarget : PidTuningTarget::MOTOR_SPEED_LEFT;
         beginRunLocked(target);
         m_startRequested = false;
         return;
     }
 
-    if (event.previousState == SystemState::PID_TUNING &&
-        event.newState != SystemState::PID_TUNING &&
-        m_status.state == PidTuningState::RUNNING) {
+    if (m_status.state == PidTuningState::RUNNING) {
         cancelRunLocked("Tuning stopped");
     }
 }

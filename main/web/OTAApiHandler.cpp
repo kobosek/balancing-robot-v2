@@ -39,6 +39,7 @@ esp_err_t OTAApiHandler::sendStatusJson(httpd_req_t* req) {
 
     cJSON_AddBoolToObject(root.get(), "available", status.available);
     cJSON_AddBoolToObject(root.get(), "spiffs_available", status.spiffsAvailable);
+    cJSON_AddBoolToObject(root.get(), "update_allowed", status.updateAllowed);
     cJSON_AddBoolToObject(root.get(), "update_in_progress", status.updateInProgress);
     cJSON_AddBoolToObject(root.get(), "reboot_required", status.rebootRequired);
     cJSON_AddNumberToObject(root.get(), "bytes_written", static_cast<double>(status.bytesWritten));

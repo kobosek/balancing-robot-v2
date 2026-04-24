@@ -50,6 +50,7 @@ public:
     std::shared_ptr<BalancingAlgorithm> balancingAlgorithmHandle() const { return m_balancingAlgorithm; }
     std::shared_ptr<PidTuningService> pidTuningServiceHandle() const { return m_pidTuningService; }
     std::shared_ptr<GuidedCalibrationService> guidedCalibrationServiceHandle() const { return m_guidedCalibrationService; }
+    std::shared_ptr<OTAService> otaServiceHandle() const { return m_otaService; }
     std::shared_ptr<WebServer> webServerHandle() const { return m_webServer; }
     std::shared_ptr<IMUService> imuServiceHandle() const { return m_imuService; }
 

@@ -11,7 +11,6 @@
 #include "IMU_AvailabilityChanged.hpp"
 #include "IMUService.hpp"
 #include "StateManager.hpp"
-#include "SystemState.hpp"
 #include "esp_check.h"
 #include "esp_log.h"
 
@@ -59,18 +58,18 @@ void Application::run()
     m_runtime = std::make_unique<ApplicationRuntime>();
     if (m_runtime == nullptr) {
         ESP_LOGE(TAG, "Failed to allocate application runtime");
-        m_context->stateManager().setState(SystemState::FATAL_ERROR);
+        m_context->stateManager().markFatalError();
         return;
     }
 
     const esp_err_t ret = m_runtime->start(*m_context, intervalMs, batteryIntervalMs);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start required tasks. Entering FATAL_ERROR state.");
-        m_context->stateManager().setState(SystemState::FATAL_ERROR);
+        m_context->stateManager().markFatalError();
         return;
     }
 
-    m_context->stateManager().setState(SystemState::IDLE);
+    m_context->stateManager().markReady();
     ESP_LOGI(TAG, "System State set to IDLE");
     ESP_LOGI(TAG, "Application running");
 }

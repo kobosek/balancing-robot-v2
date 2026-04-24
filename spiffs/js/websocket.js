@@ -1,9 +1,13 @@
 import { getWsUrl, WS_RECONNECT_DELAY_MS } from './constants.js';
 import { appState } from './state.js';
 import { updateWsStatusUI } from './ui.js';
-import { stopJoystickSendInterval } from './joystick.js'; // Import function to stop joystick on disconnect
 
 let reconnectTimer = null;
+let disconnectHandler = null;
+
+export function setWebSocketDisconnectHandler(handler) {
+    disconnectHandler = typeof handler === 'function' ? handler : null;
+}
 
 export function setupWebSocket() {
     const wsUrl = getWsUrl();
@@ -65,7 +69,9 @@ export function setupWebSocket() {
             console.log(`WebSocket Closed. Code: ${event.code}, Reason: ${event.reason}`);
             updateWsStatusUI('DISCONNECTED', '#dc3545');
             appState.ws = null; // Nullify the current WS instance
-            stopJoystickSendInterval(); // Stop sending joystick data
+            if (disconnectHandler) {
+                disconnectHandler();
+            }
 
             // Schedule reconnection attempt
             clearTimeout(reconnectTimer); // Clear any existing timer just in case

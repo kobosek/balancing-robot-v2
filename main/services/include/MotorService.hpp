@@ -2,7 +2,6 @@
 #pragma once
 
 #include "EventBus.hpp"                 // Found via INCLUDE_DIRS
-#include "SystemState.hpp"              // Found via INCLUDE_DIRS
 #include "MX1616H_HWDriver.hpp"         // Found via INCLUDE_DIRS
 #include "EventHandler.hpp"             // For EventHandler base class
 #include "config/MotorConfig.hpp"
@@ -12,7 +11,7 @@
 #include <cmath>                        // Not needed in header
  // Forward declare event class
 class BaseEvent; // <<< Already defined
-class SYSTEM_StateChanged; // Forward declaration for event handler
+class MOTOR_OutputEnabledChanged;
 
 class MotorService : public EventHandler {
 public:
@@ -40,12 +39,11 @@ private:
     std::unique_ptr<MX1616H_HWDriver> m_hw_driver_left;
     std::unique_ptr<MX1616H_HWDriver> m_hw_driver_right;
 
-    SystemState m_current_system_state = SystemState::INIT;
     bool m_enabled = false;
     uint32_t m_pwm_max_duty = 0;
 
     // Event handlers for specific event types
-    void handleSystemStateChange(const SYSTEM_StateChanged& event);
+    void handleMotorOutputEnabledChanged(const MOTOR_OutputEnabledChanged& event);
     // Declaration only
     esp_err_t configureLEDCTimer();
 };

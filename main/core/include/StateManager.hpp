@@ -3,7 +3,6 @@
 // ================================================
 #pragma once
 
-#include "SystemState.hpp"
 #include "EventBus.hpp"
 #include "EventHandler.hpp"
 #include <mutex>
@@ -17,6 +16,10 @@ class BALANCE_FallDetected;
 class BALANCE_AutoBalanceReady;
 class UI_StartBalancing;
 class UI_Stop;
+class UI_EnableAutoBalancing;
+class UI_DisableAutoBalancing;
+class UI_EnableFallDetection;
+class UI_DisableFallDetection;
 class BATTERY_StatusUpdate;
 class UI_CalibrateImu;
 class UI_StartPidTuning;
@@ -31,19 +34,31 @@ class IMU_CalibrationRequest;
 class IMU_CalibrationRequestRejected;
 class IMU_CommunicationError;
 class IMU_AvailabilityChanged;
+enum class SystemState;
 
 struct SystemBehaviorConfig; 
 struct BatteryConfig;
 struct ConfigData; 
+
+struct SystemStatusSnapshot {
+    int stateId;
+    const char* stateName;
+    bool autoBalancingEnabled;
+    bool fallDetectionEnabled;
+    bool criticalBatteryMotorShutdownEnabled;
+};
 
 class StateManager : public EventHandler {
 public:
     StateManager(EventBus& eventBus, const SystemBehaviorConfig& initialBehaviorConfig, const BatteryConfig& initialBatteryConfig);
     ~StateManager() = default;
 
-    SystemState getCurrentState() const;
+    SystemStatusSnapshot getStatusSnapshot() const;
     bool isCriticalBatteryMotorShutdownEnabled() const { return m_criticalBatteryMotorShutdownEnabled; }
-    void setState(SystemState newState);
+    bool isAutoBalancingEnabled() const { return m_autoBalancingEnabled; }
+    bool isFallDetectionEnabled() const { return m_fallDetectionEnabled; }
+    void markReady();
+    void markFatalError();
 
     esp_err_t init();
     // EventHandler interface implementation
@@ -63,11 +78,20 @@ private:
     bool m_pending_start = false;
     bool m_battery_critical = false;
     bool m_criticalBatteryMotorShutdownEnabled = false;
+    bool m_autoBalancingEnabled = true;
+    bool m_fallDetectionEnabled = true;
+
+    SystemState getCurrentState() const;
+    void setState(SystemState newState);
 
     void handleFallDetected(const BALANCE_FallDetected& event);
     void handleAutoBalanceReady(const BALANCE_AutoBalanceReady& event);
     void handleStartBalancing(const UI_StartBalancing& event);
     void handleStop(const UI_Stop& event);
+    void handleEnableAutoBalancing(const UI_EnableAutoBalancing& event);
+    void handleDisableAutoBalancing(const UI_DisableAutoBalancing& event);
+    void handleEnableFallDetect(const UI_EnableFallDetection& event);
+    void handleDisableFallDetect(const UI_DisableFallDetection& event);
     void handleBatteryUpdate(const BATTERY_StatusUpdate& event);
     void handleCalibrateCommand(const UI_CalibrateImu& event);
     void handleStartPidTuning(const UI_StartPidTuning& event);
@@ -83,7 +107,13 @@ private:
     void handleConfigUpdate(const CONFIG_FullConfigUpdate& event);
 
     void initiateCalibration(bool force = false);
-    
-    std::string stateToString(SystemState state) const;
+    void publishBalanceMonitorMode();
+    void publishMotorOutputMode();
+    void publishRoutineRunModes();
+    void publishCommandInputMode();
+    void publishControlRunMode();
+    void publishImuSystemPolicy();
+    void publishOtaUpdatePolicy();
+
     void applyConfig(const SystemBehaviorConfig& behaviorConfig, const BatteryConfig& batteryConfig);
 };

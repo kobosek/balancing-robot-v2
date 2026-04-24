@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EventHandler.hpp"
 #include "esp_err.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
@@ -14,6 +15,7 @@ enum class OTAUpdateTarget {
 struct OTAStatus {
     bool available = false;
     bool spiffsAvailable = false;
+    bool updateAllowed = false;
     bool updateInProgress = false;
     bool rebootRequired = false;
     size_t bytesWritten = 0;
@@ -27,9 +29,12 @@ struct OTAStatus {
     std::string message;
 };
 
-class OTAService {
+class OTAService : public EventHandler {
 public:
     esp_err_t init();
+
+    void handleEvent(const BaseEvent& event) override;
+    std::string getHandlerName() const override { return TAG; }
 
     OTAStatus getStatus() const;
     esp_err_t begin(size_t expectedSize);
@@ -50,6 +55,7 @@ private:
     esp_ota_handle_t m_updateHandle = 0;
     OTAUpdateTarget m_activeTarget = OTAUpdateTarget::APP;
     size_t m_writeOffset = 0;
+    bool m_bundleSpiffsReady = false;
     OTAStatus m_status;
 
     esp_err_t beginAppUpdateLocked(size_t expectedSize);
@@ -58,4 +64,5 @@ private:
     esp_err_t writeSpiffsLocked(const uint8_t* data, size_t len);
     esp_err_t finishAppLocked();
     esp_err_t finishSpiffsLocked();
+    void setUpdateAllowed(bool allowed);
 };

@@ -1,9 +1,8 @@
 // main/MotorService.cpp
 #include "MotorService.hpp"             // Relative path within module's include dir
-#include "SYSTEM_StateChanged.hpp"  // Found via INCLUDE_DIRS
+#include "MOTOR_OutputEnabledChanged.hpp"
 #include "MX1616H_HWDriver.hpp"         // Found via INCLUDE_DIRS (needed for make_unique)
 #include "BaseEvent.hpp"                // Found via INCLUDE_DIRS (needed for handle state change)
-#include "SystemState.hpp"              // Found via INCLUDE_DIRS (needed for handle state change)
 #include "esp_check.h"
 #include "driver/ledc.h"
 #include <cmath>
@@ -16,7 +15,6 @@
 MotorService::MotorService(const MotorConfig& config, EventBus& bus) :
     m_config(config),
     m_eventBus(bus),
-    m_current_system_state(SystemState::INIT),
     m_enabled(false),
     m_pwm_max_duty(0)
 {
@@ -73,8 +71,8 @@ esp_err_t MotorService::init() {
 
 // EventHandler implementation
 void MotorService::handleEvent(const BaseEvent& event) {
-    if (event.is<SYSTEM_StateChanged>()) {
-        handleSystemStateChange(event.as<SYSTEM_StateChanged>());
+    if (event.is<MOTOR_OutputEnabledChanged>()) {
+        handleMotorOutputEnabledChanged(event.as<MOTOR_OutputEnabledChanged>());
     } else {
         ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
                  getHandlerName().c_str(), event.eventName());
@@ -147,14 +145,9 @@ esp_err_t MotorService::setMotorEffort(float leftEffort, float rightEffort) {
     return (ret_l == ESP_OK && ret_r == ESP_OK) ? ESP_OK : ESP_FAIL;
 }
 
-void MotorService::handleSystemStateChange(const SYSTEM_StateChanged& event) {
-    m_current_system_state = event.newState;
-    ESP_LOGI(TAG, "Received State Change event: %d", static_cast<int>(m_current_system_state));
-    
-    bool should_be_enabled = (m_current_system_state == SystemState::BALANCING ||
-                              m_current_system_state == SystemState::PID_TUNING ||
-                              m_current_system_state == SystemState::GUIDED_CALIBRATION);
-    
+void MotorService::handleMotorOutputEnabledChanged(const MOTOR_OutputEnabledChanged& event) {
+    const bool should_be_enabled = event.enabled;
+
     if (should_be_enabled && !m_enabled) { 
         ESP_LOGI(TAG, "Enabling motors."); 
         m_enabled = true; 

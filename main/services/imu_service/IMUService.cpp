@@ -16,9 +16,9 @@
 #include "IMU_CalibrationRequestRejected.hpp"
 #include "IMU_CommunicationError.hpp"
 #include "IMU_GyroOffsetsUpdated.hpp"
+#include "IMU_SystemPolicyChanged.hpp"
 #include "MPU6050HardwareController.hpp"
 #include "OrientationEstimator.hpp"
-#include "SYSTEM_StateChanged.hpp"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -61,7 +61,9 @@ IMUService::IMUService(std::shared_ptr<OrientationEstimator> estimator,
     m_healthMonitorTask(),
     m_is_calibrating_flag(false),
     m_current_state(IMUState::INITIALIZED),
-    m_system_state(SystemState::INIT),
+    m_calibration_allowed(false),
+    m_auto_attach_allowed(false),
+    m_hardware_config_apply_allowed(true),
     m_pending_hardware_apply(false),
     m_fault_reported(false),
     m_next_auto_attach_time_us(0),
@@ -178,8 +180,8 @@ void IMUService::handleEvent(const BaseEvent& event) {
         handleCalibrationRequest(event.as<IMU_CalibrationRequest>());
     } else if (event.is<IMU_AttachRequested>()) {
         handleAttachRequested(event.as<IMU_AttachRequested>());
-    } else if (event.is<SYSTEM_StateChanged>()) {
-        handleSystemStateChanged(event.as<SYSTEM_StateChanged>());
+    } else if (event.is<IMU_SystemPolicyChanged>()) {
+        handleSystemPolicyChanged(event.as<IMU_SystemPolicyChanged>());
     }
 }
 
@@ -213,7 +215,7 @@ void IMUService::pollBackgroundMaintenance() {
     applyPendingHardwareConfigIfSafe();
 
     if (getCurrentState() != IMUState::UNAVAILABLE ||
-        getSystemState() != SystemState::IDLE ||
+        !m_auto_attach_allowed.load(std::memory_order_acquire) ||
         m_is_calibrating_flag.load(std::memory_order_acquire)) {
         return;
     }
@@ -229,7 +231,8 @@ void IMUService::pollBackgroundMaintenance() {
         return;
     }
 
-    if (getCurrentState() != IMUState::UNAVAILABLE || getSystemState() != SystemState::IDLE) {
+    if (getCurrentState() != IMUState::UNAVAILABLE ||
+        !m_auto_attach_allowed.load(std::memory_order_acquire)) {
         return;
     }
 
@@ -248,14 +251,6 @@ void IMUService::pollBackgroundMaintenance() {
 IMUState IMUService::getCurrentState() const {
     std::lock_guard<std::mutex> lock(m_state_mutex);
     return m_current_state;
-}
-
-SystemState IMUService::getSystemState() const {
-    return m_system_state.load(std::memory_order_acquire);
-}
-
-void IMUService::updateSystemState(SystemState newState) {
-    m_system_state.store(newState, std::memory_order_release);
 }
 
 bool IMUService::isAvailable() const {
@@ -496,9 +491,8 @@ void IMUService::applyConfig(const SystemBehaviorConfig& config) {
 }
 
 bool IMUService::canApplyHardwareConfigNow() const {
-    const SystemState systemState = m_system_state.load(std::memory_order_acquire);
     const IMUState imuState = getCurrentState();
-    return systemState != SystemState::BALANCING &&
+    return m_hardware_config_apply_allowed.load(std::memory_order_acquire) &&
            !m_is_calibrating_flag.load(std::memory_order_acquire) &&
            imuState != IMUState::CALIBRATION;
 }
@@ -639,7 +633,7 @@ void IMUService::handleCalibrationRequest(const IMU_CalibrationRequest& event) {
         m_eventBus.publish(IMU_CalibrationRequestRejected(IMU_CalibrationRequestRejected::Reason::OTHER, false));
         return;
     }
-    if (getSystemState() != SystemState::IDLE) {
+    if (!m_calibration_allowed.load(std::memory_order_acquire)) {
         m_eventBus.publish(IMU_CalibrationRequestRejected(IMU_CalibrationRequestRejected::Reason::NOT_IDLE, true));
         return;
     }
@@ -691,14 +685,15 @@ void IMUService::handleAttachRequested(const IMU_AttachRequested& event) {
     }
 }
 
-void IMUService::handleSystemStateChanged(const SYSTEM_StateChanged& event) {
-    m_system_state.store(event.newState, std::memory_order_release);
-    if (event.newState == SystemState::IDLE) {
-        if (getCurrentState() == IMUState::UNAVAILABLE) {
-            scheduleAutoAttachRetry(0);
-        }
-        applyPendingHardwareConfigIfSafe();
+void IMUService::handleSystemPolicyChanged(const IMU_SystemPolicyChanged& event) {
+    m_calibration_allowed.store(event.calibrationAllowed, std::memory_order_release);
+    m_auto_attach_allowed.store(event.autoAttachAllowed, std::memory_order_release);
+    m_hardware_config_apply_allowed.store(event.hardwareConfigApplyAllowed, std::memory_order_release);
+
+    if (event.autoAttachAllowed && getCurrentState() == IMUState::UNAVAILABLE) {
+        scheduleAutoAttachRetry(0);
     }
+    applyPendingHardwareConfigIfSafe();
 }
 
 esp_err_t IMUService::performCalibration() {

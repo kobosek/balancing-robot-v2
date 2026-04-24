@@ -1,5 +1,7 @@
 #include "OTAService.hpp"
 
+#include "BaseEvent.hpp"
+#include "OTA_UpdatePolicyChanged.hpp"
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_spiffs.h"
@@ -27,6 +29,7 @@ esp_err_t OTAService::init() {
     m_status.appVersion = appDesc ? std::string(appDesc->version) : std::string("unknown");
     m_status.available = m_updatePartition != nullptr;
     m_status.spiffsAvailable = m_spiffsPartition != nullptr;
+    m_status.updateAllowed = false;
     m_status.updateInProgress = false;
     m_status.rebootRequired = false;
     m_status.bytesWritten = 0;
@@ -71,6 +74,23 @@ OTAStatus OTAService::getStatus() const {
     return m_status;
 }
 
+void OTAService::handleEvent(const BaseEvent& event) {
+    if (event.is<OTA_UpdatePolicyChanged>()) {
+        setUpdateAllowed(event.as<OTA_UpdatePolicyChanged>().updateAllowed);
+    } else {
+        ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
+                 getHandlerName().c_str(), event.eventName());
+    }
+}
+
+void OTAService::setUpdateAllowed(bool allowed) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_status.updateAllowed = allowed;
+    if (!allowed && !m_status.updateInProgress) {
+        m_bundleSpiffsReady = false;
+    }
+}
+
 esp_err_t OTAService::begin(size_t expectedSize) {
     return beginAppUpdate(expectedSize);
 }
@@ -86,7 +106,15 @@ esp_err_t OTAService::beginSpiffsUpdate(size_t expectedSize) {
 }
 
 esp_err_t OTAService::beginAppUpdateLocked(size_t expectedSize) {
+    if (!m_status.updateAllowed) {
+        m_status.message = "OTA is allowed only while system is IDLE";
+        return ESP_ERR_INVALID_STATE;
+    }
     if (m_status.updateInProgress) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!m_bundleSpiffsReady) {
+        m_status.message = "Upload SPIFFS image before firmware";
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -120,6 +148,10 @@ esp_err_t OTAService::beginAppUpdateLocked(size_t expectedSize) {
 }
 
 esp_err_t OTAService::beginSpiffsUpdateLocked(size_t expectedSize) {
+    if (!m_status.updateAllowed) {
+        m_status.message = "OTA is allowed only while system is IDLE";
+        return ESP_ERR_INVALID_STATE;
+    }
     if (m_status.updateInProgress) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -161,6 +193,7 @@ esp_err_t OTAService::beginSpiffsUpdateLocked(size_t expectedSize) {
 
     m_activeTarget = OTAUpdateTarget::SPIFFS;
     m_writeOffset = 0;
+    m_bundleSpiffsReady = false;
     m_status.updateInProgress = true;
     m_status.rebootRequired = false;
     m_status.bytesWritten = 0;
@@ -242,6 +275,7 @@ esp_err_t OTAService::finishAppLocked() {
     }
 
     m_status.rebootRequired = true;
+    m_bundleSpiffsReady = false;
     m_status.activeTarget = "app";
     m_status.message = "App OTA upload complete; reboot required";
     return ESP_OK;
@@ -260,9 +294,10 @@ esp_err_t OTAService::finishSpiffsLocked() {
     }
 
     m_status.updateInProgress = false;
-    m_status.rebootRequired = true;
+    m_status.rebootRequired = false;
+    m_bundleSpiffsReady = true;
     m_status.activeTarget = "spiffs";
-    m_status.message = "SPIFFS OTA upload complete; reboot required";
+    m_status.message = "SPIFFS OTA upload complete; firmware upload required";
     return ESP_OK;
 }
 
@@ -275,6 +310,7 @@ void OTAService::abort() {
     m_updateHandle = 0;
     m_status.updateInProgress = false;
     if (m_activeTarget == OTAUpdateTarget::SPIFFS) {
+        m_bundleSpiffsReady = false;
         m_status.rebootRequired = true;
         m_status.message = "SPIFFS upload aborted; serial reflash may be required";
     } else {

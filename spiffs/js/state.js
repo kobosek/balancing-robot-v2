@@ -69,6 +69,7 @@ export const appState = {
         ota: {
             available: false,
             spiffs_available: false,
+            update_allowed: false,
             update_in_progress: false,
             reboot_required: false,
             bytes_written: 0,

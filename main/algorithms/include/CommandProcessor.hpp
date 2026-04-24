@@ -4,7 +4,6 @@
 #pragma once
 #include "EventBus.hpp"
 #include "EventHandler.hpp"
-#include "SystemState.hpp"
 #include "config/ControlConfig.hpp"
 #include "config/SystemBehaviorConfig.hpp"
 #include <mutex>                    // For thread safety
@@ -12,8 +11,8 @@
 
 // Forward declarations
 class BaseEvent;
+class COMMAND_InputModeChanged;
 class CONFIG_FullConfigUpdate;
-class SYSTEM_StateChanged;
 class MOTION_TargetMovement;
 class UI_JoystickInput;
 
@@ -36,13 +35,13 @@ private:
     EventBus& m_eventBus;                       // Declaration Order: 1
 
     // --- Internal State ---
-    SystemState m_current_state;                // Declaration Order: 3
-    float m_target_pitch_offset_deg;            // Declaration Order: 4
-    float m_target_angular_velocity_dps;        // Declaration Order: 5
-    mutable std::mutex m_target_mutex;          // Declaration Order: 6
+    float m_target_pitch_offset_deg;            // Declaration Order: 3
+    float m_target_angular_velocity_dps;        // Declaration Order: 4
+    mutable std::mutex m_target_mutex;          // Declaration Order: 5
 
     // --- Timeout Tracking ---
-    int64_t m_last_input_time_us;               // Declaration Order: 7
+    int64_t m_last_input_time_us;               // Declaration Order: 6
+    bool m_accepting_input;                     // Declaration Order: 7
     bool m_input_timed_out;                     // Declaration Order: 8
     esp_timer_handle_t m_timeout_timer;         // Declaration Order: 9
 
@@ -55,7 +54,7 @@ private:
     float m_max_angular_velocity_dps;           // Declaration Order: 15 (From SystemBehaviorConfig)
 
     // --- Event Handlers ---
-    void handleSystemStateChange(const SYSTEM_StateChanged& event);
+    void handleInputModeChange(const COMMAND_InputModeChanged& event);
     void handleJoystickInput(const UI_JoystickInput& event);
     void handleConfigUpdate(const CONFIG_FullConfigUpdate& event);
 
