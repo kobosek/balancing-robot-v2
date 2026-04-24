@@ -12,6 +12,7 @@ public:
     esp_err_t init(const PIDConfig& config);
     esp_err_t updateParams(const PIDConfig& config);
     float compute(float setpoint, float currentValue, float dt);
+    float computeWithMeasurementRate(float setpoint, float currentValue, float currentRate, float dt);
     void reset();
 
 private:

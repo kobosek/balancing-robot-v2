@@ -74,6 +74,32 @@ float PIDController::compute(float setpoint, float currentValue, float dt) {
     return output;
 }
 
+float PIDController::computeWithMeasurementRate(float setpoint, float currentValue, float currentRate, float dt) {
+    if (dt <= 0.0f) {
+         ESP_LOGW(TAG, "Invalid dt (%.4f) in PID compute for key %s, returning 0 output.", dt, m_config_key.c_str());
+         return 0.0f;
+    }
+
+    float currentError = setpoint - currentValue;
+    float pTerm = m_params.pid_kp * currentError;
+
+    float integral_delta = (currentError + m_lastError) * 0.5f * dt * m_params.pid_ki;
+    m_integral += integral_delta;
+    m_integral = std::max(m_params.pid_iterm_min, std::min(m_integral, m_params.pid_iterm_max));
+
+    // Derivative-on-measurement avoids a kick when the command changes target angle.
+    float dTerm = -m_params.pid_kd * currentRate;
+    m_lastError = currentError;
+
+    float output = pTerm + m_integral + dTerm;
+    output = std::max(m_params.pid_output_min, std::min(output, m_params.pid_output_max));
+
+    ESP_LOGV(TAG, "PID (%s) | SP:%.3f PV:%.3f Rate:%.3f E:%.3f | P:%.3f I:%.3f D:%.3f | Out:%.3f",
+                    m_config_key.c_str(), setpoint, currentValue, currentRate, currentError, pTerm, m_integral, dTerm, output);
+
+    return output;
+}
+
 void PIDController::reset() {
     ESP_LOGD(TAG, "Resetting PID state for key: %s", m_config_key.c_str());
     m_integral = 0.0f;

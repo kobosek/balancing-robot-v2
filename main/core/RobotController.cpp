@@ -76,10 +76,10 @@ void RobotController::runControlStep(float dt) {
         return;
     }
 
-    const auto orientation = m_estimator->getPitchAndYawRate();
-    const float pitch_deg = orientation.first;
-    const float pitch_rate_dps = 0.0f;
-    const float yaw_rate_dps = orientation.second;
+    const OrientationEstimate orientation = m_estimator->getOrientation();
+    const float pitch_deg = orientation.pitch_deg;
+    const float pitch_rate_dps = orientation.pitch_rate_dps;
+    const float yaw_rate_dps = orientation.yaw_rate_dps;
 
     m_controlEventDispatcher.enqueueOrientation(
         pitch_deg * OrientationEstimator::DEG_TO_RAD,

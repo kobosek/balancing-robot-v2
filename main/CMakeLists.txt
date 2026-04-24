@@ -56,6 +56,7 @@ idf_component_register(SRCS # --- Tasks ---
                             "web/LogsApiHandler.cpp"
                             # --- Algorithms ---
                             "algorithms/PIDController.cpp"
+                            "algorithms/NestedPidBalanceStrategy.cpp"
                             "algorithms/BalancingAlgorithm.cpp"
                             "algorithms/BalanceMonitor.cpp"
                             "algorithms/CommandProcessor.cpp"
