@@ -9,6 +9,7 @@
 #include "ConfigData.hpp"
 #include "ConfigurationService.hpp"
 #include "ControlEventDispatcher.hpp"
+#include "ControlModeExecutor.hpp"
 #include "EncoderService.hpp"
 #include "EventBus.hpp"
 #include "GuidedCalibrationService.hpp"
@@ -225,14 +226,19 @@ esp_err_t ApplicationContext::initializeControlSubsystem()
     ret = m_guidedCalibrationService->init();
     ESP_RETURN_ON_ERROR(ret, TAG, "GuidedCalibrationService init failed");
 
+    m_controlModeExecutor = std::make_unique<ControlModeExecutor>(
+        *m_balancingAlgorithm,
+        *m_pidTuningService,
+        *m_guidedCalibrationService
+    );
+    ESP_RETURN_ON_FALSE(m_controlModeExecutor != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate control mode executor");
+
     m_robotController = std::make_shared<RobotController>(
         m_orientationEstimator,
         *m_encoderService,
         *m_motorService,
-        *m_balancingAlgorithm,
         *m_batteryService,
-        *m_pidTuningService,
-        *m_guidedCalibrationService,
+        *m_controlModeExecutor,
         *m_controlEventDispatcher
     );
     ESP_RETURN_ON_FALSE(m_robotController != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate robot controller");

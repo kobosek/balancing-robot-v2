@@ -9,6 +9,7 @@ class JsonConfigParser;
 class ConfigurationService;
 class StateManager;
 class RobotController;
+class ControlModeExecutor;
 class ControlEventDispatcher;
 class WiFiManager;
 class WebServer;
@@ -68,6 +69,7 @@ private:
     std::shared_ptr<ConfigurationService> m_configService;
     std::shared_ptr<StateManager> m_stateManager;
     std::shared_ptr<ControlEventDispatcher> m_controlEventDispatcher;
+    std::unique_ptr<ControlModeExecutor> m_controlModeExecutor;
     std::shared_ptr<RobotController> m_robotController;
     std::unique_ptr<WiFiManager> m_wifiManager;
     std::shared_ptr<WebServer> m_webServer;

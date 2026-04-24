@@ -8,18 +8,16 @@
 
 // Forward Declarations
 class OrientationEstimator;
-class BalancingAlgorithm;
 class EncoderService;
 class MotorService;
 class BatteryService;
-class PidTuningService;
-class GuidedCalibrationService;
 class ControlEventDispatcher;
+class ControlModeExecutor;
 class BaseEvent;
 class MOTION_TargetMovement;
 struct MotorEffort;
 struct TelemetryDataPoint;
-struct GuidedCalibrationSample;
+struct ControlModeResult;
 
 class RobotController : public EventHandler {
 public:
@@ -27,10 +25,8 @@ public:
         std::shared_ptr<OrientationEstimator> estimator,
         EncoderService& encoderService,
         MotorService& motorService,
-        BalancingAlgorithm& algorithm,
         BatteryService& batteryService,
-        PidTuningService& pidTuningService,
-        GuidedCalibrationService& guidedCalibrationService,
+        ControlModeExecutor& controlModeExecutor,
         ControlEventDispatcher& controlEventDispatcher
     );
 
@@ -47,10 +43,8 @@ private:
     std::shared_ptr<OrientationEstimator> m_estimator;
     EncoderService& m_encoderService;
     MotorService& m_motorService;
-    BalancingAlgorithm& m_algorithm;
     BatteryService& m_batteryService;
-    PidTuningService& m_pidTuningService;
-    GuidedCalibrationService& m_guidedCalibrationService;
+    ControlModeExecutor& m_controlModeExecutor;
     ControlEventDispatcher& m_controlEventDispatcher;
 
     // Latest command values (thread-safe)
@@ -63,27 +57,13 @@ private:
     std::mutex m_control_mode_mutex;
 
     void stopControlLoop();
-    MotorEffort executeControlMode(ControlRunMode currentMode,
-                                   float dt,
-                                   float pitch_deg,
-                                   float pitch_rate_dps,
-                                   float yaw_rate_dps,
-                                   float speedL_dps,
-                                   float speedR_dps,
-                                   float& currentTargetPitchOffset_deg,
-                                   float& currentTargetAngVel_dps);
-    MotorEffort executeGuidedCalibrationMode(float dt,
-                                             float pitch_deg,
-                                             float speedL_dps,
-                                             float speedR_dps) const;
     TelemetryDataPoint buildTelemetrySnapshot(int64_t timestamp_us,
-                                              ControlRunMode currentMode,
                                               int telemetryStateCode,
                                               float pitch_deg,
                                               float yaw_rate_dps,
                                               float speedL_dps,
                                               float speedR_dps,
-                                              float currentTargetPitchOffset_deg) const;
+                                              const ControlModeResult& modeResult) const;
     void handleTargetMovementCommand(const MOTION_TargetMovement& event);
     void handleControlRunModeChanged(const CONTROL_RunModeChanged& event);
 };
