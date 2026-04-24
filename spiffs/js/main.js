@@ -10,6 +10,7 @@ import { createConfigForms, toggleConfigMenu, showConfigForm, showGeneralConfigF
 import { sendCommandApi, fetchConfigApi, fetchStateApi, postConfigApi, uploadOtaFirmware } from './api.js';
 import { updateTelemetryData } from './telemetry.js';
 import { DATA_FETCH_INTERVAL_MS, STATE_FETCH_INTERVAL_MS } from './constants.js';
+import { loadPersistedLogs, startLogsPolling, stopLogsPolling, handleClearLogs, handleSaveLogsHtml, handleSaveLogsText, renderPersistedLogs, toggleLogsPanel } from './logs.js';
 
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', initialize);
@@ -29,6 +30,8 @@ function initialize() {
         }
 
         assignElements(); // Assign static DOM elements to uiElements cache
+        loadPersistedLogs();
+        renderPersistedLogs();
         createConfigForms(); // Create config forms and their dynamic controls
         setupEventListeners(); // Set up basic UI event listeners
         setWebSocketDisconnectHandler(stopJoystickSendInterval);
@@ -37,6 +40,7 @@ function initialize() {
         setupJoystick();     // Initialize the joystick controller
         setupGraphs();     // Setup multiple graphs
         startDataFetching(); // Start fetching telemetry and state
+        startLogsPolling(); // Collect logs even while the panel is collapsed
 
         console.log("Initialization complete.");
     } catch (error) {
@@ -77,6 +81,10 @@ function setupEventListeners() {
     uiElements.startGuidedCalibrationBtn?.addEventListener('click', () => handleCommandClick('start_guided_calibration', uiElements.startGuidedCalibrationBtn));
     uiElements.cancelGuidedCalibrationBtn?.addEventListener('click', () => handleCommandClick('cancel_guided_calibration', uiElements.cancelGuidedCalibrationBtn));
     uiElements.otaUploadBtn?.addEventListener('click', handleOtaUpload);
+    uiElements.toggleLogsBtn?.addEventListener('click', toggleLogsPanel);
+    uiElements.clearLogsBtn?.addEventListener('click', handleClearLogs);
+    uiElements.saveLogsTextBtn?.addEventListener('click', handleSaveLogsText);
+    uiElements.saveLogsHtmlBtn?.addEventListener('click', handleSaveLogsHtml);
 
     console.log("Event listeners setup complete.");
 }
@@ -325,6 +333,7 @@ function stopDataFetching() {
         console.log("Cleared state fetch timer:", appState.timers.stateFetch);
         appState.timers.stateFetch = null;
     }
+    stopLogsPolling();
 }
 
 // --- Page Unload Cleanup ---

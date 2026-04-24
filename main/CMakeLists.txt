@@ -44,6 +44,7 @@ idf_component_register(SRCS # --- Tasks ---
                             "services/PidTuningService.cpp"
                             "services/OTAService.cpp"
                             "services/GuidedCalibrationService.cpp"
+                            "services/LogBufferService.cpp"
                             # --- Web ---
                             "web/WebServer.cpp"
                             "web/StaticFileHandler.cpp"
@@ -52,6 +53,7 @@ idf_component_register(SRCS # --- Tasks ---
                             "web/CommandApiHandler.cpp"
                             "web/StateApiHandler.cpp"
                             "web/OTAApiHandler.cpp"
+                            "web/LogsApiHandler.cpp"
                             # --- Algorithms ---
                             "algorithms/PIDController.cpp"
                             "algorithms/BalancingAlgorithm.cpp"

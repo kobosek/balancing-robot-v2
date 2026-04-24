@@ -367,6 +367,9 @@ cJSON* serializeWeb(const WebServerConfig& config) {
     }
     cJSON_AddNumberToObject(obj, "telemetry_buffer_size", config.telemetry_buffer_size);
     cJSON_AddNumberToObject(obj, "max_config_post_size", config.max_config_post_size);
+    cJSON_AddBoolToObject(obj, "web_logs_enabled", config.web_logs_enabled);
+    cJSON_AddNumberToObject(obj, "log_buffer_lines", config.log_buffer_lines);
+    cJSON_AddNumberToObject(obj, "log_line_max_length", config.log_line_max_length);
     return obj;
 }
 
@@ -376,6 +379,9 @@ bool deserializeWeb(cJSON* obj, WebServerConfig& config) {
     }
     GET_JSON_NUMBER_INT(obj, "telemetry_buffer_size", config.telemetry_buffer_size);
     GET_JSON_NUMBER_INT(obj, "max_config_post_size", config.max_config_post_size);
+    GET_JSON_BOOL(obj, "web_logs_enabled", config.web_logs_enabled);
+    GET_JSON_NUMBER_INT(obj, "log_buffer_lines", config.log_buffer_lines);
+    GET_JSON_NUMBER_INT(obj, "log_line_max_length", config.log_line_max_length);
     return true;
 }
 

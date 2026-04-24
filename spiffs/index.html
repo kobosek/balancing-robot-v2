@@ -106,6 +106,19 @@
         <!-- Telemetry Section -->
         <h2>Telemetry</h2>
 
+        <button id="toggleLogsBtn" class="logs-toggle-button">Show Logs</button>
+        <div id="logsPanel" class="logs-panel logs-panel-collapsed">
+            <div class="logs-header">
+                <h3>ESP Logs</h3>
+                <div class="logs-actions">
+                    <button id="saveLogsTextBtn" class="toggle-button">Save TXT</button>
+                    <button id="saveLogsHtmlBtn" class="toggle-button">Save HTML</button>
+                    <button id="clearLogsBtn" class="toggle-button">Clear Firmware Buffer</button>
+                </div>
+            </div>
+            <pre id="logsOutput" class="logs-output"></pre>
+        </div>
+
         <!-- Graph 1: Pitch (Actual vs Desired) & Control Input -->
         <div class="graph-container" id="graphContainer1">
             <h3>Pitch (Actual vs Desired) & Control Input</h3>

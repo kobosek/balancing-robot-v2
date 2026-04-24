@@ -262,6 +262,14 @@ bool ConfigValidator::validate(const ConfigData& config, std::string& error) con
         error = "web.max_config_post_size [512, 64k]";
         return false;
     }
+    if (config.web.log_buffer_lines < 1 || config.web.log_buffer_lines > 500) {
+        error = "web.log_buffer_lines [1,500]";
+        return false;
+    }
+    if (config.web.log_line_max_length < 32 || config.web.log_line_max_length > 512) {
+        error = "web.log_line_max_length [32,512]";
+        return false;
+    }
 
     return true;
 }

@@ -18,6 +18,7 @@ private:
     static constexpr const char* TAG = "WiFiManager";
 
     static void eventHandler(void*, esp_event_base_t, int32_t, void*);
+    static void startSntp();
     // Connect now takes OUR WiFiConfig struct by const reference
     esp_err_t connect(const WiFiConfig& config); // <-- Use our struct type
     esp_err_t initNVS();
@@ -28,4 +29,5 @@ private:
     static const int WIFI_FAIL_BIT = BIT1;
     static const int MAXIMUM_RETRY = 5;
     static int s_retryNum;
+    static bool s_sntpStarted;
 };

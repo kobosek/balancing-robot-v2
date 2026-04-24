@@ -134,6 +134,9 @@
   },
   "web": {
     "telemetry_buffer_size": 100,
-    "max_config_post_size": 4096
+    "max_config_post_size": 4096,
+    "web_logs_enabled": true,
+    "log_buffer_lines": 250,
+    "log_line_max_length": 256
   }
 }

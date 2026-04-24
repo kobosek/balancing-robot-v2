@@ -4,14 +4,18 @@
 
 #include "nvs_flash.h"
 #include "esp_netif.h"
+#include "esp_sntp.h"
 
 #include <cstring>
+#include <cstdlib>
+#include <ctime>
 #include "esp_log.h"
 #include <cstring> // For strncpy
 
 // Static member initialization
 EventGroupHandle_t WiFiManager::s_wifiEventGroup = nullptr;
 int WiFiManager::s_retryNum = 0;
+bool WiFiManager::s_sntpStarted = false;
 
 // NVS Init remains the same
 esp_err_t WiFiManager::initNVS() {
@@ -176,7 +180,23 @@ void WiFiManager::eventHandler(void* arg, esp_event_base_t event_base, int32_t e
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
         ESP_LOGI(TAG, "Got IP address: " IPSTR, IP2STR(&event->ip_info.ip));
+        startSntp();
         s_retryNum = 0; // Reset retry counter on success
         if (s_wifiEventGroup) xEventGroupSetBits(s_wifiEventGroup, WIFI_CONNECTED_BIT);
     }
+}
+
+void WiFiManager::startSntp()
+{
+    if (s_sntpStarted) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "Starting SNTP time synchronization");
+    setenv("TZ", "CET-1CEST,M3.5.0/2,M10.5.0/3", 1);
+    tzset();
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_init();
+    s_sntpStarted = true;
 }

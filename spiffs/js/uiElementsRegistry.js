@@ -7,5 +7,6 @@ export const STATIC_UI_ELEMENT_IDS = [
     'joystickZone',
     'telemetryGraph1', 'legend1', 'graphContainer1',
     'telemetryGraph2', 'legend2', 'graphContainer2',
-    'telemetryGraph3', 'legend3', 'graphContainer3'
+    'telemetryGraph3', 'legend3', 'graphContainer3',
+    'toggleLogsBtn', 'logsPanel', 'logsOutput', 'clearLogsBtn', 'saveLogsTextBtn', 'saveLogsHtmlBtn'
 ];

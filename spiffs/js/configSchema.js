@@ -50,5 +50,8 @@ export const GENERAL_CONFIG_FIELDS = [
     { label: 'IMU NoData Thr', id: 'behavior_imu_health_no_data_threshold', step: '1', min: 1, max: 100, section: 'behavior', key: 'imu_health_no_data_threshold' },
     { label: 'IMU Timeout(ms)', id: 'behavior_imu_health_data_timeout_ms', step: '10', min: 1, max: 10000, section: 'behavior', key: 'imu_health_data_timeout_ms' },
     { label: 'Telem Buf Size', id: 'web_telemetry_buffer_size', step: '10', min: 1, max: 10000, section: 'web', key: 'telemetry_buffer_size' },
-    { label: 'Max POST Size', id: 'web_max_config_post_size', step: '128', min: 512, max: 65536, section: 'web', key: 'max_config_post_size' }
+    { label: 'Max POST Size', id: 'web_max_config_post_size', step: '128', min: 512, max: 65536, section: 'web', key: 'max_config_post_size' },
+    { label: 'Web Logs', id: 'web_web_logs_enabled', type: 'checkbox', section: 'web', key: 'web_logs_enabled' },
+    { label: 'Log Lines', id: 'web_log_buffer_lines', step: '10', min: 1, max: 500, section: 'web', key: 'log_buffer_lines' },
+    { label: 'Log Line Len', id: 'web_log_line_max_length', step: '16', min: 32, max: 512, section: 'web', key: 'log_line_max_length' }
 ];

@@ -87,10 +87,14 @@ export const appState = {
     telemetryJsonCache: null,
 
     // Timers
-    timers: { dataFetch: null, stateFetch: null, wsReconnect: null, joystickSend: null },
+    timers: { dataFetch: null, stateFetch: null, wsReconnect: null, joystickSend: null, logsFetch: null },
 
     // WebSocket instance
     ws: null,
+
+    logsPanelExpanded: false,
+    webLogLines: [],
+    webLogNextSequence: 0,
 
     // Joystick state
     joystick: { instance: null, currentData: { x: 0, y: 0 }, lastSentData: { x: -99, y: -99 }, isActive: false },

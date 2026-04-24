@@ -20,6 +20,7 @@ class ConfigApiHandler;
 class CommandApiHandler;
 class StateApiHandler;
 class OTAApiHandler;
+class LogsApiHandler;
 
 class WebServer : public EventHandler {
 public:
@@ -29,7 +30,8 @@ public:
               std::unique_ptr<ConfigApiHandler> configApiHandler,
               std::unique_ptr<CommandApiHandler> commandApiHandler,
               std::unique_ptr<StateApiHandler> stateApiHandler,
-              std::unique_ptr<OTAApiHandler> otaApiHandler);
+              std::unique_ptr<OTAApiHandler> otaApiHandler,
+              std::unique_ptr<LogsApiHandler> logsApiHandler);
     ~WebServer();
 
     esp_err_t init();
@@ -55,6 +57,7 @@ private:
     std::unique_ptr<CommandApiHandler> m_commandApiHandler;
     std::unique_ptr<StateApiHandler> m_stateApiHandler;
     std::unique_ptr<OTAApiHandler> m_otaApiHandler;
+    std::unique_ptr<LogsApiHandler> m_logsApiHandler;
 
     // Static callback functions (HTTP)
     static esp_err_t static_get_handler(httpd_req_t* req);
@@ -65,6 +68,8 @@ private:
     static esp_err_t get_state_handler(httpd_req_t* req);
     static esp_err_t get_ota_status_handler(httpd_req_t* req);
     static esp_err_t ota_upload_handler(httpd_req_t* req);
+    static esp_err_t get_logs_handler(httpd_req_t* req);
+    static esp_err_t clear_logs_handler(httpd_req_t* req);
 
     // WebSocket Handling
     static esp_err_t websocket_handler(httpd_req_t *req);

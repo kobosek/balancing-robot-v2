@@ -7,6 +7,7 @@
 #include "CommandApiHandler.hpp"
 #include "StateApiHandler.hpp"
 #include "OTAApiHandler.hpp"
+#include "LogsApiHandler.hpp"
 
 #include "EventBus.hpp"
 #include "TelemetryDataPoint.hpp"
@@ -27,7 +28,8 @@ WebServer::WebServer(EventBus& eventBus,
                      std::unique_ptr<ConfigApiHandler> configApiHandler,
                      std::unique_ptr<CommandApiHandler> commandApiHandler,
                      std::unique_ptr<StateApiHandler> stateApiHandler,
-                     std::unique_ptr<OTAApiHandler> otaApiHandler)
+                     std::unique_ptr<OTAApiHandler> otaApiHandler,
+                     std::unique_ptr<LogsApiHandler> logsApiHandler)
     : server(nullptr),
       m_eventBus(eventBus),
       m_staticFileHandler(std::move(staticFileHandler)),
@@ -35,7 +37,8 @@ WebServer::WebServer(EventBus& eventBus,
       m_configApiHandler(std::move(configApiHandler)),
       m_commandApiHandler(std::move(commandApiHandler)),
       m_stateApiHandler(std::move(stateApiHandler)),
-      m_otaApiHandler(std::move(otaApiHandler))
+      m_otaApiHandler(std::move(otaApiHandler)),
+      m_logsApiHandler(std::move(logsApiHandler))
 {
     ESP_LOGI(TAG, "Webserver handlers created.");
 }
@@ -127,6 +130,16 @@ esp_err_t WebServer::init() {
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed register ota_upload URI");
     ESP_LOGI(TAG, "Registered handler for: /api/ota (POST)");
 
+    const httpd_uri_t get_logs_uri = { "/api/logs", HTTP_GET, get_logs_handler, nullptr };
+    ret = httpd_register_uri_handler(server, &get_logs_uri);
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register get_logs URI");
+    ESP_LOGI(TAG, "Registered handler for: /api/logs (GET)");
+
+    const httpd_uri_t clear_logs_uri = { "/api/logs", HTTP_DELETE, clear_logs_handler, nullptr };
+    ret = httpd_register_uri_handler(server, &clear_logs_uri);
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register clear_logs URI");
+    ESP_LOGI(TAG, "Registered handler for: /api/logs (DELETE)");
+
     // --- Register WebSocket URI Handler ---
     const httpd_uri_t ws_uri = { "/ws", HTTP_GET, websocket_handler, nullptr, true };
     ret = httpd_register_uri_handler(server, &ws_uri);
@@ -184,6 +197,16 @@ esp_err_t WebServer::ota_upload_handler(httpd_req_t *req) {
      httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
      if (!instance || !instance->m_otaApiHandler) { ESP_LOGE(TAG, "OTA API handler ctx invalid!"); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); return ESP_FAIL; }
     return instance->m_otaApiHandler->handleUploadRequest(req);
+}
+esp_err_t WebServer::get_logs_handler(httpd_req_t *req) {
+     httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
+     if (!instance || !instance->m_logsApiHandler) { ESP_LOGE(TAG, "Logs API handler ctx invalid!"); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); return ESP_FAIL; }
+    return instance->m_logsApiHandler->handleGetRequest(req);
+}
+esp_err_t WebServer::clear_logs_handler(httpd_req_t *req) {
+     httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
+     if (!instance || !instance->m_logsApiHandler) { ESP_LOGE(TAG, "Logs API handler ctx invalid!"); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); return ESP_FAIL; }
+    return instance->m_logsApiHandler->handleDeleteRequest(req);
 }
 
 // --- WebSocket Static Handler ---

@@ -24,6 +24,7 @@ class CommandProcessor;
 class PidTuningService;
 class OTAService;
 class GuidedCalibrationService;
+class LogBufferService;
 
 class ApplicationContext {
 public:
@@ -86,4 +87,5 @@ private:
     std::shared_ptr<PidTuningService> m_pidTuningService;
     std::shared_ptr<OTAService> m_otaService;
     std::shared_ptr<GuidedCalibrationService> m_guidedCalibrationService;
+    std::unique_ptr<LogBufferService> m_logBufferService;
 };

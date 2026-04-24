@@ -15,12 +15,14 @@
 #include "GuidedCalibrationService.hpp"
 #include "IMUService.hpp"
 #include "JsonConfigParser.hpp"
+#include "LogBufferService.hpp"
 #include "MotorService.hpp"
 #include "OTAService.hpp"
 #include "OrientationEstimator.hpp"
 #include "PidTuningService.hpp"
 #include "RobotController.hpp"
 #include "OTAApiHandler.hpp"
+#include "LogsApiHandler.hpp"
 #include "SPIFFSStorageService.hpp"
 #include "StateApiHandler.hpp"
 #include "StateManager.hpp"
@@ -110,6 +112,17 @@ esp_err_t ApplicationContext::initializeCoreServices()
     ret = m_configService->init();
     ESP_RETURN_ON_ERROR(ret, TAG, "Config service init failed");
     ESP_LOGI(TAG, "ConfigService initialized");
+
+    const WebServerConfig webConf = m_configService->getWebServerConfig();
+    m_logBufferService = std::make_unique<LogBufferService>();
+    ESP_RETURN_ON_FALSE(m_logBufferService != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate log buffer service");
+    ret = m_logBufferService->init(
+        webConf.web_logs_enabled,
+        static_cast<size_t>(webConf.log_buffer_lines),
+        static_cast<size_t>(webConf.log_line_max_length)
+    );
+    ESP_RETURN_ON_ERROR(ret, TAG, "LogBufferService init failed");
+    ESP_LOGI(TAG, "LogBufferService initialized");
 
     const SystemBehaviorConfig behaviorConf = m_configService->getSystemBehaviorConfig();
     const BatteryConfig batteryConf = m_configService->getBatteryConfig();
@@ -270,6 +283,7 @@ esp_err_t ApplicationContext::initializeConnectivitySubsystem()
         *m_otaService
     );
     auto otaApiHandler = std::make_unique<OTAApiHandler>(*m_otaService);
+    auto logsApiHandler = std::make_unique<LogsApiHandler>(*m_logBufferService);
 
     m_webServer = std::make_shared<WebServer>(
         *m_eventBus,
@@ -278,7 +292,8 @@ esp_err_t ApplicationContext::initializeConnectivitySubsystem()
         std::move(configApiHandler),
         std::move(commandApiHandler),
         std::move(stateApiHandler),
-        std::move(otaApiHandler)
+        std::move(otaApiHandler),
+        std::move(logsApiHandler)
     );
     ESP_RETURN_ON_FALSE(m_webServer != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate web server");
 

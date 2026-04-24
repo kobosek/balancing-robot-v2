@@ -1,4 +1,4 @@
-import { API_CONFIG_URL, API_COMMAND_URL, API_STATE_URL, API_DATA_URL, API_OTA_URL } from './constants.js';
+import { API_CONFIG_URL, API_COMMAND_URL, API_STATE_URL, API_DATA_URL, API_OTA_URL, API_LOGS_URL } from './constants.js';
 import { updateConfigCache, invalidateConfigCache, appState, updateCurrentSystemState } from './state.js';
 import { updateStatusSectionUI } from './ui.js'; // For state updates
 
@@ -173,3 +173,28 @@ export async function uploadOtaImage(file, target) {
 }
 
 export const uploadOtaFirmware = uploadOtaImage;
+
+export async function fetchLogsApi(sinceSequence = 0) {
+    try {
+        const url = `${API_LOGS_URL}?since=${encodeURIComponent(sinceSequence || 0)}`;
+        const response = await fetch(url, { cache: 'no-cache' });
+        if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+        return await response.json();
+    } catch (error) {
+        console.error('Error fetching logs:', error);
+        return null;
+    }
+}
+
+export async function clearLogsApi() {
+    try {
+        const response = await fetch(API_LOGS_URL, { method: 'DELETE' });
+        const result = await parseJsonOrText(response);
+        if (!response.ok) throw new Error(result.message || `HTTP error ${response.status}`);
+        return result;
+    } catch (error) {
+        console.error('Error clearing logs:', error);
+        alert(`Error clearing logs: ${error.message || 'Unknown error'}`);
+        return null;
+    }
+}
