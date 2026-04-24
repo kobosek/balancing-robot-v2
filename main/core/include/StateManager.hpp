@@ -81,7 +81,6 @@ private:
     bool m_autoBalancingEnabled = true;
     bool m_fallDetectionEnabled = true;
 
-    SystemState getCurrentState() const;
     void setState(SystemState newState);
 
     void handleFallDetected(const BALANCE_FallDetected& event);
@@ -107,6 +106,7 @@ private:
     void handleConfigUpdate(const CONFIG_FullConfigUpdate& event);
 
     void initiateCalibration(bool force = false);
+    void publishStateDerivedModes();
     void publishBalanceMonitorMode();
     void publishMotorOutputMode();
     void publishRoutineRunModes();
