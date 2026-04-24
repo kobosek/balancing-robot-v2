@@ -26,6 +26,18 @@ EncoderService::EncoderService(const EncoderConfig& config) :
 }
 
 EncoderService::~EncoderService() {
+    if (m_unit_left) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_stop(m_unit_left));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_disable(m_unit_left));
+    }
+    if (m_unit_right) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_stop(m_unit_right));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_disable(m_unit_right));
+    }
+    if (m_channel_left_a) { pcnt_del_channel(m_channel_left_a); }
+    if (m_channel_left_b) { pcnt_del_channel(m_channel_left_b); }
+    if (m_channel_right_a) { pcnt_del_channel(m_channel_right_a); }
+    if (m_channel_right_b) { pcnt_del_channel(m_channel_right_b); }
     if (m_unit_left) { pcnt_del_unit(m_unit_left); }
     if (m_unit_right) { pcnt_del_unit(m_unit_right); }
 }
@@ -47,34 +59,80 @@ esp_err_t EncoderService::init() {
     // ... (PCNT initialization remains the same) ...
     ESP_LOGI(TAG, "Initializing EncoderService...");
     esp_err_t ret;
-    ret = initPCNTUnit(m_config.left_pin_a, m_config.left_pin_b, &m_unit_left);
+    ret = initPCNTUnit(m_config.left_pin_a, m_config.left_pin_b, &m_unit_left, &m_channel_left_a, &m_channel_left_b);
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed init Left Encoder PCNT");
     ESP_LOGI(TAG, "Left Encoder PCNT Initialized (Pins A:%d, B:%d)", m_config.left_pin_a, m_config.left_pin_b);
-    ret = initPCNTUnit(m_config.right_pin_a, m_config.right_pin_b, &m_unit_right);
+    ret = initPCNTUnit(m_config.right_pin_a, m_config.right_pin_b, &m_unit_right, &m_channel_right_a, &m_channel_right_b);
     ESP_RETURN_ON_ERROR(ret, TAG, "Failed init Right Encoder PCNT");
     ESP_LOGI(TAG, "Right Encoder PCNT Initialized (Pins A:%d, B:%d)", m_config.right_pin_a, m_config.right_pin_b);
     ESP_LOGI(TAG, "EncoderService Initialized Successfully.");
     return ESP_OK;
 }
 
-esp_err_t EncoderService::initPCNTUnit(int pinA, int pinB, pcnt_unit_handle_t* unit_handle) {
+esp_err_t EncoderService::initPCNTUnit(int pinA, int pinB, pcnt_unit_handle_t* unit_handle,
+                                       pcnt_channel_handle_t* channel_a_handle,
+                                       pcnt_channel_handle_t* channel_b_handle) {
     // ... (PCNT initialization remains the same) ...
      ESP_LOGD(TAG, "Init PCNT Unit for pins A:%d, B:%d", pinA, pinB);
+     *unit_handle = nullptr;
+     *channel_a_handle = nullptr;
+     *channel_b_handle = nullptr;
+     pcnt_unit_handle_t unit = nullptr;
+     pcnt_channel_handle_t pcnt_chan_a = nullptr;
+     pcnt_channel_handle_t pcnt_chan_b = nullptr;
+     bool unit_enabled = false;
+     bool unit_started = false;
+     auto cleanup = [&]() {
+         if (unit_started) {
+             ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_stop(unit));
+         }
+         if (unit_enabled) {
+             ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_disable(unit));
+         }
+         if (pcnt_chan_a) {
+             ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_del_channel(pcnt_chan_a));
+         }
+         if (pcnt_chan_b) {
+             ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_del_channel(pcnt_chan_b));
+         }
+         if (unit) {
+             ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_del_unit(unit));
+         }
+     };
      pcnt_unit_config_t unit_config = { .low_limit = m_config.pcnt_low_limit, .high_limit = m_config.pcnt_high_limit, .flags = { .accum_count = 1 } };
-     ESP_RETURN_ON_ERROR(pcnt_new_unit(&unit_config, unit_handle), TAG, "Failed create PCNT unit");
+     esp_err_t ret = pcnt_new_unit(&unit_config, &unit);
+     if (ret != ESP_OK) {
+         ESP_LOGE(TAG, "Failed create PCNT unit: %s", esp_err_to_name(ret));
+         return ret;
+     }
      pcnt_glitch_filter_config_t filter_config = { .max_glitch_ns = (uint32_t)m_config.pcnt_filter_ns };
-     ESP_RETURN_ON_ERROR(pcnt_unit_set_glitch_filter(*unit_handle, &filter_config), TAG, "Failed set PCNT glitch filter");
-     pcnt_chan_config_t chan_a_config = { .edge_gpio_num = pinA, .level_gpio_num = pinB }; pcnt_channel_handle_t pcnt_chan_a = NULL;
-     ESP_RETURN_ON_ERROR(pcnt_new_channel(*unit_handle, &chan_a_config, &pcnt_chan_a), TAG, "Failed create PCNT channel A");
-     pcnt_chan_config_t chan_b_config = { .edge_gpio_num = pinB, .level_gpio_num = pinA }; pcnt_channel_handle_t pcnt_chan_b = NULL;
-     ESP_RETURN_ON_ERROR(pcnt_new_channel(*unit_handle, &chan_b_config, &pcnt_chan_b), TAG, "Failed create PCNT channel B");
-     ESP_RETURN_ON_ERROR(pcnt_channel_set_edge_action(pcnt_chan_a, PCNT_CHANNEL_EDGE_ACTION_DECREASE, PCNT_CHANNEL_EDGE_ACTION_INCREASE), TAG, "Chan A edge fail");
-     ESP_RETURN_ON_ERROR(pcnt_channel_set_level_action(pcnt_chan_a, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE), TAG, "Chan A level fail");
-     ESP_RETURN_ON_ERROR(pcnt_channel_set_edge_action(pcnt_chan_b, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_DECREASE), TAG, "Chan B edge fail");
-     ESP_RETURN_ON_ERROR(pcnt_channel_set_level_action(pcnt_chan_b, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE), TAG, "Chan B level fail");
-     ESP_RETURN_ON_ERROR(pcnt_unit_enable(*unit_handle), TAG, "Failed enable PCNT unit");
-     ESP_RETURN_ON_ERROR(pcnt_unit_clear_count(*unit_handle), TAG, "Failed clear PCNT count");
-     ESP_RETURN_ON_ERROR(pcnt_unit_start(*unit_handle), TAG, "Failed start PCNT unit");
+     ret = pcnt_unit_set_glitch_filter(unit, &filter_config);
+     if (ret != ESP_OK) { ESP_LOGE(TAG, "Failed set PCNT glitch filter: %s", esp_err_to_name(ret)); cleanup(); return ret; }
+     pcnt_chan_config_t chan_a_config = { .edge_gpio_num = pinA, .level_gpio_num = pinB };
+     ret = pcnt_new_channel(unit, &chan_a_config, &pcnt_chan_a);
+     if (ret != ESP_OK) { ESP_LOGE(TAG, "Failed create PCNT channel A: %s", esp_err_to_name(ret)); cleanup(); return ret; }
+     pcnt_chan_config_t chan_b_config = { .edge_gpio_num = pinB, .level_gpio_num = pinA };
+     ret = pcnt_new_channel(unit, &chan_b_config, &pcnt_chan_b);
+     if (ret != ESP_OK) { ESP_LOGE(TAG, "Failed create PCNT channel B: %s", esp_err_to_name(ret)); cleanup(); return ret; }
+     ret = pcnt_channel_set_edge_action(pcnt_chan_a, PCNT_CHANNEL_EDGE_ACTION_DECREASE, PCNT_CHANNEL_EDGE_ACTION_INCREASE);
+     if (ret != ESP_OK) { ESP_LOGE(TAG, "Chan A edge fail: %s", esp_err_to_name(ret)); cleanup(); return ret; }
+     ret = pcnt_channel_set_level_action(pcnt_chan_a, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE);
+     if (ret != ESP_OK) { ESP_LOGE(TAG, "Chan A level fail: %s", esp_err_to_name(ret)); cleanup(); return ret; }
+     ret = pcnt_channel_set_edge_action(pcnt_chan_b, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_DECREASE);
+     if (ret != ESP_OK) { ESP_LOGE(TAG, "Chan B edge fail: %s", esp_err_to_name(ret)); cleanup(); return ret; }
+     ret = pcnt_channel_set_level_action(pcnt_chan_b, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE);
+     if (ret != ESP_OK) { ESP_LOGE(TAG, "Chan B level fail: %s", esp_err_to_name(ret)); cleanup(); return ret; }
+     ret = pcnt_unit_enable(unit);
+     if (ret != ESP_OK) { ESP_LOGE(TAG, "Failed enable PCNT unit: %s", esp_err_to_name(ret)); cleanup(); return ret; }
+     unit_enabled = true;
+     ret = pcnt_unit_clear_count(unit);
+     if (ret != ESP_OK) { ESP_LOGE(TAG, "Failed clear PCNT count: %s", esp_err_to_name(ret)); cleanup(); return ret; }
+     ret = pcnt_unit_start(unit);
+     if (ret != ESP_OK) { ESP_LOGE(TAG, "Failed start PCNT unit: %s", esp_err_to_name(ret)); cleanup(); return ret; }
+     unit_started = true;
+     *unit_handle = unit;
+     *channel_a_handle = pcnt_chan_a;
+     *channel_b_handle = pcnt_chan_b;
      return ESP_OK;
 }
 

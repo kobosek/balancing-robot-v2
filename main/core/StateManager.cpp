@@ -56,11 +56,13 @@ esp_err_t StateManager::init() {
 }
 
 void StateManager::applyConfig(const SystemBehaviorConfig& behaviorConfig, const BatteryConfig& batteryConfig) {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     (void)behaviorConfig;
     m_criticalBatteryMotorShutdownEnabled = batteryConfig.critical_battery_motor_shutdown_enabled;
 }
 
 SystemStatusSnapshot StateManager::getStatusSnapshot() const {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     return {
         static_cast<int>(m_currentState),
         policy::toApiStateName(m_currentState),
@@ -79,6 +81,7 @@ void StateManager::markFatalError() {
 }
 
 void StateManager::setState(SystemState newState) {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     const SystemState previousState = m_currentState;
     bool stateChanged = false;
     if (m_currentState != newState) {
@@ -101,6 +104,7 @@ void StateManager::setState(SystemState newState) {
 }
 
 void StateManager::handleEvent(const BaseEvent& event) {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (event.is<BALANCE_FallDetected>()) {
         handleFallDetected(event.as<BALANCE_FallDetected>());
     } else if (event.is<BALANCE_AutoBalanceReady>()) {

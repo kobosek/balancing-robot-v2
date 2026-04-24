@@ -69,6 +69,7 @@ void BalancingAlgorithm::handleEvent(const BaseEvent& event) {
 }
 
 void BalancingAlgorithm::resetState() {
+    std::lock_guard<std::mutex> lock(m_mutex);
     m_anglePid.reset();
     m_speedPidLeft.reset();
     m_speedPidRight.reset();
@@ -82,6 +83,7 @@ MotorEffort BalancingAlgorithm::update(float dt, float currentPitch_deg, float c
                                       float currentSpeedLeft_dps, float currentSpeedRight_dps,
                                       float targetPitchOffset_deg, float targetAngVel_dps)
 {
+    std::lock_guard<std::mutex> lock(m_mutex);
     MotorEffort effort = {0.0f, 0.0f};
     if (dt <= 0) { ESP_LOGW(TAG, "Invalid dt (%.4f)", dt); return effort; }
 
@@ -138,6 +140,7 @@ MotorEffort BalancingAlgorithm::update(float dt, float currentPitch_deg, float c
 
 // Helper to apply config values
 void BalancingAlgorithm::applyConfig(const ConfigData& config) {
+     std::lock_guard<std::mutex> lock(m_mutex);
      ESP_LOGD(TAG, "Applying new config to BalancingAlgorithm.");
      m_anglePid.updateParams(config.pid_angle);
      m_speedPidLeft.updateParams(config.pid_speed_left);
@@ -165,6 +168,7 @@ void BalancingAlgorithm::handleConfigUpdate(const CONFIG_FullConfigUpdate& event
 
 // Handle granular PID config update event
 void BalancingAlgorithm::handlePIDConfigUpdate(const CONFIG_PidConfigUpdate& event) {
+    std::lock_guard<std::mutex> lock(m_mutex);
     ESP_LOGD(TAG, "Handling granular PID config update for '%s'", event.pidName.c_str());
     
     // Update the specific PID controller based on the name

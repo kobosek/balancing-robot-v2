@@ -5,6 +5,7 @@
 #include "config/SystemBehaviorConfig.hpp"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include <mutex>
 
 class BaseEvent;
 class BALANCE_MonitorModeChanged;
@@ -24,6 +25,7 @@ public:
 private:
     static constexpr const char* TAG = "BalanceMonitor";
     EventBus& m_eventBus;
+    mutable std::mutex m_mutex;
 
     // Fall detection state
     float m_pitch_threshold_rad;
@@ -46,6 +48,6 @@ private:
     void handleOrientationData(const IMU_OrientationData& event);
     void handleMonitorModeChanged(const BALANCE_MonitorModeChanged& event);
 
-    void checkFall(float pitch_rad);
-    void checkAutoBalancing(float pitch_rad);
+    bool checkFall(float pitch_rad);
+    bool checkAutoBalancing(float pitch_rad);
 };

@@ -118,7 +118,8 @@ esp_err_t MotorService::setMotorEffort(float leftEffort, float rightEffort) {
     leftEffort = std::max(-1.0f, std::min(1.0f, leftEffort));
     rightEffort = std::max(-1.0f, std::min(1.0f, rightEffort));
     uint32_t leftDuty1 = 0, leftDuty2 = 0, rightDuty1 = 0, rightDuty2 = 0;
-    if (m_enabled) {
+    const bool enabled = m_enabled.load();
+    if (enabled) {
         if (std::fabs(leftEffort) > 1e-3) {
             float mag = std::fabs(leftEffort);
             uint32_t effective_max_duty = m_pwm_max_duty;
@@ -138,7 +139,7 @@ esp_err_t MotorService::setMotorEffort(float leftEffort, float rightEffort) {
              if (rightEffort > 0) { rightDuty1 = dutyMag; } else { rightDuty2 = dutyMag; }
         }
     }
-    ESP_LOGV(TAG, "Set Effort: L=%.2f R=%.2f => Raw Duty L(%lu,%lu) R(%lu,%lu) | Enabled:%d", leftEffort, rightEffort, leftDuty1, leftDuty2, rightDuty1, rightDuty2, m_enabled);
+    ESP_LOGV(TAG, "Set Effort: L=%.2f R=%.2f => Raw Duty L(%lu,%lu) R(%lu,%lu) | Enabled:%d", leftEffort, rightEffort, leftDuty1, leftDuty2, rightDuty1, rightDuty2, enabled);
     esp_err_t ret_l = ESP_FAIL, ret_r = ESP_FAIL;
     if (m_hw_driver_left) { ret_l = m_hw_driver_left->setRawDuty(leftDuty1, leftDuty2); if (ret_l != ESP_OK) ESP_LOGE(TAG, "Failed set left motor duty: %s", esp_err_to_name(ret_l)); } else { ESP_LOGE(TAG, "Left HW Driver null!"); }
     if (m_hw_driver_right) { ret_r = m_hw_driver_right->setRawDuty(rightDuty1, rightDuty2); if (ret_r != ESP_OK) ESP_LOGE(TAG, "Failed set right motor duty: %s", esp_err_to_name(ret_r)); } else { ESP_LOGE(TAG, "Right HW Driver null!"); }
@@ -148,12 +149,13 @@ esp_err_t MotorService::setMotorEffort(float leftEffort, float rightEffort) {
 void MotorService::handleMotorOutputEnabledChanged(const MOTOR_OutputEnabledChanged& event) {
     const bool should_be_enabled = event.enabled;
 
-    if (should_be_enabled && !m_enabled) { 
+    const bool was_enabled = m_enabled.load();
+    if (should_be_enabled && !was_enabled) {
         ESP_LOGI(TAG, "Enabling motors."); 
-        m_enabled = true; 
-    } else if (!should_be_enabled && m_enabled) { 
+        m_enabled.store(true);
+    } else if (!should_be_enabled && was_enabled) {
         ESP_LOGI(TAG, "Disabling motors."); 
-        m_enabled = false; 
+        m_enabled.store(false);
         esp_err_t stop_ret = setMotorEffort(0.0f, 0.0f); 
         if(stop_ret != ESP_OK) { 
             ESP_LOGE(TAG, "Failed stop motors!"); 

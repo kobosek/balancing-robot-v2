@@ -7,6 +7,7 @@
 #include "config/MotorConfig.hpp"
 // #include "esp_log.h" // Moved to .cpp
 #include <memory>
+#include <atomic>
 #include <algorithm>                    // Not needed in header
 #include <cmath>                        // Not needed in header
  // Forward declare event class
@@ -39,7 +40,7 @@ private:
     std::unique_ptr<MX1616H_HWDriver> m_hw_driver_left;
     std::unique_ptr<MX1616H_HWDriver> m_hw_driver_right;
 
-    bool m_enabled = false;
+    std::atomic<bool> m_enabled{false};
     uint32_t m_pwm_max_duty = 0;
 
     // Event handlers for specific event types

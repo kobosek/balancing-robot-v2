@@ -54,9 +54,18 @@ public:
     ~StateManager() = default;
 
     SystemStatusSnapshot getStatusSnapshot() const;
-    bool isCriticalBatteryMotorShutdownEnabled() const { return m_criticalBatteryMotorShutdownEnabled; }
-    bool isAutoBalancingEnabled() const { return m_autoBalancingEnabled; }
-    bool isFallDetectionEnabled() const { return m_fallDetectionEnabled; }
+    bool isCriticalBatteryMotorShutdownEnabled() const {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        return m_criticalBatteryMotorShutdownEnabled;
+    }
+    bool isAutoBalancingEnabled() const {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        return m_autoBalancingEnabled;
+    }
+    bool isFallDetectionEnabled() const {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        return m_fallDetectionEnabled;
+    }
     void markReady();
     void markFatalError();
 
@@ -72,6 +81,7 @@ private:
     static constexpr const char* TAG = "StateManager";
 
     EventBus& m_eventBus;
+    mutable std::recursive_mutex m_mutex;
     SystemState m_currentState;
     bool m_imu_available = false;
     bool m_pending_calibration = false;

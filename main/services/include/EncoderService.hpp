@@ -26,6 +26,10 @@ private:
 
     pcnt_unit_handle_t m_unit_left = nullptr;
     pcnt_unit_handle_t m_unit_right = nullptr;
+    pcnt_channel_handle_t m_channel_left_a = nullptr;
+    pcnt_channel_handle_t m_channel_left_b = nullptr;
+    pcnt_channel_handle_t m_channel_right_a = nullptr;
+    pcnt_channel_handle_t m_channel_right_b = nullptr;
 
     volatile int m_last_pulse_count_left = 0;
     volatile int m_last_pulse_count_right = 0;
@@ -37,6 +41,8 @@ private:
     float m_degs_per_pulse = 0.0f; // Renamed constant
     // --- End Update ---
 
-    esp_err_t initPCNTUnit(int pinA, int pinB, pcnt_unit_handle_t* unit_handle);
+    esp_err_t initPCNTUnit(int pinA, int pinB, pcnt_unit_handle_t* unit_handle,
+                           pcnt_channel_handle_t* channel_a_handle,
+                           pcnt_channel_handle_t* channel_b_handle);
     int32_t calculateDeltaPulses(int currentCount, int previousCount) const;
 };

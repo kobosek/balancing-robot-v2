@@ -6,6 +6,7 @@
 #include "EventHandler.hpp" // Include for EventHandler base class
 #include "PIDController.hpp"
 #include "esp_log.h"
+#include <mutex>
 
 // Forward declarations for event classes
 class CONFIG_PidConfigUpdate;
@@ -40,14 +41,24 @@ public:
     std::string getHandlerName() const override { return "BalancingAlgorithm"; }
 
     // --- Getters for Telemetry ---
-    float getLastSpeedSetpointLeftDPS() const { return m_last_speed_setpoint_left_dps; }
-    float getLastSpeedSetpointRightDPS() const { return m_last_speed_setpoint_right_dps; }
-    bool isYawControlEnabled() const { return m_yaw_control_enabled; }
+    float getLastSpeedSetpointLeftDPS() const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_last_speed_setpoint_left_dps;
+    }
+    float getLastSpeedSetpointRightDPS() const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_last_speed_setpoint_right_dps;
+    }
+    bool isYawControlEnabled() const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_yaw_control_enabled;
+    }
     // --- End Getters ---
 
 private:
     static constexpr const char* TAG = "BalancingAlgo";
     EventBus& m_eventBus;
+    mutable std::mutex m_mutex;
     // ConfigurationService& m_configService; // REMOVE
 
     PIDController m_anglePid;

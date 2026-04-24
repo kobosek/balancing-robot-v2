@@ -29,12 +29,38 @@ BalanceMonitor::BalanceMonitor(EventBus& bus, const SystemBehaviorConfig& config
 }
 
 void BalanceMonitor::handleEvent(const BaseEvent& event) {
-    if (event.is<IMU_OrientationData>()) {
-        handleOrientationData(event.as<IMU_OrientationData>());
-    } else if (event.is<BALANCE_MonitorModeChanged>()) {
-        handleMonitorModeChanged(event.as<BALANCE_MonitorModeChanged>());
-    } else if (event.is<CONFIG_BehaviorConfigUpdate>()) {
-        handleConfigUpdate(event.as<CONFIG_BehaviorConfigUpdate>());
+    bool publish_fall_detected = false;
+    bool publish_auto_balance_ready = false;
+
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+
+        if (event.is<IMU_OrientationData>()) {
+            const auto& orientationEvent = event.as<IMU_OrientationData>();
+            if (m_fallDetectionActive) {
+                publish_fall_detected = checkFall(orientationEvent.pitch_rad);
+            }
+
+            if (m_autoBalancingActive) {
+                publish_auto_balance_ready = checkAutoBalancing(orientationEvent.pitch_rad);
+            } else if (m_within_auto_balance_angle) {
+                m_within_auto_balance_angle = false;
+                m_auto_balance_angle_start_time_us = 0;
+            }
+        } else if (event.is<BALANCE_MonitorModeChanged>()) {
+            handleMonitorModeChanged(event.as<BALANCE_MonitorModeChanged>());
+        } else if (event.is<CONFIG_BehaviorConfigUpdate>()) {
+            handleConfigUpdate(event.as<CONFIG_BehaviorConfigUpdate>());
+        }
+    }
+
+    if (publish_fall_detected) {
+        BALANCE_FallDetected fall_event;
+        m_eventBus.publish(fall_event);
+    }
+    if (publish_auto_balance_ready) {
+        BALANCE_AutoBalanceReady auto_balance_event;
+        m_eventBus.publish(auto_balance_event);
     }
 }
 
@@ -53,6 +79,7 @@ void BalanceMonitor::handleConfigUpdate(const CONFIG_BehaviorConfigUpdate& event
 }
 
 void BalanceMonitor::reset() {
+    std::lock_guard<std::mutex> lock(m_mutex);
     m_potentially_fallen = false;
     m_fall_start_time_us = 0;
     m_fall_event_published = false;
@@ -63,11 +90,11 @@ void BalanceMonitor::reset() {
 
 void BalanceMonitor::handleOrientationData(const IMU_OrientationData& event) {
     if (m_fallDetectionActive) {
-        checkFall(event.pitch_rad);
+        (void)checkFall(event.pitch_rad);
     }
 
     if (m_autoBalancingActive) {
-        checkAutoBalancing(event.pitch_rad);
+        (void)checkAutoBalancing(event.pitch_rad);
     } else if (m_within_auto_balance_angle) {
         m_within_auto_balance_angle = false;
         m_auto_balance_angle_start_time_us = 0;
@@ -93,7 +120,7 @@ void BalanceMonitor::handleMonitorModeChanged(const BALANCE_MonitorModeChanged& 
     }
 }
 
-void BalanceMonitor::checkFall(float pitch_rad) {
+bool BalanceMonitor::checkFall(float pitch_rad) {
     bool threshold_exceeded = (std::abs(pitch_rad) > m_pitch_threshold_rad);
     int64_t now = esp_timer_get_time();
 
@@ -106,9 +133,8 @@ void BalanceMonitor::checkFall(float pitch_rad) {
                      pitch_rad * RAD_TO_DEG, m_pitch_threshold_rad * RAD_TO_DEG);
         } else if (!m_fall_event_published && (now - m_fall_start_time_us) >= (int64_t)m_threshold_duration_us) {
             ESP_LOGW(TAG, "Fall confirmed after %llu us.", m_threshold_duration_us);
-            BALANCE_FallDetected fall_event;
-            m_eventBus.publish(fall_event);
             m_fall_event_published = true;
+            return true;
         }
     } else {
         if (m_potentially_fallen) {
@@ -118,9 +144,10 @@ void BalanceMonitor::checkFall(float pitch_rad) {
             m_fall_event_published = false;
         }
     }
+    return false;
 }
 
-void BalanceMonitor::checkAutoBalancing(float pitch_rad) {
+bool BalanceMonitor::checkAutoBalancing(float pitch_rad) {
     bool is_upright = (std::abs(pitch_rad) < m_auto_balance_angle_threshold_rad);
     int64_t now = esp_timer_get_time();
 
@@ -134,8 +161,7 @@ void BalanceMonitor::checkAutoBalancing(float pitch_rad) {
             ESP_LOGI(TAG, "Auto balance conditions met.");
             m_within_auto_balance_angle = false;
             m_auto_balance_angle_start_time_us = 0;
-            BALANCE_AutoBalanceReady auto_balance_event;
-            m_eventBus.publish(auto_balance_event);
+            return true;
         }
     } else {
         if (m_within_auto_balance_angle) {
@@ -144,4 +170,5 @@ void BalanceMonitor::checkAutoBalancing(float pitch_rad) {
             m_auto_balance_angle_start_time_us = 0;
         }
     }
+    return false;
 }

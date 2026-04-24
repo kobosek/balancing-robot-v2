@@ -3,6 +3,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include <mutex>
 #include <string>
 
 class Task {
@@ -12,6 +13,7 @@ public:
     }
 
     virtual bool start(UBaseType_t priority, BaseType_t coreId = -1, uint32_t stackSize = 4096) {
+        std::lock_guard<std::mutex> lock(m_taskMutex);
         if (m_taskHandle != nullptr) {
             ESP_LOGW(m_taskName, "Task already running");
             return false;
@@ -49,14 +51,21 @@ public:
     }
 
     virtual void stop() {
-        if (m_taskHandle != nullptr) {
-            ESP_LOGI(m_taskName, "Stopping task");
-            vTaskDelete(m_taskHandle);
+        TaskHandle_t taskHandle = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(m_taskMutex);
+            taskHandle = m_taskHandle;
             m_taskHandle = nullptr;
+        }
+
+        if (taskHandle != nullptr) {
+            ESP_LOGI(m_taskName, "Stopping task");
+            vTaskDelete(taskHandle);
         }
     }
 
     bool isRunning() const {
+        std::lock_guard<std::mutex> lock(m_taskMutex);
         return m_taskHandle != nullptr;
     }
 
@@ -73,10 +82,14 @@ private:
         
         // If we get here, the task has exited its run method
         // Mark it as not running anymore
-        task->m_taskHandle = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(task->m_taskMutex);
+            task->m_taskHandle = nullptr;
+        }
         vTaskDelete(NULL);
     }
 
     const char* m_taskName;
     TaskHandle_t m_taskHandle;
+    mutable std::mutex m_taskMutex;
 };

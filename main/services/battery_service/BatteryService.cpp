@@ -205,6 +205,7 @@ bool BatteryService::adc_calibration_init(adc_channel_t channel) {
 
 // Apply config values from structs
 void BatteryService::applyConfig(const BatteryConfig& batConf, const SystemBehaviorConfig& behaviorConf) {
+    std::lock_guard<std::mutex> lock(m_status_mutex);
     const bool adc_path_changed =
         m_config.adc_pin != batConf.adc_pin ||
         m_config.adc_atten != batConf.adc_atten ||
@@ -220,7 +221,6 @@ void BatteryService::applyConfig(const BatteryConfig& batConf, const SystemBehav
     // Note: Read interval is now passed to the task constructor, not used directly here
 
     if (adc_path_changed) {
-        std::lock_guard<std::mutex> lock(m_status_mutex);
         m_filtered_adc_pin_voltage = -1.0f;
         m_filter_sample_count = 0;
     }
@@ -248,12 +248,22 @@ void BatteryService::handleEvent(const BaseEvent& event) {
 
 void BatteryService::handleBatteryConfigUpdate(const CONFIG_BatteryConfigUpdate& event) {
     ESP_LOGD(TAG, "Battery config update received.");
-    applyConfig(event.config, m_behaviorConfig);
+    SystemBehaviorConfig behaviorConfig;
+    {
+        std::lock_guard<std::mutex> lock(m_status_mutex);
+        behaviorConfig = m_behaviorConfig;
+    }
+    applyConfig(event.config, behaviorConfig);
 }
 
 void BatteryService::handleBehaviorConfigUpdate(const CONFIG_BehaviorConfigUpdate& event) {
     ESP_LOGD(TAG, "Behavior config update received for BatteryService.");
-    applyConfig(m_config, event.config);
+    BatteryConfig batteryConfig;
+    {
+        std::lock_guard<std::mutex> lock(m_status_mutex);
+        batteryConfig = m_config;
+    }
+    applyConfig(batteryConfig, event.config);
 }
 
 BatteryStatus BatteryService::getLatestStatus() const {
@@ -262,6 +272,14 @@ BatteryStatus BatteryService::getLatestStatus() const {
 }
 
 void BatteryService::updateBatteryStatus() {
+    BatteryConfig config;
+    int oversampling_count = 1;
+    {
+        std::lock_guard<std::mutex> lock(m_status_mutex);
+        config = m_config;
+        oversampling_count = m_oversampling_count;
+    }
+
     // Use the member variable for oversampling count
     if (!m_oneshot_adc_handle || m_adc_channel < 0) {
         ESP_LOGW(TAG, "ADC not initialized properly, cannot read battery voltage.");
@@ -278,11 +296,11 @@ void BatteryService::updateBatteryStatus() {
     }
 
     m_raw_samples.clear();
-    if (m_raw_samples.capacity() < static_cast<size_t>(m_oversampling_count)) {
-        m_raw_samples.reserve(m_oversampling_count);
+    if (m_raw_samples.capacity() < static_cast<size_t>(oversampling_count)) {
+        m_raw_samples.reserve(oversampling_count);
     }
 
-    for (int i = 0; i < m_oversampling_count; i++) {
+    for (int i = 0; i < oversampling_count; i++) {
         int raw_value;
         esp_err_t ret = adc_oneshot_read(m_oneshot_adc_handle, m_adc_channel, &raw_value);
         if (ret != ESP_OK) {
@@ -291,13 +309,13 @@ void BatteryService::updateBatteryStatus() {
         }
         m_raw_samples.push_back(raw_value);
         // Optionally add small delay between samples if ADC needs it
-        if (i < m_oversampling_count - 1) {
+        if (i < oversampling_count - 1) {
              esp_rom_delay_us(kBatterySampleDelayUs);
         }
     }
 
     if (m_raw_samples.empty()) {
-        ESP_LOGE(TAG, "No successful ADC samples obtained after %d attempts.", m_oversampling_count);
+        ESP_LOGE(TAG, "No successful ADC samples obtained after %d attempts.", oversampling_count);
         return; // Cannot calculate voltage
     }
 
@@ -327,7 +345,7 @@ void BatteryService::updateBatteryStatus() {
     ESP_LOGD(TAG, "Raw ADC value: %d (trimmed average of %d/%d samples)", adc_raw, filtered_sample_count, static_cast<int>(m_raw_samples.size()));
 
     // Convert to voltage
-    const float adc_full_scale_voltage = estimate_adc_full_scale_voltage(static_cast<adc_atten_t>(m_config.adc_atten));
+    const float adc_full_scale_voltage = estimate_adc_full_scale_voltage(static_cast<adc_atten_t>(config.adc_atten));
     float adc_pin_voltage = 0.0f;
     if (m_adc_cali_enable && m_adc_cali_handle) {
         int volt_mv;
@@ -358,8 +376,8 @@ void BatteryService::updateBatteryStatus() {
     }
 
     float voltage = adc_pin_voltage;
-    if (m_config.voltage_divider_ratio > 0.0f) {
-        voltage = adc_pin_voltage * m_config.voltage_divider_ratio;
+    if (config.voltage_divider_ratio > 0.0f) {
+        voltage = adc_pin_voltage * config.voltage_divider_ratio;
     }
 
     ESP_LOGD(TAG, "ADC pin voltage: %.3fV, battery voltage: %.3fV (filtered)", adc_pin_voltage, voltage);
@@ -375,17 +393,17 @@ void BatteryService::updateBatteryStatus() {
 
     // Calculate percentage based on min/max from config
     float percentage = 0.0f;
-    if (voltage <= m_config.voltage_min) {
+    if (voltage <= config.voltage_min) {
         percentage = 0.0f;
-    } else if (voltage >= m_config.voltage_max) {
+    } else if (voltage >= config.voltage_max) {
         percentage = 100.0f;
     } else {
         // Ensure denominator is not zero
-        float range = m_config.voltage_max - m_config.voltage_min;
+        float range = config.voltage_max - config.voltage_min;
         if (range > 0.01f) { // Avoid division by zero or tiny ranges
-             percentage = ((voltage - m_config.voltage_min) / range) * 100.0f;
+             percentage = ((voltage - config.voltage_min) / range) * 100.0f;
         } else {
-            percentage = (voltage >= m_config.voltage_max) ? 100.0f : 0.0f;
+            percentage = (voltage >= config.voltage_max) ? 100.0f : 0.0f;
         }
     }
 
@@ -393,8 +411,8 @@ void BatteryService::updateBatteryStatus() {
     percentage = std::max(0.0f, std::min(100.0f, percentage));
     int rounded_percentage = static_cast<int>(percentage + 0.5f); // Round to nearest integer
 
-    const float low_warning_voltage = m_config.voltage_min + (m_config.voltage_max - m_config.voltage_min) * 0.1f;
-    const bool is_critical = voltage <= m_config.voltage_min;
+    const float low_warning_voltage = config.voltage_min + (config.voltage_max - config.voltage_min) * 0.1f;
+    const bool is_critical = voltage <= config.voltage_min;
     const bool is_low = voltage <= low_warning_voltage;
 
     // Create battery status struct

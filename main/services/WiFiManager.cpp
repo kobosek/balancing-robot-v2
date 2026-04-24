@@ -58,6 +58,7 @@ esp_err_t WiFiManager::init(const WiFiConfig& initialConfig) {
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize ESP-NETIF: %s", esp_err_to_name(ret));
         vEventGroupDelete(s_wifiEventGroup); // Cleanup event group on failure
+        s_wifiEventGroup = nullptr;
         return ret;
     }
 
@@ -65,6 +66,7 @@ esp_err_t WiFiManager::init(const WiFiConfig& initialConfig) {
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to create event loop: %s", esp_err_to_name(ret));
         vEventGroupDelete(s_wifiEventGroup);
+        s_wifiEventGroup = nullptr;
         // Consider esp_netif_deinit() here too?
         return ret;
     }
@@ -73,6 +75,7 @@ esp_err_t WiFiManager::init(const WiFiConfig& initialConfig) {
     if (!sta_netif) {
         ESP_LOGE(TAG, "Failed to create STA netif");
         vEventGroupDelete(s_wifiEventGroup);
+        s_wifiEventGroup = nullptr;
         // Cleanup event loop?
         return ESP_FAIL;
     }
@@ -83,6 +86,7 @@ esp_err_t WiFiManager::init(const WiFiConfig& initialConfig) {
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize WiFi: %s", esp_err_to_name(ret));
         vEventGroupDelete(s_wifiEventGroup);
+        s_wifiEventGroup = nullptr;
         // Cleanup netif, event loop?
         return ret;
     }
