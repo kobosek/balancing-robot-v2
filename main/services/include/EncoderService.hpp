@@ -38,4 +38,5 @@ private:
     // --- End Update ---
 
     esp_err_t initPCNTUnit(int pinA, int pinB, pcnt_unit_handle_t* unit_handle);
+    int32_t calculateDeltaPulses(int currentCount, int previousCount) const;
 };

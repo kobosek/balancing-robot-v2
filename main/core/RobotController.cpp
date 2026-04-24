@@ -29,7 +29,10 @@ RobotController::RobotController(
     m_controlModeExecutor(controlModeExecutor),
     m_controlEventDispatcher(controlEventDispatcher),
     m_latestTargetPitchOffset_deg(0.0f),
-    m_latestTargetAngVel_dps(0.0f)
+    m_latestTargetAngVel_dps(0.0f),
+    m_controlMode(ControlRunMode::DISABLED),
+    m_telemetryStateCode(0),
+    m_telemetryEnabled(false)
 {
     ESP_LOGI(TAG, "RobotController constructed.");
 }
@@ -48,34 +51,24 @@ void RobotController::handleEvent(const BaseEvent& event) {
 
 
 void RobotController::handleTargetMovementCommand(const MOTION_TargetMovement& event) {
-    { // Lock scope
-        std::lock_guard<std::mutex> lock(m_target_values_mutex);
-        m_latestTargetPitchOffset_deg = event.targetPitchOffset_deg;
-        m_latestTargetAngVel_dps = event.targetAngularVelocity_dps;
-    }
+    m_latestTargetPitchOffset_deg.store(event.targetPitchOffset_deg, std::memory_order_relaxed);
+    m_latestTargetAngVel_dps.store(event.targetAngularVelocity_dps, std::memory_order_relaxed);
     ESP_LOGV(TAG, "RC Handler: Updated targets: PitchOffset=%.2f, AngVel=%.2f", event.targetPitchOffset_deg, event.targetAngularVelocity_dps);
 }
 
 void RobotController::handleControlRunModeChanged(const CONTROL_RunModeChanged& event) {
-    std::lock_guard<std::mutex> lock(m_control_mode_mutex);
-    m_controlMode = event.mode;
-    m_telemetryStateCode = event.telemetryStateCode;
-    m_telemetryEnabled = event.telemetryEnabled;
+    m_telemetryStateCode.store(event.telemetryStateCode, std::memory_order_relaxed);
+    m_telemetryEnabled.store(event.telemetryEnabled, std::memory_order_relaxed);
+    m_controlMode.store(event.mode, std::memory_order_relaxed);
     ESP_LOGI(TAG, "Control run mode changed to %d", static_cast<int>(event.mode));
 }
 
 void RobotController::runControlStep(float dt) {
     const int64_t startTimeMicros = esp_timer_get_time();
 
-    ControlRunMode currentMode = ControlRunMode::DISABLED;
-    int telemetryStateCode = 0;
-    bool telemetryEnabled = false;
-    {
-        std::lock_guard<std::mutex> lock(m_control_mode_mutex);
-        currentMode = m_controlMode;
-        telemetryStateCode = m_telemetryStateCode;
-        telemetryEnabled = m_telemetryEnabled;
-    }
+    const bool telemetryEnabled = m_telemetryEnabled.load(std::memory_order_relaxed);
+    const int telemetryStateCode = m_telemetryStateCode.load(std::memory_order_relaxed);
+    const ControlRunMode currentMode = m_controlMode.load(std::memory_order_relaxed);
 
     if (!telemetryEnabled) {
         stopControlLoop();
@@ -96,13 +89,8 @@ void RobotController::runControlStep(float dt) {
     const float speedL_dps = m_encoderService.getLeftSpeedDegPerSec();
     const float speedR_dps = m_encoderService.getRightSpeedDegPerSec();
 
-    float currentTargetPitchOffset_deg;
-    float currentTargetAngVel_dps;
-    {
-        std::lock_guard<std::mutex> lock(m_target_values_mutex);
-        currentTargetPitchOffset_deg = m_latestTargetPitchOffset_deg;
-        currentTargetAngVel_dps = m_latestTargetAngVel_dps;
-    }
+    const float currentTargetPitchOffset_deg = m_latestTargetPitchOffset_deg.load(std::memory_order_relaxed);
+    const float currentTargetAngVel_dps = m_latestTargetAngVel_dps.load(std::memory_order_relaxed);
 
     ControlModeInput modeInput = {};
     modeInput.mode = currentMode;

@@ -4,6 +4,7 @@
 #include "TELEMETRY_Snapshot.hpp"
 #include "BaseEvent.hpp"
 #include "ConfigData.hpp" // Need full struct def for WebServerConfig
+#include "HttpResponseUtils.hpp"
 #include "cJSON.h"
 #include <memory>
 #include <vector>
@@ -123,7 +124,7 @@ esp_err_t TelemetryHandler::handleRequest(httpd_req_t *req) {
         else { ESP_LOGE(TAG, "Failed to send telemetry JSON response (%s)", esp_err_to_name(send_ret)); final_ret = ESP_FAIL; }
     } else {
         ESP_LOGE(TAG, "Error creating JSON for /data");
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "JSON processing failed");
+        final_ret = sendHttpError(req, HTTPD_500_INTERNAL_SERVER_ERROR, "JSON processing failed");
     }
     return final_ret;
 }

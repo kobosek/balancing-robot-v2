@@ -130,7 +130,9 @@ function drawSingleGraph(graphState) {
             ctx.translate(labelPosX, labelPosY); ctx.rotate(isLeftAxis ? -Math.PI / 2 : Math.PI / 2); ctx.textAlign = 'center'; ctx.fillText(label, 0, 0); ctx.restore();
         };
         drawYAxis(config.yLeftAxis, true); drawYAxis(config.yRightAxis, false);
-        const intervalMs = parseInt(appState.telemetryJsonCache?.interval_ms || 5); const totalTimeSec = (MAX_DATA_POINTS * intervalMs) / 1000.0;
+        const configuredIntervalMs = parseInt(appState.configDataCache?.mainLoop?.interval_ms ?? 5, 10);
+        const intervalMs = Number.isFinite(configuredIntervalMs) && configuredIntervalMs > 0 ? configuredIntervalMs : 5;
+        const totalTimeSec = (MAX_DATA_POINTS * intervalMs) / 1000.0;
         const xTimeSteps = Math.min(4, Math.floor(graphWidth / 80)); ctx.lineWidth = 0.5; ctx.fillStyle = '#666'; ctx.strokeStyle = '#ccc';
         for (let i = 0; i <= xTimeSteps; i++) {
             const x = padding.left + graphWidth * (i / xTimeSteps); ctx.beginPath(); ctx.moveTo(x, padding.top); ctx.lineTo(x, padding.top + graphHeight + 5); ctx.stroke();

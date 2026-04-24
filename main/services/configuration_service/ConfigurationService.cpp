@@ -99,12 +99,14 @@ esp_err_t ConfigurationService::updateConfigFromJson(const std::string& json) {
     
     // Store old config to detect changes
     ConfigData oldConfig;
+    ConfigData newConfig;
     
     // Lock only when updating the internal state and saving
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         oldConfig = m_configData;  // Store old config for comparison
         m_configData = tempConfig; // Update internal state
+        newConfig = m_configData;
         ret = saveInternal();      // Attempt to save
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to save configuration after update.");
@@ -115,11 +117,11 @@ esp_err_t ConfigurationService::updateConfigFromJson(const std::string& json) {
     } // Mutex released
     
     // Publish granular events for changed components
-    m_configChangePublisher.publishChanges(oldConfig, m_configData);
+    m_configChangePublisher.publishChanges(oldConfig, newConfig);
     
     // Still publish the full update as a fallback for components not using specific events
     ESP_LOGI(TAG, "Publishing general configuration update event.");
-    m_configChangePublisher.publishFullConfig(m_configData);
+    m_configChangePublisher.publishFullConfig(newConfig);
 
     return ret; // Return the result of the save operation
 }
@@ -178,6 +180,7 @@ void ConfigurationService::updateImuGyroOffsets(float x, float y, float z) {
     
     // Store old config for comparison
     ConfigData oldConfig;
+    ConfigData newConfig;
     
     // Update and save the new offsets
     {
@@ -186,6 +189,7 @@ void ConfigurationService::updateImuGyroOffsets(float x, float y, float z) {
         m_configData.imu.gyro_offset_x = x;
         m_configData.imu.gyro_offset_y = y;
         m_configData.imu.gyro_offset_z = z;
+        newConfig = m_configData;
         
         // Save the updated offsets to persistent storage
         esp_err_t ret = saveInternal();
@@ -197,10 +201,10 @@ void ConfigurationService::updateImuGyroOffsets(float x, float y, float z) {
     }
     
     // Publish granular IMU config update event
-    m_configChangePublisher.publishImuConfig(m_configData.imu, false);
+    m_configChangePublisher.publishImuConfig(newConfig.imu, false);
     
     // Also publish a general config update event for backward compatibility
-    m_configChangePublisher.publishFullConfig(m_configData);
+    m_configChangePublisher.publishFullConfig(newConfig);
 }
 
 // EventHandler implementation

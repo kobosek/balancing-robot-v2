@@ -15,7 +15,8 @@
 
 // Forward declarations
 class BaseEvent;
-class CONFIG_FullConfigUpdate;
+class CONFIG_BatteryConfigUpdate;
+class CONFIG_BehaviorConfigUpdate;
 
 class BatteryService : public EventHandler {
 public:
@@ -63,5 +64,6 @@ private:
     esp_err_t map_gpio_to_channel();
     // void loadConfigParameters(); // REMOVE or make private apply
     void applyConfig(const BatteryConfig& batConf, const SystemBehaviorConfig& behaviorConf); // Add apply helper
-    void handleConfigUpdate(const CONFIG_FullConfigUpdate& event); // Specific event handler
+    void handleBatteryConfigUpdate(const CONFIG_BatteryConfigUpdate& event);
+    void handleBehaviorConfigUpdate(const CONFIG_BehaviorConfigUpdate& event);
 };

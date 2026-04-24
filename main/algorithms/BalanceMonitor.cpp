@@ -3,7 +3,7 @@
 #include "BALANCE_AutoBalanceReady.hpp"
 #include "BALANCE_MonitorModeChanged.hpp"
 #include "EventBus.hpp"
-#include "CONFIG_FullConfigUpdate.hpp"
+#include "CONFIG_BehaviorConfigUpdate.hpp"
 #include "IMU_OrientationData.hpp"
 #include "BaseEvent.hpp"
 #include "esp_log.h"
@@ -33,8 +33,8 @@ void BalanceMonitor::handleEvent(const BaseEvent& event) {
         handleOrientationData(event.as<IMU_OrientationData>());
     } else if (event.is<BALANCE_MonitorModeChanged>()) {
         handleMonitorModeChanged(event.as<BALANCE_MonitorModeChanged>());
-    } else if (event.is<CONFIG_FullConfigUpdate>()) {
-        handleConfigUpdate(event.as<CONFIG_FullConfigUpdate>());
+    } else if (event.is<CONFIG_BehaviorConfigUpdate>()) {
+        handleConfigUpdate(event.as<CONFIG_BehaviorConfigUpdate>());
     }
 }
 
@@ -48,8 +48,8 @@ void BalanceMonitor::applyConfig(const SystemBehaviorConfig& config) {
              config.auto_balance_pitch_threshold_deg, m_auto_balance_hold_time_us);
 }
 
-void BalanceMonitor::handleConfigUpdate(const CONFIG_FullConfigUpdate& event) {
-    applyConfig(event.configData.behavior);
+void BalanceMonitor::handleConfigUpdate(const CONFIG_BehaviorConfigUpdate& event) {
+    applyConfig(event.config);
 }
 
 void BalanceMonitor::reset() {

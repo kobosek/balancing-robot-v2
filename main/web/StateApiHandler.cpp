@@ -7,6 +7,7 @@
 #include "ConfigurationService.hpp"
 #include "OTAService.hpp"
 #include "BaseEvent.hpp"
+#include "HttpResponseUtils.hpp"
 #include "cJSON.h"
 #include <memory>
 #include <string>
@@ -137,7 +138,7 @@ esp_err_t StateApiHandler::handleRequest(httpd_req_t *req) {
     std::unique_ptr<cJSON, decltype(cjson_deleter)> root_ptr(cJSON_CreateObject());
     cJSON* root = root_ptr.get();
     if (!root) {
-        httpd_resp_send_500(req); return ESP_FAIL;
+        return sendHttp500(req);
     }
 
     cJSON_AddNumberToObject(root, "state_id", systemStatus.stateId);
@@ -208,7 +209,7 @@ esp_err_t StateApiHandler::handleRequest(httpd_req_t *req) {
     std::unique_ptr<char, decltype(char_deleter)> json_str_ptr(cJSON_PrintUnformatted(root));
     char* json_string = json_str_ptr.get();
     if (!json_string) {
-        httpd_resp_send_500(req); return ESP_FAIL;
+        return sendHttp500(req);
     }
 
     httpd_resp_set_type(req, "application/json");

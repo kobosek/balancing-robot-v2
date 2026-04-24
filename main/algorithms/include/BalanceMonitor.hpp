@@ -8,7 +8,7 @@
 
 class BaseEvent;
 class BALANCE_MonitorModeChanged;
-class CONFIG_FullConfigUpdate;
+class CONFIG_BehaviorConfigUpdate;
 class IMU_OrientationData;
 
 class BalanceMonitor : public EventHandler {
@@ -42,7 +42,7 @@ private:
     bool m_fallDetectionActive = false;
 
     void applyConfig(const SystemBehaviorConfig& config);
-    void handleConfigUpdate(const CONFIG_FullConfigUpdate& event);
+    void handleConfigUpdate(const CONFIG_BehaviorConfigUpdate& event);
     void handleOrientationData(const IMU_OrientationData& event);
     void handleMonitorModeChanged(const BALANCE_MonitorModeChanged& event);
 

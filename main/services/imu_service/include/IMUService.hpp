@@ -14,7 +14,7 @@
 #include <mutex>
 
 class BaseEvent;
-class CONFIG_FullConfigUpdate;
+class CONFIG_BehaviorConfigUpdate;
 class CONFIG_ImuConfigUpdate;
 class FIFOProcessor;
 class FIFOTask;
@@ -111,8 +111,8 @@ private:
     esp_err_t performCalibration();
     void scheduleAutoAttachRetry(int64_t delayUs = 0);
 
-    void handleConfigUpdate(const CONFIG_FullConfigUpdate& event);
     void handleIMUConfigUpdate(const CONFIG_ImuConfigUpdate& event);
+    void handleBehaviorConfigUpdate(const CONFIG_BehaviorConfigUpdate& event);
     void handleCalibrationRequest(const IMU_CalibrationRequest& event);
     void handleAttachRequested(const IMU_AttachRequested& event);
     void handleSystemPolicyChanged(const IMU_SystemPolicyChanged& event);

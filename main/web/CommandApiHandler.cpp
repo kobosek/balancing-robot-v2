@@ -16,6 +16,7 @@
 #include "UI_CancelGuidedCalibration.hpp"
 #include "PidTuningTypes.hpp"
 #include "BaseEvent.hpp"           // Need for BaseEvent
+#include "HttpResponseUtils.hpp"
 #include "cJSON.h"
 #include <memory>                   // For unique_ptr
 #include <array>
@@ -40,15 +41,15 @@ esp_err_t CommandApiHandler::handleRequest(httpd_req_t *req) {
     size_t content_len = req->content_len;
 
     if (content_len == 0 || content_len >= sizeof(buf)) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, content_len == 0 ? "Empty body" : "Payload too large or invalid");
-        return ESP_FAIL;
+        return sendHttpError(req, HTTPD_400_BAD_REQUEST, content_len == 0 ? "Empty body" : "Payload too large or invalid");
     }
 
-    int recv_ret = httpd_req_recv(req, buf, content_len);
+    int recv_ret = receiveHttpRequestBody(req, buf, content_len);
     if (recv_ret <= 0) {
-        if (recv_ret == HTTPD_SOCK_ERR_TIMEOUT) httpd_resp_send_408(req);
-        else httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Receive error");
-        return ESP_FAIL;
+        if (recv_ret == HTTPD_SOCK_ERR_TIMEOUT) {
+            return sendHttpTimeout(req);
+        }
+        return sendHttpError(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Receive error");
     }
     buf[recv_ret] = '\0';
 
@@ -56,14 +57,12 @@ esp_err_t CommandApiHandler::handleRequest(httpd_req_t *req) {
     std::unique_ptr<cJSON, decltype(cjson_deleter)> root_ptr(cJSON_Parse(buf));
     cJSON* root = root_ptr.get();
     if (!root) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
-        return ESP_FAIL;
+        return sendHttpError(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
     }
 
     cJSON *cmd_item = cJSON_GetObjectItemCaseSensitive(root, "command");
     if (!cmd_item || !cJSON_IsString(cmd_item) || !cmd_item->valuestring) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing/invalid 'command' field");
-        return ESP_FAIL;
+        return sendHttpError(req, HTTPD_400_BAD_REQUEST, "Missing/invalid 'command' field");
     }
     std::string command_str = cmd_item->valuestring;
     std::string message;
@@ -115,8 +114,7 @@ esp_err_t CommandApiHandler::handleRequest(httpd_req_t *req) {
             } else if (target_str == "motor_speed_right" || target_str == "speed_right" || target_str == "pid_speed_right") {
                 target = PidTuningTarget::MOTOR_SPEED_RIGHT;
             } else {
-                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Unknown PID tuning target");
-                return ESP_FAIL;
+                return sendHttpError(req, HTTPD_400_BAD_REQUEST, "Unknown PID tuning target");
             }
         }
         UI_StartPidTuning cmd_event(target);
@@ -131,8 +129,7 @@ esp_err_t CommandApiHandler::handleRequest(httpd_req_t *req) {
 
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Unknown command received: %s", command_str.c_str());
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Unknown command");
-        return ESP_FAIL; // Error already sent
+        return sendHttpError(req, HTTPD_400_BAD_REQUEST, "Unknown command");
     }
 
     // Send success response if command was known

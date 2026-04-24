@@ -1,5 +1,6 @@
 #include "OTAApiHandler.hpp"
 
+#include "HttpResponseUtils.hpp"
 #include "OTAService.hpp"
 #include "cJSON.h"
 #include "esp_log.h"
@@ -33,8 +34,7 @@ esp_err_t OTAApiHandler::sendStatusJson(httpd_req_t* req) {
     auto char_deleter = [](char* ptr){ if (ptr) free(ptr); };
     std::unique_ptr<cJSON, decltype(cjson_deleter)> root(cJSON_CreateObject(), cjson_deleter);
     if (!root) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+        return sendHttp500(req);
     }
 
     cJSON_AddBoolToObject(root.get(), "available", status.available);
@@ -54,8 +54,7 @@ esp_err_t OTAApiHandler::sendStatusJson(httpd_req_t* req) {
 
     std::unique_ptr<char, decltype(char_deleter)> json(cJSON_PrintUnformatted(root.get()), char_deleter);
     if (!json) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+        return sendHttp500(req);
     }
 
     httpd_resp_set_type(req, "application/json");
@@ -85,8 +84,7 @@ esp_err_t OTAApiHandler::sendErrorJson(httpd_req_t* req, httpd_err_code_t status
 
 esp_err_t OTAApiHandler::handleUploadRequest(httpd_req_t* req) {
     if (req->content_len <= 0) {
-        sendErrorJson(req, HTTPD_400_BAD_REQUEST, "Empty OTA image");
-        return ESP_FAIL;
+        return sendErrorJson(req, HTTPD_400_BAD_REQUEST, "Empty OTA image");
     }
 
     const OTAUpdateTarget target = parseUploadTarget(req);
@@ -96,16 +94,14 @@ esp_err_t OTAApiHandler::handleUploadRequest(httpd_req_t* req) {
     if (ret != ESP_OK) {
         const OTAStatus status = m_otaService.getStatus();
         ESP_LOGE(TAG, "OTA begin failed: %s", esp_err_to_name(ret));
-        sendErrorJson(req, HTTPD_500_INTERNAL_SERVER_ERROR, status.message.c_str());
-        return ESP_FAIL;
+        return sendErrorJson(req, HTTPD_500_INTERNAL_SERVER_ERROR, status.message.c_str());
     }
 
     constexpr size_t BUFFER_SIZE = 4096;
     std::unique_ptr<uint8_t[]> buffer(new (std::nothrow) uint8_t[BUFFER_SIZE]);
     if (!buffer) {
         m_otaService.abort();
-        sendErrorJson(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA buffer allocation failed");
-        return ESP_FAIL;
+        return sendErrorJson(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA buffer allocation failed");
     }
 
     int remaining = req->content_len;
@@ -115,19 +111,17 @@ esp_err_t OTAApiHandler::handleUploadRequest(httpd_req_t* req) {
         if (received <= 0) {
             m_otaService.abort();
             if (received == HTTPD_SOCK_ERR_TIMEOUT) {
-                httpd_resp_send_408(req);
+                return sendHttpTimeout(req);
             } else {
-                sendErrorJson(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA upload receive failed");
+                return sendErrorJson(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA upload receive failed");
             }
-            return ESP_FAIL;
         }
 
         ret = m_otaService.write(buffer.get(), static_cast<size_t>(received));
         if (ret != ESP_OK) {
             m_otaService.abort();
             const OTAStatus status = m_otaService.getStatus();
-            sendErrorJson(req, HTTPD_500_INTERNAL_SERVER_ERROR, status.message.c_str());
-            return ESP_FAIL;
+            return sendErrorJson(req, HTTPD_500_INTERNAL_SERVER_ERROR, status.message.c_str());
         }
         remaining -= received;
     }
@@ -135,8 +129,7 @@ esp_err_t OTAApiHandler::handleUploadRequest(httpd_req_t* req) {
     ret = m_otaService.finish();
     if (ret != ESP_OK) {
         const OTAStatus status = m_otaService.getStatus();
-        sendErrorJson(req, HTTPD_500_INTERNAL_SERVER_ERROR, status.message.c_str());
-        return ESP_FAIL;
+        return sendErrorJson(req, HTTPD_500_INTERNAL_SERVER_ERROR, status.message.c_str());
     }
 
     esp_err_t sendRet = sendStatusJson(req);

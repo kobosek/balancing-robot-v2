@@ -1,14 +1,32 @@
 import { API_CONFIG_URL, API_COMMAND_URL, API_STATE_URL, API_DATA_URL, API_OTA_URL, API_LOGS_URL } from './constants.js';
-import { updateConfigCache, invalidateConfigCache, appState, updateCurrentSystemState } from './state.js';
+import { updateConfigCache, invalidateConfigCache, updateCurrentSystemState } from './state.js';
 import { updateStatusSectionUI } from './ui.js'; // For state updates
+
+async function parseJsonOrText(response) {
+    const text = await response.text();
+    if (!text) return {};
+    try {
+        return JSON.parse(text);
+    } catch (error) {
+        return { message: text };
+    }
+}
+
+async function apiCall(url, options = {}) {
+    const response = await fetch(url, options);
+    const result = await parseJsonOrText(response);
+    if (!response.ok) {
+        const message = result && typeof result === 'object' ? result.message : null;
+        throw new Error(message || `HTTP error ${response.status}`);
+    }
+    return result;
+}
 
 // --- Config API ---
 export async function fetchConfigApi() {
     console.log("Fetching config from server...");
     try {
-        const response = await fetch(API_CONFIG_URL, { cache: 'no-cache' });
-        if (!response.ok) throw new Error(`HTTP error ${response.status}`);
-        const data = await response.json();
+        const data = await apiCall(API_CONFIG_URL, { cache: 'no-cache' });
         updateConfigCache(data); // Update cache in state.js
         return data;
     } catch (error) {
@@ -21,13 +39,11 @@ export async function fetchConfigApi() {
 export async function postConfigApi(configData) {
     console.log("Posting updated config...");
     try {
-        const response = await fetch(API_CONFIG_URL, {
+        const result = await apiCall(API_CONFIG_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(configData)
         });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.message || `HTTP error ${response.status}`);
         console.log("Config saved successfully:", result);
         invalidateConfigCache(); // Invalidate cache via state.js
         return result;
@@ -48,13 +64,11 @@ export async function sendCommandApi(commandName, extraPayload = {}) {
         'discard_pid_tuning'
     ]);
     try {
-        const response = await fetch(API_COMMAND_URL, {
+        const result = await apiCall(API_COMMAND_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ command: commandName, ...extraPayload })
         });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.message || `HTTP error ${response.status}`);
         console.log('HTTP Command response:', result);
         if (configChangingCommands.has(commandName)) {
             invalidateConfigCache();
@@ -73,12 +87,11 @@ export async function sendCommandApi(commandName, extraPayload = {}) {
 // --- State API ---
 export async function fetchStateApi() {
     try {
-        const response = await fetch(API_STATE_URL, { cache: 'no-cache' });
-        if (!response.ok) throw new Error(`HTTP error ${response.status}`);
-        const data = await response.json();
+        const data = await apiCall(API_STATE_URL, { cache: 'no-cache' });
         if (data && typeof data === 'object') {
             updateCurrentSystemState(data); // Update the state in appState
             updateStatusSectionUI();
+            return data;
         } else {
             throw new Error("Invalid state data format");
         }
@@ -123,28 +136,17 @@ export async function fetchStateApi() {
             }
         });
         updateStatusSectionUI(); // Update UI to show error
+        return null;
     }
 }
 
 // --- Telemetry Data API ---
 export async function fetchDataApi() {
     try {
-        const response = await fetch(API_DATA_URL, { cache: 'no-cache' });
-        if (!response.ok) throw new Error(`HTTP error ${response.status}`);
-        return await response.json(); // Return the raw JSON data
+        return await apiCall(API_DATA_URL, { cache: 'no-cache' }); // Return the raw JSON data
     } catch (error) {
         console.error('Telemetry Update Error:', error);
         return null; // Indicate failure
-    }
-}
-
-async function parseJsonOrText(response) {
-    const text = await response.text();
-    if (!text) return {};
-    try {
-        return JSON.parse(text);
-    } catch (error) {
-        return { message: text };
     }
 }
 
@@ -156,13 +158,11 @@ export async function uploadOtaImage(file, target) {
 
     try {
         const uploadUrl = `${API_OTA_URL}?target=${encodeURIComponent(target)}`;
-        const response = await fetch(uploadUrl, {
+        const result = await apiCall(uploadUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/octet-stream' },
             body: file
         });
-        const result = await parseJsonOrText(response);
-        if (!response.ok) throw new Error(result.message || `HTTP error ${response.status}`);
         setTimeout(fetchStateApi, 300);
         return result;
     } catch (error) {
@@ -177,9 +177,7 @@ export const uploadOtaFirmware = uploadOtaImage;
 export async function fetchLogsApi(sinceSequence = 0) {
     try {
         const url = `${API_LOGS_URL}?since=${encodeURIComponent(sinceSequence || 0)}`;
-        const response = await fetch(url, { cache: 'no-cache' });
-        if (!response.ok) throw new Error(`HTTP error ${response.status}`);
-        return await response.json();
+        return await apiCall(url, { cache: 'no-cache' });
     } catch (error) {
         console.error('Error fetching logs:', error);
         return null;
@@ -188,10 +186,7 @@ export async function fetchLogsApi(sinceSequence = 0) {
 
 export async function clearLogsApi() {
     try {
-        const response = await fetch(API_LOGS_URL, { method: 'DELETE' });
-        const result = await parseJsonOrText(response);
-        if (!response.ok) throw new Error(result.message || `HTTP error ${response.status}`);
-        return result;
+        return await apiCall(API_LOGS_URL, { method: 'DELETE' });
     } catch (error) {
         console.error('Error clearing logs:', error);
         alert(`Error clearing logs: ${error.message || 'Unknown error'}`);

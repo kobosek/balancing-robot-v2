@@ -8,6 +8,7 @@
 #include "StateApiHandler.hpp"
 #include "OTAApiHandler.hpp"
 #include "LogsApiHandler.hpp"
+#include "HttpResponseUtils.hpp"
 
 #include "EventBus.hpp"
 #include "TelemetryDataPoint.hpp"
@@ -90,67 +91,45 @@ esp_err_t WebServer::init() {
     ESP_RETURN_ON_ERROR(httpd_start(&server, &config), TAG, "Error starting httpd server");
     ESP_LOGI(TAG, "HTTPD server started.");
 
-    const httpd_uri_t root_uri = { "/", HTTP_GET, static_get_handler, nullptr };
-    esp_err_t ret = httpd_register_uri_handler(server, &root_uri);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register root URI");
-    ESP_LOGI(TAG, "Registered handler for: / (GET)");
+    struct Route {
+        httpd_uri_t uri;
+        const char* name;
+    };
 
-    const httpd_uri_t data_uri = { "/data", HTTP_GET, data_get_handler, nullptr };
-    ret = httpd_register_uri_handler(server, &data_uri);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register data URI");
-    ESP_LOGI(TAG, "Registered handler for: /data (GET)");
+    const auto makeRoute = [](const char* uri,
+                              httpd_method_t method,
+                              esp_err_t (*handler)(httpd_req_t*),
+                              const char* name,
+                              bool isWebSocket = false) {
+        httpd_uri_t routeUri = {};
+        routeUri.uri = uri;
+        routeUri.method = method;
+        routeUri.handler = handler;
+        routeUri.user_ctx = nullptr;
+        routeUri.is_websocket = isWebSocket;
+        return Route{routeUri, name};
+    };
 
-    const httpd_uri_t get_config_uri = { "/api/config", HTTP_GET, get_config_handler, nullptr };
-    ret = httpd_register_uri_handler(server, &get_config_uri);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register get_config URI");
-    ESP_LOGI(TAG, "Registered handler for: /api/config (GET)");
+    const Route routes[] = {
+        makeRoute("/", HTTP_GET, static_get_handler, "root URI"),
+        makeRoute("/data", HTTP_GET, data_get_handler, "data URI"),
+        makeRoute("/api/config", HTTP_GET, get_config_handler, "get_config URI"),
+        makeRoute("/api/config", HTTP_POST, set_config_handler, "set_config URI"),
+        makeRoute("/api/command", HTTP_POST, command_handler, "command URI"),
+        makeRoute("/api/state", HTTP_GET, get_state_handler, "get_state URI"),
+        makeRoute("/api/ota", HTTP_GET, get_ota_status_handler, "get_ota_status URI"),
+        makeRoute("/api/ota", HTTP_POST, ota_upload_handler, "ota_upload URI"),
+        makeRoute("/api/logs", HTTP_GET, get_logs_handler, "get_logs URI"),
+        makeRoute("/api/logs", HTTP_DELETE, clear_logs_handler, "clear_logs URI"),
+        makeRoute("/ws", HTTP_GET, websocket_handler, "WebSocket URI", true),
+        makeRoute("/*", HTTP_GET, static_get_handler, "fallback file URI"),
+    };
 
-    const httpd_uri_t set_config_uri = { "/api/config", HTTP_POST, set_config_handler, nullptr };
-    ret = httpd_register_uri_handler(server, &set_config_uri);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register set_config URI");
-    ESP_LOGI(TAG, "Registered handler for: /api/config (POST)");
-
-    const httpd_uri_t command_uri = { "/api/command", HTTP_POST, command_handler, nullptr };
-    ret = httpd_register_uri_handler(server, &command_uri);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register command URI");
-    ESP_LOGI(TAG, "Registered handler for: /api/command (POST)");
-
-    const httpd_uri_t get_state_uri = { "/api/state", HTTP_GET, get_state_handler, nullptr };
-    ret = httpd_register_uri_handler(server, &get_state_uri);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register get_state URI");
-    ESP_LOGI(TAG, "Registered handler for: /api/state (GET)");
-
-    const httpd_uri_t get_ota_status_uri = { "/api/ota", HTTP_GET, get_ota_status_handler, nullptr };
-    ret = httpd_register_uri_handler(server, &get_ota_status_uri);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register get_ota_status URI");
-    ESP_LOGI(TAG, "Registered handler for: /api/ota (GET)");
-
-    const httpd_uri_t ota_upload_uri = { "/api/ota", HTTP_POST, ota_upload_handler, nullptr };
-    ret = httpd_register_uri_handler(server, &ota_upload_uri);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register ota_upload URI");
-    ESP_LOGI(TAG, "Registered handler for: /api/ota (POST)");
-
-    const httpd_uri_t get_logs_uri = { "/api/logs", HTTP_GET, get_logs_handler, nullptr };
-    ret = httpd_register_uri_handler(server, &get_logs_uri);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register get_logs URI");
-    ESP_LOGI(TAG, "Registered handler for: /api/logs (GET)");
-
-    const httpd_uri_t clear_logs_uri = { "/api/logs", HTTP_DELETE, clear_logs_handler, nullptr };
-    ret = httpd_register_uri_handler(server, &clear_logs_uri);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register clear_logs URI");
-    ESP_LOGI(TAG, "Registered handler for: /api/logs (DELETE)");
-
-    // --- Register WebSocket URI Handler ---
-    const httpd_uri_t ws_uri = { "/ws", HTTP_GET, websocket_handler, nullptr, true };
-    ret = httpd_register_uri_handler(server, &ws_uri);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register WebSocket URI");
-    ESP_LOGI(TAG, "Registered handler for: /ws (WebSocket)");
-
-    // --- Register FALLBACK/WILDCARD file handler LAST ---
-    const httpd_uri_t file_uri = { "/*", HTTP_GET, static_get_handler, nullptr };
-    ret = httpd_register_uri_handler(server, &file_uri);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed register fallback file URI");
-    ESP_LOGI(TAG, "Registered handler for: /* (GET) - Fallback");
+    for (const Route& route : routes) {
+        esp_err_t ret = httpd_register_uri_handler(server, &route.uri);
+        ESP_RETURN_ON_ERROR(ret, TAG, "Failed register %s", route.name);
+        ESP_LOGI(TAG, "Registered handler for: %s (%d)", route.uri.uri, static_cast<int>(route.uri.method));
+    }
 
     ESP_LOGI(TAG, "All URI handlers registration attempted.");
     return ESP_OK;
@@ -160,52 +139,52 @@ esp_err_t WebServer::init() {
 // --- Static HTTP Handler Implementations ---
 esp_err_t WebServer::static_get_handler(httpd_req_t *req) {
     httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
-    if (!instance || !instance->m_staticFileHandler) { ESP_LOGE(TAG, "Static file handler ctx invalid!"); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); return ESP_FAIL; }
+    if (!instance || !instance->m_staticFileHandler) { ESP_LOGE(TAG, "Static file handler ctx invalid!"); return sendHttpError(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); }
     return instance->m_staticFileHandler->handleRequest(req);
 }
 esp_err_t WebServer::data_get_handler(httpd_req_t *req) {
     httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
-    if (!instance || !instance->m_telemetryHandler) { ESP_LOGE(TAG, "Telemetry handler ctx invalid!"); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); return ESP_FAIL; }
+    if (!instance || !instance->m_telemetryHandler) { ESP_LOGE(TAG, "Telemetry handler ctx invalid!"); return sendHttpError(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); }
     return instance->m_telemetryHandler->handleRequest(req);
 }
 esp_err_t WebServer::get_config_handler(httpd_req_t *req) {
      httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
-     if (!instance || !instance->m_configApiHandler) { ESP_LOGE(TAG, "Config API handler ctx invalid!"); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); return ESP_FAIL; }
+     if (!instance || !instance->m_configApiHandler) { ESP_LOGE(TAG, "Config API handler ctx invalid!"); return sendHttpError(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); }
     return instance->m_configApiHandler->handleGetRequest(req);
 }
 esp_err_t WebServer::set_config_handler(httpd_req_t *req) {
      httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
-     if (!instance || !instance->m_configApiHandler) { ESP_LOGE(TAG, "Config API handler ctx invalid!"); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); return ESP_FAIL; }
+     if (!instance || !instance->m_configApiHandler) { ESP_LOGE(TAG, "Config API handler ctx invalid!"); return sendHttpError(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); }
     return instance->m_configApiHandler->handlePostRequest(req);
 }
 esp_err_t WebServer::command_handler(httpd_req_t *req) {
      httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
-     if (!instance || !instance->m_commandApiHandler) { ESP_LOGE(TAG, "Command API handler ctx invalid!"); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); return ESP_FAIL; }
+     if (!instance || !instance->m_commandApiHandler) { ESP_LOGE(TAG, "Command API handler ctx invalid!"); return sendHttpError(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); }
     return instance->m_commandApiHandler->handleRequest(req);
 }
 esp_err_t WebServer::get_state_handler(httpd_req_t *req) {
      httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
-     if (!instance || !instance->m_stateApiHandler) { ESP_LOGE(TAG, "State API handler ctx invalid!"); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); return ESP_FAIL; }
+     if (!instance || !instance->m_stateApiHandler) { ESP_LOGE(TAG, "State API handler ctx invalid!"); return sendHttpError(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); }
     return instance->m_stateApiHandler->handleRequest(req);
 }
 esp_err_t WebServer::get_ota_status_handler(httpd_req_t *req) {
      httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
-     if (!instance || !instance->m_otaApiHandler) { ESP_LOGE(TAG, "OTA API handler ctx invalid!"); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); return ESP_FAIL; }
+     if (!instance || !instance->m_otaApiHandler) { ESP_LOGE(TAG, "OTA API handler ctx invalid!"); return sendHttpError(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); }
     return instance->m_otaApiHandler->handleStatusRequest(req);
 }
 esp_err_t WebServer::ota_upload_handler(httpd_req_t *req) {
      httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
-     if (!instance || !instance->m_otaApiHandler) { ESP_LOGE(TAG, "OTA API handler ctx invalid!"); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); return ESP_FAIL; }
+     if (!instance || !instance->m_otaApiHandler) { ESP_LOGE(TAG, "OTA API handler ctx invalid!"); return sendHttpError(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); }
     return instance->m_otaApiHandler->handleUploadRequest(req);
 }
 esp_err_t WebServer::get_logs_handler(httpd_req_t *req) {
      httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
-     if (!instance || !instance->m_logsApiHandler) { ESP_LOGE(TAG, "Logs API handler ctx invalid!"); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); return ESP_FAIL; }
+     if (!instance || !instance->m_logsApiHandler) { ESP_LOGE(TAG, "Logs API handler ctx invalid!"); return sendHttpError(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); }
     return instance->m_logsApiHandler->handleGetRequest(req);
 }
 esp_err_t WebServer::clear_logs_handler(httpd_req_t *req) {
      httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
-     if (!instance || !instance->m_logsApiHandler) { ESP_LOGE(TAG, "Logs API handler ctx invalid!"); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); return ESP_FAIL; }
+     if (!instance || !instance->m_logsApiHandler) { ESP_LOGE(TAG, "Logs API handler ctx invalid!"); return sendHttpError(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); }
     return instance->m_logsApiHandler->handleDeleteRequest(req);
 }
 

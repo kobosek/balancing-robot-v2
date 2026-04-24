@@ -86,7 +86,7 @@ void EncoderService::update(float dt) {
     if (m_unit_left) {
         int count_left = 0;
         if (pcnt_unit_get_count(m_unit_left, &count_left) == ESP_OK) {
-            int32_t delta_pulses = count_left - m_last_pulse_count_left;
+            int32_t delta_pulses = calculateDeltaPulses(count_left, m_last_pulse_count_left);
             float instant_speed_dps = static_cast<float>(delta_pulses) * m_degs_per_pulse / dt; // Calculate DPS
              m_speed_dps_left = m_config.speed_filter_alpha * instant_speed_dps + (1.0f - m_config.speed_filter_alpha) * m_speed_dps_left; // Rename state var
              m_last_pulse_count_left = count_left;
@@ -98,7 +98,7 @@ void EncoderService::update(float dt) {
      if (m_unit_right) {
         int count_right = 0;
         if (pcnt_unit_get_count(m_unit_right, &count_right) == ESP_OK) {
-            int32_t delta_pulses = count_right - m_last_pulse_count_right;
+            int32_t delta_pulses = calculateDeltaPulses(count_right, m_last_pulse_count_right);
             float instant_speed_dps = static_cast<float>(delta_pulses) * m_degs_per_pulse / dt; // Calculate DPS
             m_speed_dps_right = m_config.speed_filter_alpha * instant_speed_dps + (1.0f - m_config.speed_filter_alpha) * m_speed_dps_right; // Rename state var
             m_last_pulse_count_right = count_right;
@@ -109,4 +109,22 @@ void EncoderService::update(float dt) {
      ESP_LOGV(TAG, "Update: dt=%.4f | LSpd: %.1f (%.1f) RSpd: %.1f (%.1f) dps", // Update log unit
               dt, m_speed_dps_left, m_last_unfiltered_speed_left_dps,
               m_speed_dps_right, m_last_unfiltered_speed_right_dps);
+}
+
+int32_t EncoderService::calculateDeltaPulses(int currentCount, int previousCount) const {
+    int32_t delta = static_cast<int32_t>(currentCount) - static_cast<int32_t>(previousCount);
+    const int32_t range =
+        static_cast<int32_t>(m_config.pcnt_high_limit) - static_cast<int32_t>(m_config.pcnt_low_limit) + 1;
+    if (range <= 0) {
+        return delta;
+    }
+
+    const int32_t halfRange = range / 2;
+    if (delta > halfRange) {
+        delta -= range;
+    } else if (delta < -halfRange) {
+        delta += range;
+    }
+
+    return delta;
 }

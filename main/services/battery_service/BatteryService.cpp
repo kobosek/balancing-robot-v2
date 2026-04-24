@@ -2,7 +2,8 @@
 #include "ConfigData.hpp"
 #include "BATTERY_StatusUpdate.hpp"
 #include "EventBus.hpp"
-#include "CONFIG_FullConfigUpdate.hpp" // Include event with payload
+#include "CONFIG_BatteryConfigUpdate.hpp"
+#include "CONFIG_BehaviorConfigUpdate.hpp"
 #include "BaseEvent.hpp"
 #include <numeric>
 #include <vector>
@@ -235,18 +236,24 @@ void BatteryService::applyConfig(const BatteryConfig& batConf, const SystemBehav
 }
 
 void BatteryService::handleEvent(const BaseEvent& event) {
-    if (event.is<CONFIG_FullConfigUpdate>()) {
-        handleConfigUpdate(event.as<CONFIG_FullConfigUpdate>());
+    if (event.is<CONFIG_BatteryConfigUpdate>()) {
+        handleBatteryConfigUpdate(event.as<CONFIG_BatteryConfigUpdate>());
+    } else if (event.is<CONFIG_BehaviorConfigUpdate>()) {
+        handleBehaviorConfigUpdate(event.as<CONFIG_BehaviorConfigUpdate>());
     } else {
         ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
                  getHandlerName().c_str(), event.eventName());
     }
 }
 
-// Handle config update event
-void BatteryService::handleConfigUpdate(const CONFIG_FullConfigUpdate& event) {
-    ESP_LOGD(TAG, "Config update received, reloading BatteryService parameters.");
-    applyConfig(event.configData.battery, event.configData.behavior);
+void BatteryService::handleBatteryConfigUpdate(const CONFIG_BatteryConfigUpdate& event) {
+    ESP_LOGD(TAG, "Battery config update received.");
+    applyConfig(event.config, m_behaviorConfig);
+}
+
+void BatteryService::handleBehaviorConfigUpdate(const CONFIG_BehaviorConfigUpdate& event) {
+    ESP_LOGD(TAG, "Behavior config update received for BatteryService.");
+    applyConfig(m_config, event.config);
 }
 
 BatteryStatus BatteryService::getLatestStatus() const {

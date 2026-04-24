@@ -1,6 +1,6 @@
 #pragma once
 
-#include <mutex>
+#include <atomic>
 #include "esp_err.h"
 #include "EventHandler.hpp"
 #include "CONTROL_RunModeChanged.hpp"
@@ -47,14 +47,12 @@ private:
     ControlModeExecutor& m_controlModeExecutor;
     ControlEventDispatcher& m_controlEventDispatcher;
 
-    // Latest command values (thread-safe)
-    float m_latestTargetPitchOffset_deg = 0.0f;
-    float m_latestTargetAngVel_dps = 0.0f;
-    std::mutex m_target_values_mutex;
-    ControlRunMode m_controlMode = ControlRunMode::DISABLED;
-    int m_telemetryStateCode = 0;
-    bool m_telemetryEnabled = false;
-    std::mutex m_control_mode_mutex;
+    // Updated by event handlers and read by the control task.
+    std::atomic<float> m_latestTargetPitchOffset_deg{0.0f};
+    std::atomic<float> m_latestTargetAngVel_dps{0.0f};
+    std::atomic<ControlRunMode> m_controlMode{ControlRunMode::DISABLED};
+    std::atomic<int> m_telemetryStateCode{0};
+    std::atomic<bool> m_telemetryEnabled{false};
 
     void stopControlLoop();
     TelemetryDataPoint buildTelemetrySnapshot(int64_t timestamp_us,

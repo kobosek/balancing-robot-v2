@@ -23,15 +23,6 @@ enum class I2CErrorSeverity {
     PERMANENT
 };
 
-struct I2CErrorTrend {
-    uint32_t error_count_window[10] = {0};
-    uint32_t window_index = 0;
-    uint32_t total_window_errors = 0;
-    uint64_t last_error_timestamp = 0;
-    float error_rate_per_second = 0.0f;
-    bool trend_increasing = false;
-};
-
 struct I2CStats {
     uint32_t total_operations = 0;
     uint32_t successful_operations = 0;
@@ -46,7 +37,6 @@ struct I2CStats {
     uint32_t invalid_response_errors = 0;
     uint32_t hardware_fault_errors = 0;
 
-    I2CErrorTrend error_trend;
     float current_error_rate_percent = 0.0f;
     uint32_t consecutive_failures = 0;
     uint32_t max_consecutive_failures = 0;
@@ -69,10 +59,7 @@ public:
     I2CErrorSeverity classifySeverity(I2CErrorType errorType) const;
 
 private:
-    void updateErrorTrend(I2CErrorType errorType, uint64_t currentTimeUs);
     static uint64_t getCurrentTimestampUs();
 
     I2CStats m_stats{};
-    uint32_t m_error_count_in_current_window = 0;
-    uint64_t m_window_start_time = 0;
 };

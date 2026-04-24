@@ -217,7 +217,7 @@ bool FIFOProcessor::processFIFO() {
         m_healthMonitor.pet();
     }
 
-    return processedSampleCount > 0;
+    return true;
 }
 
 void FIFOProcessor::setScalingFactors(float accelLsbPerG, float gyroLsbPerDps) {

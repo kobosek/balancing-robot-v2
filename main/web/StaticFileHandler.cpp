@@ -1,6 +1,7 @@
 // main/web/StaticFileHandler.cpp
 
 #include "StaticFileHandler.hpp"
+#include "HttpResponseUtils.hpp"
 #include "esp_vfs.h"    // For fopen, FILE, etc.
 #include "esp_check.h"  // For ESP_LOGx macros
 #include <memory>       // For unique_ptr
@@ -61,8 +62,7 @@ esp_err_t StaticFileHandler::handleRequest(httpd_req_t *req) {
         // Prevent directory traversal
         if (strstr(uri, "..") != NULL) {
              ESP_LOGW(TAG, "Directory traversal attempt detected: %s", uri);
-             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid URI");
-             return ESP_FAIL;
+             return sendHttpError(req, HTTPD_400_BAD_REQUEST, "Invalid URI");
         }
         strlcat(filepath, uri, sizeof(filepath));
     }
@@ -77,8 +77,9 @@ esp_err_t StaticFileHandler::handleRequest(httpd_req_t *req) {
         ESP_LOGW(TAG, "fopen failed for '%s'. errno: %d (%s)", filepath, current_errno, strerror(current_errno));
 
         if (current_errno == ENOENT) {
-            // Special case: If original request ended in '/', try appending index.html
-            if (uri[strlen(uri) - 1] == '/') {
+            // Special case: If original request ended in '/', try appending index.html.
+            // Root has already been mapped to /index.html above.
+            if (strcmp(uri, "/") != 0 && uri[strlen(uri) - 1] == '/') {
                  strlcat(filepath, "index.html", sizeof(filepath));
                  ESP_LOGI(TAG, "Retrying with index.html: %s", filepath);
                  f = fopen(filepath, "rb");
@@ -99,8 +100,7 @@ esp_err_t StaticFileHandler::handleRequest(httpd_req_t *req) {
          else {
             // Other file open error
             ESP_LOGE(TAG, "Unhandled file open error for %s", filepath);
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to open file");
-            return ESP_FAIL;
+            return sendHttpError(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to open file");
         }
     }
 
@@ -115,8 +115,7 @@ esp_err_t StaticFileHandler::handleRequest(httpd_req_t *req) {
     if (!chunk) {
         ESP_LOGE(TAG, "Failed to allocate send buffer");
         fclose(f);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Memory allocation error");
-        return ESP_FAIL;
+        return sendHttpError(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Memory allocation error");
     }
 
     // --- Send File Content ---

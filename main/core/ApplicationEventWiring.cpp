@@ -9,6 +9,8 @@
 #include "BATTERY_StatusUpdate.hpp"
 #include "BatteryService.hpp"
 #include "CommandProcessor.hpp"
+#include "CONFIG_BatteryConfigUpdate.hpp"
+#include "CONFIG_BehaviorConfigUpdate.hpp"
 #include "CONFIG_FullConfigUpdate.hpp"
 #include "CONFIG_ImuConfigUpdate.hpp"
 #include "CONFIG_PidConfigUpdate.hpp"
@@ -75,7 +77,7 @@ esp_err_t ApplicationEventWiring::wire(const ApplicationContext& context) const
     eventBus.subscribe<CONFIG_FullConfigUpdate, CONFIG_PidConfigUpdate>(asHandler(context.balancingAlgorithmHandle()));
     eventBus.subscribe<IMU_OrientationData,
                        BALANCE_MonitorModeChanged,
-                       CONFIG_FullConfigUpdate>(asHandler(context.balanceMonitorHandle()));
+                       CONFIG_BehaviorConfigUpdate>(asHandler(context.balanceMonitorHandle()));
     eventBus.subscribe<MOTOR_OutputEnabledChanged>(asHandler(context.motorServiceHandle()));
     eventBus.subscribe<UI_StartPidTuning,
                        UI_CancelPidTuning,
@@ -86,7 +88,8 @@ esp_err_t ApplicationEventWiring::wire(const ApplicationContext& context) const
                        UI_CancelGuidedCalibration,
                        GUIDED_CalibrationRunModeChanged,
                        CONFIG_FullConfigUpdate>(asHandler(context.guidedCalibrationServiceHandle()));
-    eventBus.subscribe<CONFIG_FullConfigUpdate>(asHandler(context.batteryServiceHandle()));
+    eventBus.subscribe<CONFIG_BatteryConfigUpdate,
+                       CONFIG_BehaviorConfigUpdate>(asHandler(context.batteryServiceHandle()));
     eventBus.subscribe<BALANCE_FallDetected,
                        BALANCE_AutoBalanceReady,
                        UI_StartBalancing,
@@ -109,8 +112,8 @@ esp_err_t ApplicationEventWiring::wire(const ApplicationContext& context) const
                        IMU_AvailabilityChanged,
                        CONFIG_FullConfigUpdate>(asHandler(context.stateManagerHandle()));
     eventBus.subscribe<IMU_GyroOffsetsUpdated>(asHandler(context.configServiceHandle()));
-    eventBus.subscribe<CONFIG_FullConfigUpdate,
-                       CONFIG_ImuConfigUpdate,
+    eventBus.subscribe<CONFIG_ImuConfigUpdate,
+                       CONFIG_BehaviorConfigUpdate,
                        IMU_CalibrationRequest,
                        IMU_AttachRequested,
                        IMU_SystemPolicyChanged>(asHandler(context.imuServiceHandle()));

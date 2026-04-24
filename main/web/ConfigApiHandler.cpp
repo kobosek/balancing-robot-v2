@@ -4,6 +4,7 @@
 #include "EventBus.hpp" // Include event bus
 #include "CONFIG_FullConfigUpdate.hpp" // Include event definition
 #include "BaseEvent.hpp"
+#include "HttpResponseUtils.hpp"
 #include <memory>
 #include <string>
 #include <new>
@@ -46,8 +47,7 @@ esp_err_t ConfigApiHandler::handleGetRequest(httpd_req_t *req) {
 
     if (serialize_ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to serialize configuration for GET request");
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Config generation failed");
-        return ESP_FAIL;
+        return sendHttpError(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Config generation failed");
     }
 
     httpd_resp_set_type(req, "application/json");
@@ -63,28 +63,26 @@ esp_err_t ConfigApiHandler::handlePostRequest(httpd_req_t *req) {
 
     // Use configured max size
     if (content_len == 0 || content_len > m_max_post_data_size) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
-                            content_len == 0 ? "Empty body" : "Payload too large");
-        return ESP_FAIL;
+        return sendHttpError(req,
+                             HTTPD_400_BAD_REQUEST,
+                             content_len == 0 ? "Empty body" : "Payload too large");
     }
 
     std::unique_ptr<char[]> buf_ptr(new (std::nothrow) char[content_len + 1]);
     char* buf = buf_ptr.get();
     if (!buf) {
         ESP_LOGE(TAG, "Malloc failed for POST buf");
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Mem alloc error");
-        return ESP_FAIL;
+        return sendHttpError(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Mem alloc error");
     }
 
-    int recv_len = httpd_req_recv(req, buf, content_len);
+    int recv_len = receiveHttpRequestBody(req, buf, content_len);
     if (recv_len <= 0) {
         if (recv_len == HTTPD_SOCK_ERR_TIMEOUT) {
-            httpd_resp_send_408(req);
+            return sendHttpTimeout(req);
         } else {
             ESP_LOGE(TAG, "POST recv failed (%d)", recv_len);
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Receive error");
+            return sendHttpError(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Receive error");
         }
-        return ESP_FAIL;
     }
     buf[recv_len] = '\0';
     ESP_LOGD(TAG, "Received JSON: %s", buf);
@@ -99,10 +97,9 @@ esp_err_t ConfigApiHandler::handlePostRequest(httpd_req_t *req) {
         ESP_LOGE(TAG, "Config update failed (err: %s)", esp_err_to_name(ret));
         // Provide a slightly more specific error message if possible
         if (ret == ESP_FAIL) { // Assuming ESP_FAIL is used for validation errors by ConfigurationService
-             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid config data provided");
+             return sendHttpError(req, HTTPD_400_BAD_REQUEST, "Invalid config data provided");
         } else {
-             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid config format or save failed");
+             return sendHttpError(req, HTTPD_400_BAD_REQUEST, "Invalid config format or save failed");
         }
-        return ESP_FAIL;
     }
 }

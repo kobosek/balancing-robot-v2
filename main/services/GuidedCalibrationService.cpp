@@ -96,8 +96,10 @@ MotorEffort GuidedCalibrationService::update(float dt, const GuidedCalibrationSa
 
                 case GuidedCalibrationPhase::LEFT_DIRECTION:
                     effort.left = clampAbs(m_tuningConfig.step_effort, m_tuningConfig.max_effort);
-                    m_phaseMaxSignedSpeed_dps = sample.speedLeft_dps;
-                    m_phaseMaxAbsSpeed_dps = std::max(m_phaseMaxAbsSpeed_dps, std::fabs(sample.speedLeft_dps));
+                    if (std::fabs(sample.speedLeft_dps) > m_phaseMaxAbsSpeed_dps) {
+                        m_phaseMaxAbsSpeed_dps = std::fabs(sample.speedLeft_dps);
+                        m_phaseMaxSignedSpeed_dps = sample.speedLeft_dps;
+                    }
                     if (m_phaseElapsed_s >= DIRECTION_DURATION_S) {
                         m_status.leftDirectionOk = m_phaseMaxAbsSpeed_dps >= MIN_DIRECTION_RESPONSE_DPS && m_phaseMaxSignedSpeed_dps > 0.0f;
                         if (!m_status.leftDirectionOk) {
@@ -113,8 +115,10 @@ MotorEffort GuidedCalibrationService::update(float dt, const GuidedCalibrationSa
 
                 case GuidedCalibrationPhase::RIGHT_DIRECTION:
                     effort.right = clampAbs(m_tuningConfig.step_effort, m_tuningConfig.max_effort);
-                    m_phaseMaxSignedSpeed_dps = sample.speedRight_dps;
-                    m_phaseMaxAbsSpeed_dps = std::max(m_phaseMaxAbsSpeed_dps, std::fabs(sample.speedRight_dps));
+                    if (std::fabs(sample.speedRight_dps) > m_phaseMaxAbsSpeed_dps) {
+                        m_phaseMaxAbsSpeed_dps = std::fabs(sample.speedRight_dps);
+                        m_phaseMaxSignedSpeed_dps = sample.speedRight_dps;
+                    }
                     if (m_phaseElapsed_s >= DIRECTION_DURATION_S) {
                         m_status.rightDirectionOk = m_phaseMaxAbsSpeed_dps >= MIN_DIRECTION_RESPONSE_DPS && m_phaseMaxSignedSpeed_dps > 0.0f;
                         if (!m_status.rightDirectionOk) {

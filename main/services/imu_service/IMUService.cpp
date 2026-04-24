@@ -1,6 +1,6 @@
 #include "IMUService.hpp"
 
-#include "CONFIG_FullConfigUpdate.hpp"
+#include "CONFIG_BehaviorConfigUpdate.hpp"
 #include "CONFIG_ImuConfigUpdate.hpp"
 #include "EventBus.hpp"
 #include "FIFOProcessor.hpp"
@@ -172,10 +172,10 @@ void IMUService::stopTasks() {
 }
 
 void IMUService::handleEvent(const BaseEvent& event) {
-    if (event.is<CONFIG_FullConfigUpdate>()) {
-        handleConfigUpdate(event.as<CONFIG_FullConfigUpdate>());
-    } else if (event.is<CONFIG_ImuConfigUpdate>()) {
+    if (event.is<CONFIG_ImuConfigUpdate>()) {
         handleIMUConfigUpdate(event.as<CONFIG_ImuConfigUpdate>());
+    } else if (event.is<CONFIG_BehaviorConfigUpdate>()) {
+        handleBehaviorConfigUpdate(event.as<CONFIG_BehaviorConfigUpdate>());
     } else if (event.is<IMU_CalibrationRequest>()) {
         handleCalibrationRequest(event.as<IMU_CalibrationRequest>());
     } else if (event.is<IMU_AttachRequested>()) {
@@ -612,11 +612,6 @@ void IMUService::markSensorUnavailable(esp_err_t errorCode, bool publishErrorEve
     }
 }
 
-void IMUService::handleConfigUpdate(const CONFIG_FullConfigUpdate& event) {
-    applyConfig(event.configData.imu);
-    applyConfig(event.configData.behavior);
-}
-
 void IMUService::handleIMUConfigUpdate(const CONFIG_ImuConfigUpdate& event) {
     const bool hardwareConfigChanged = applyConfig(event.config);
     if (event.requiresHardwareInit != hardwareConfigChanged) {
@@ -625,6 +620,10 @@ void IMUService::handleIMUConfigUpdate(const CONFIG_ImuConfigUpdate& event) {
                  event.requiresHardwareInit ? "true" : "false",
                  hardwareConfigChanged ? "true" : "false");
     }
+}
+
+void IMUService::handleBehaviorConfigUpdate(const CONFIG_BehaviorConfigUpdate& event) {
+    applyConfig(event.config);
 }
 
 void IMUService::handleCalibrationRequest(const IMU_CalibrationRequest& event) {
