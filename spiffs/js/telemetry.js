@@ -23,8 +23,7 @@ export async function updateTelemetryData() {
     const batchValuesByKey = Object.fromEntries(telemetryKeys.map(key => [key, []]));
 
     batchData.forEach((point) => {
-        // --- MODIFIED: Check length needed for new data format (9 elements) ---
-        if (Array.isArray(point) && point.length >= 9) {
+        if (Array.isArray(point) && point.length >= 12) {
             // Map received array elements to named properties based on NEW order
             const currentDataMap = {
                 pitchDeg:           point[0], // Index 0
@@ -35,7 +34,10 @@ export async function updateTelemetryData() {
                 speedSetpointLDPS:  point[5], // Index 5 (Setpoint L)
                 speedSetpointRDPS:  point[6], // Index 6 (Setpoint R)
                 desiredAngleDeg:    point[7], // Index 7 (Desired Angle)
-                yawRateDPS:         point[8], // Index 8 (Yaw Rate) <<< NEW
+                yawAngleDeg:        point[8], // Index 8 (Actual Yaw Angle)
+                targetYawAngleDeg:  point[9], // Index 9 (Target Yaw Angle)
+                yawRateDPS:         point[10], // Index 10 (Yaw Rate)
+                targetYawRateDPS:   point[11], // Index 11 (Target Yaw Rate)
                 // Add joystick data separately
                 joystickX:          appState.joystick.currentData.x,
                 joystickY:          appState.joystick.currentData.y,
@@ -50,7 +52,7 @@ export async function updateTelemetryData() {
             latestPointMap = currentDataMap; // Store the latest mapped point
             dataUpdated = true;
         } else {
-            console.warn(`Skipping invalid point array format or insufficient length (${point?.length || 'null'} < 9):`, point);
+            console.warn(`Skipping invalid point array format or insufficient length (${point?.length || 'null'} < 12):`, point);
         }
     });
 

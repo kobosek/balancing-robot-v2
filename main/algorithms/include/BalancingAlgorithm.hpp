@@ -20,6 +20,7 @@ public:
                        const PIDConfig& initialAnglePid,
                        const PIDConfig& initialSpeedLeftPid,
                        const PIDConfig& initialSpeedRightPid,
+                       const PIDConfig& initialYawAnglePid,
                        const PIDConfig& initialYawRatePid,
                        const ControlConfig& initialControl,
                        const EncoderConfig& initialEncoder,
@@ -27,6 +28,7 @@ public:
 
     esp_err_t init();
     MotorEffort update(float dt, float currentPitch_deg, float currentPitchRate_dps,
+                      float currentYaw_deg,
                       float currentYawRate_dps,
                       float currentSpeedLeft_dps, float currentSpeedRight_dps,
                       float targetPitchOffset_deg, float targetAngVel_dps);
@@ -39,6 +41,8 @@ public:
     // --- Getters for Telemetry ---
     float getLastSpeedSetpointLeftDPS() const;
     float getLastSpeedSetpointRightDPS() const;
+    float getLastTargetYawDeg() const;
+    float getLastDesiredYawRateDPS() const;
     bool isYawControlEnabled() const;
     // --- End Getters ---
 

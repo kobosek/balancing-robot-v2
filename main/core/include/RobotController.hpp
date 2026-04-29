@@ -58,6 +58,7 @@ private:
     TelemetryDataPoint buildTelemetrySnapshot(int64_t timestamp_us,
                                               int telemetryStateCode,
                                               float pitch_deg,
+                                              float yaw_deg,
                                               float yaw_rate_dps,
                                               float speedL_dps,
                                               float speedR_dps,

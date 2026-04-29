@@ -43,6 +43,10 @@ void ConfigChangePublisher::publishChanges(const ConfigData& oldConfig, const Co
         CONFIG_PidConfigUpdate event("speed_right", newConfig.pid_speed_right);
         m_eventBus.publish(event);
     }
+    if (oldConfig.pid_yaw_angle != newConfig.pid_yaw_angle) {
+        CONFIG_PidConfigUpdate event("yaw_angle", newConfig.pid_yaw_angle);
+        m_eventBus.publish(event);
+    }
     if (oldConfig.pid_yaw_rate != newConfig.pid_yaw_rate) {
         CONFIG_PidConfigUpdate event("yaw_rate", newConfig.pid_yaw_rate);
         m_eventBus.publish(event);

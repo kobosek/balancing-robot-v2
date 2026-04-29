@@ -16,6 +16,7 @@ public:
     virtual void updatePidConfig(const std::string& pidName, const PIDConfig& config) = 0;
     virtual float getLastSpeedSetpointLeftDPS() const = 0;
     virtual float getLastSpeedSetpointRightDPS() const = 0;
+    virtual float getLastTargetYawDeg() const = 0;
+    virtual float getLastDesiredYawRateDPS() const = 0;
     virtual bool isYawControlEnabled() const = 0;
 };
-

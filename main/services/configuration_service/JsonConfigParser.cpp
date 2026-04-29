@@ -73,6 +73,7 @@ esp_err_t JsonConfigParser::serialize(const ConfigData& config, std::string& out
     ADD_SECTION("pid_angle", json_config_sections::serializePid(config.pid_angle));
     ADD_SECTION("pid_speed_left", json_config_sections::serializePid(config.pid_speed_left));
     ADD_SECTION("pid_speed_right", json_config_sections::serializePid(config.pid_speed_right));
+    ADD_SECTION("pid_yaw_angle", json_config_sections::serializePid(config.pid_yaw_angle));
     ADD_SECTION("pid_yaw_rate", json_config_sections::serializePid(config.pid_yaw_rate));
     ADD_SECTION("pid_tuning", json_config_sections::serializePidTuning(config.pid_tuning));
 
@@ -188,6 +189,13 @@ esp_err_t JsonConfigParser::deserialize(const std::string& input, ConfigData& co
 
     pid_section = cJSON_GetObjectItem(root, "pid_speed_right");
     if (pid_section && !json_config_sections::deserializePid(pid_section, tempConfig.pid_speed_right)) pid_success = false; else if (!pid_section) { ESP_LOGW(TAG, "'pid_speed_right' missing."); pid_success = false; }
+
+    pid_section = cJSON_GetObjectItem(root, "pid_yaw_angle");
+    if (pid_section) {
+        if (!json_config_sections::deserializePid(pid_section, tempConfig.pid_yaw_angle)) pid_success = false;
+    } else {
+        ESP_LOGW(TAG, "'pid_yaw_angle' missing. Using defaults.");
+    }
 
     pid_section = cJSON_GetObjectItem(root, "pid_yaw_rate");
     if (pid_section && !json_config_sections::deserializePid(pid_section, tempConfig.pid_yaw_rate)) pid_success = false; else if (!pid_section) { ESP_LOGW(TAG, "'pid_yaw_rate' missing."); pid_success = false; }

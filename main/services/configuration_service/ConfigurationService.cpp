@@ -142,6 +142,8 @@ esp_err_t ConfigurationService::applyPidConfig(const std::string& pidName, const
             newConfig.pid_speed_left = config;
         } else if (pidName == "speed_right") {
             newConfig.pid_speed_right = config;
+        } else if (pidName == "yaw_angle") {
+            newConfig.pid_yaw_angle = config;
         } else if (pidName == "yaw_rate") {
             newConfig.pid_yaw_rate = config;
         } else {
@@ -167,6 +169,7 @@ esp_err_t ConfigurationService::applyPidConfig(const std::string& pidName, const
     if (oldConfig.pid_angle != newConfig.pid_angle ||
         oldConfig.pid_speed_left != newConfig.pid_speed_left ||
         oldConfig.pid_speed_right != newConfig.pid_speed_right ||
+        oldConfig.pid_yaw_angle != newConfig.pid_yaw_angle ||
         oldConfig.pid_yaw_rate != newConfig.pid_yaw_rate) {
         m_configChangePublisher.publishChanges(oldConfig, newConfig);
         m_configChangePublisher.publishFullConfig(newConfig);

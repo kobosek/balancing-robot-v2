@@ -12,7 +12,10 @@ export const appState = {
         speedSetpointLDPS: createDataArray(), // Index 5 (Target Left)
         speedSetpointRDPS: createDataArray(), // Index 6 (Target Right)
         desiredAngleDeg: createDataArray(),   // Index 7 (Target Pitch Offset)
-        yawRateDPS: createDataArray(),        // <<< ADDED: Index 8 (Actual Yaw Rate)
+        yawAngleDeg: createDataArray(),       // Index 8 (Actual Yaw Angle)
+        targetYawAngleDeg: createDataArray(), // Index 9 (Target Yaw Angle)
+        yawRateDPS: createDataArray(),        // Index 10 (Actual Yaw Rate)
+        targetYawRateDPS: createDataArray(),  // Index 11 (Target Yaw Rate)
         joystickX: createDataArray(),         // Populated locally
         joystickY: createDataArray(),         // Populated locally
     },
@@ -25,7 +28,10 @@ export const appState = {
         'speedSetpointLDPS',
         'speedSetpointRDPS',
         'desiredAngleDeg',
-        'yawRateDPS', // <<< ADDED Key
+        'yawAngleDeg',
+        'targetYawAngleDeg',
+        'yawRateDPS',
+        'targetYawRateDPS',
         'joystickX',
         'joystickY'
     ],

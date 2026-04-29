@@ -25,6 +25,7 @@ struct ConfigData {
     PIDConfig pid_angle;
     PIDConfig pid_speed_left;
     PIDConfig pid_speed_right;
+    PIDConfig pid_yaw_angle = {2.0f, 0.0f, 0.05f, -60.0f, 60.0f, -20.0f, 20.0f};
     PIDConfig pid_yaw_rate;
     PidTuningConfig pid_tuning;
     SystemBehaviorConfig behavior;

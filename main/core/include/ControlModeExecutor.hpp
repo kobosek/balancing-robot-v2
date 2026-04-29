@@ -11,6 +11,7 @@ struct ControlModeInput {
     float dt = 0.0f;
     float pitch_deg = 0.0f;
     float pitch_rate_dps = 0.0f;
+    float yaw_deg = 0.0f;
     float yaw_rate_dps = 0.0f;
     float speedLeft_dps = 0.0f;
     float speedRight_dps = 0.0f;
@@ -22,6 +23,8 @@ struct ControlModeResult {
     MotorEffort effort = {};
     float telemetryTargetPitchOffset_deg = 0.0f;
     float telemetryTargetAngularVelocity_dps = 0.0f;
+    float telemetryTargetYaw_deg = 0.0f;
+    float telemetryDesiredYawRate_dps = 0.0f;
     float speedSetpointLeft_dps = 0.0f;
     float speedSetpointRight_dps = 0.0f;
 };

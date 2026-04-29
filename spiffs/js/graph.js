@@ -1,6 +1,5 @@
 import { appState } from './state.js';
-// <<< ADDED Y_YAWRATE_RANGE_DPS >>>
-import { GRAPH_COLORS, Y_SPEED_RANGE_DPS, Y_ANGLE_RANGE_DEG, Y_EFFORT_RANGE, Y_YAWRATE_RANGE_DPS, MAX_DATA_POINTS } from './constants.js';
+import { GRAPH_COLORS, Y_SPEED_RANGE_DPS, Y_ANGLE_RANGE_DEG, Y_EFFORT_RANGE, Y_YAW_ANGLE_RANGE_DEG, Y_YAWRATE_RANGE_DPS, MAX_DATA_POINTS } from './constants.js';
 
 // --- Graph Configurations ---
 const graphConfigs = [
@@ -26,13 +25,15 @@ const graphConfigs = [
             { dataKey: 'speedRDPS', color: GRAPH_COLORS[3], yAxis: 'left', lineWidth: 1.5 },         // Actual R (Green)
         ]
     },
-    // Graph 3: Yaw Rate <<< ADDED >>>
+    // Graph 3: Yaw Heading and Rate
     {
-        yLeftAxis: { min: -Y_YAWRATE_RANGE_DPS, max: Y_YAWRATE_RANGE_DPS, steps: 6, label: 'Yaw Rate (dps)', color: GRAPH_COLORS[7] }, // Use new constant & color
-        yRightAxis: null,
+        yLeftAxis: { min: -Y_YAW_ANGLE_RANGE_DEG, max: Y_YAW_ANGLE_RANGE_DEG, steps: 6, label: 'Yaw Angle (deg)', color: GRAPH_COLORS[7] },
+        yRightAxis: { min: -Y_YAWRATE_RANGE_DPS, max: Y_YAWRATE_RANGE_DPS, steps: 6, label: 'Yaw Rate (dps)', color: GRAPH_COLORS[1] },
         series: [
-            { dataKey: 'yawRateDPS', color: GRAPH_COLORS[7], yAxis: 'left', lineWidth: 2.0 }, // Yaw Rate (Light Blue)
-            // Optional: Add targetAngVel_dps here later if needed
+            { dataKey: 'targetYawAngleDeg', color: GRAPH_COLORS[6], yAxis: 'left', lineWidth: 1.0 },
+            { dataKey: 'yawAngleDeg', color: GRAPH_COLORS[7], yAxis: 'left', lineWidth: 2.0 },
+            { dataKey: 'targetYawRateDPS', color: GRAPH_COLORS[5], yAxis: 'right', lineWidth: 1.0 },
+            { dataKey: 'yawRateDPS', color: GRAPH_COLORS[1], yAxis: 'right', lineWidth: 1.5 },
         ]
     },
 ];

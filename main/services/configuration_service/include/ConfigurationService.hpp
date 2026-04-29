@@ -31,6 +31,7 @@ public:
     const PIDConfig& getPidAngleConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.pid_angle; }
     const PIDConfig& getPidSpeedLeftConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.pid_speed_left; }
     const PIDConfig& getPidSpeedRightConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.pid_speed_right; }
+    const PIDConfig& getPidYawAngleConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.pid_yaw_angle; }
     const PIDConfig& getPidYawRateConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.pid_yaw_rate; }
     const PidTuningConfig& getPidTuningConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.pid_tuning; }
     const MPU6050Config& getMpu6050Config() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.imu; }

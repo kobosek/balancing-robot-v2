@@ -61,7 +61,7 @@
                      <button id="angleConfigBtn">Angle PID</button>
                      <button id="speedLeftConfigBtn">Speed PID Left</button>
                      <button id="speedRightConfigBtn">Speed PID Right</button>
-                     <button id="yawRateConfigBtn">Yaw Rate PID</button> <!-- <<< ADDED Yaw Rate Button -->
+                     <button id="yawRateConfigBtn">Yaw Control PIDs</button>
                      <button id="generalConfigBtn">General</button>
                      <!-- Containers for the forms (populated by JS) -->
                      <div id="angleConfigFormContainer" class="form-container" style="display: none;"></div>
@@ -145,17 +145,17 @@
              <canvas id="telemetryGraph2"></canvas>
         </div>
 
-        <!-- Graph 3: Yaw Rate --> <!-- <<< ADDED Graph 3 Section >>> -->
+        <!-- Graph 3: Yaw Heading and Rate -->
         <div class="graph-container" id="graphContainer3">
-             <h3>Yaw Rate</h3>
+             <h3>Yaw Heading and Rate</h3>
              <div id="legend3" class="legend">
-                <!-- Populated by JS, corresponds to graphConfigs[2].series -->
-                <div class="legend-item"><span class="legend-color" style="background-color: #0dcaf0;"></span> Yaw Rate (dps): <span class="legend-value" id="legendValG3_0">0.0</span></div>
-                <!-- Add more series here later if needed (e.g., target yaw rate) -->
+                <div class="legend-item"><span class="legend-color" style="background-color: #20c997;"></span> Target Yaw (deg): <span class="legend-value" id="legendValG3_0">0.0</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #0dcaf0;"></span> Actual Yaw (deg): <span class="legend-value" id="legendValG3_1">0.0</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #fd7e14;"></span> Target Yaw Rate (dps): <span class="legend-value" id="legendValG3_2">0.0</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #0d6efd;"></span> Actual Yaw Rate (dps): <span class="legend-value" id="legendValG3_3">0.0</span></div>
              </div>
              <canvas id="telemetryGraph3"></canvas>
         </div>
-        <!-- <<< END ADDED Graph 3 Section >>> -->
 
     </div> <!-- End container -->
 

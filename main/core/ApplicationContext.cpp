@@ -199,6 +199,7 @@ esp_err_t ApplicationContext::initializeControlSubsystem()
     const PIDConfig anglePidConf = m_configService->getPidAngleConfig();
     const PIDConfig speedLeftPidConf = m_configService->getPidSpeedLeftConfig();
     const PIDConfig speedRightPidConf = m_configService->getPidSpeedRightConfig();
+    const PIDConfig yawAnglePidConf = m_configService->getPidYawAngleConfig();
     const PIDConfig yawRatePidConf = m_configService->getPidYawRateConfig();
     const PidTuningConfig pidTuningConf = m_configService->getPidTuningConfig();
     const MotorConfig motorConf = m_configService->getMotorConfig();
@@ -214,6 +215,7 @@ esp_err_t ApplicationContext::initializeControlSubsystem()
         anglePidConf,
         speedLeftPidConf,
         speedRightPidConf,
+        yawAnglePidConf,
         yawRatePidConf,
         controlConf,
         encoderConf,

@@ -13,6 +13,7 @@ BalancingAlgorithm::BalancingAlgorithm(EventBus& eventBus,
                                        const PIDConfig& initialAnglePid,
                                        const PIDConfig& initialSpeedLeftPid,
                                        const PIDConfig& initialSpeedRightPid,
+                                       const PIDConfig& initialYawAnglePid,
                                        const PIDConfig& initialYawRatePid,
                                        const ControlConfig& initialControl,
                                        const EncoderConfig& initialEncoder,
@@ -26,6 +27,7 @@ BalancingAlgorithm::BalancingAlgorithm(EventBus& eventBus,
      initial_config_data.pid_angle = initialAnglePid;
      initial_config_data.pid_speed_left = initialSpeedLeftPid;
      initial_config_data.pid_speed_right = initialSpeedRightPid;
+     initial_config_data.pid_yaw_angle = initialYawAnglePid;
      initial_config_data.pid_yaw_rate = initialYawRatePid;
      initial_config_data.control = initialControl;
      initial_config_data.encoder = initialEncoder;
@@ -60,6 +62,7 @@ void BalancingAlgorithm::resetState() {
 }
 
 MotorEffort BalancingAlgorithm::update(float dt, float currentPitch_deg, float currentPitchRate_dps,
+                                      float currentYaw_deg,
                                       float currentYawRate_dps,
                                       float currentSpeedLeft_dps, float currentSpeedRight_dps,
                                       float targetPitchOffset_deg, float targetAngVel_dps)
@@ -72,6 +75,7 @@ MotorEffort BalancingAlgorithm::update(float dt, float currentPitch_deg, float c
         dt,
         currentPitch_deg,
         currentPitchRate_dps,
+        currentYaw_deg,
         currentYawRate_dps,
         currentSpeedLeft_dps,
         currentSpeedRight_dps,
@@ -109,6 +113,14 @@ float BalancingAlgorithm::getLastSpeedSetpointLeftDPS() const {
 
 float BalancingAlgorithm::getLastSpeedSetpointRightDPS() const {
     return m_strategy ? m_strategy->getLastSpeedSetpointRightDPS() : 0.0f;
+}
+
+float BalancingAlgorithm::getLastTargetYawDeg() const {
+    return m_strategy ? m_strategy->getLastTargetYawDeg() : 0.0f;
+}
+
+float BalancingAlgorithm::getLastDesiredYawRateDPS() const {
+    return m_strategy ? m_strategy->getLastDesiredYawRateDPS() : 0.0f;
 }
 
 bool BalancingAlgorithm::isYawControlEnabled() const {

@@ -79,17 +79,17 @@ esp_err_t TelemetryHandler::handleRequest(httpd_req_t *req) {
             m_telemetryBuffer.clear();
         }
 
-        json.reserve(12 + dataToSend.size() * 96);
+        json.reserve(12 + dataToSend.size() * 144);
         json = "{\"data\":[";
 
-        char pointBuffer[192];
+        char pointBuffer[256];
         bool format_failed = false;
         for (size_t i = 0; i < dataToSend.size(); ++i) {
             const auto& point = dataToSend[i];
             const int written = std::snprintf(
                 pointBuffer,
                 sizeof(pointBuffer),
-                "%s[%.3f,%.3f,%.3f,%.3f,%d,%.3f,%.3f,%.3f,%.3f]",
+                "%s[%.3f,%.3f,%.3f,%.3f,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f]",
                 i == 0 ? "" : ",",
                 static_cast<double>(point.pitch_deg),
                 static_cast<double>(point.speedLeft_dps),
@@ -99,7 +99,10 @@ esp_err_t TelemetryHandler::handleRequest(httpd_req_t *req) {
                 static_cast<double>(point.speedSetpointLeft_dps),
                 static_cast<double>(point.speedSetpointRight_dps),
                 static_cast<double>(point.desiredAngle_deg),
-                static_cast<double>(point.yawRate_dps));
+                static_cast<double>(point.yawAngle_deg),
+                static_cast<double>(point.targetYawAngle_deg),
+                static_cast<double>(point.yawRate_dps),
+                static_cast<double>(point.targetYawRate_dps));
             if (written < 0 || written >= static_cast<int>(sizeof(pointBuffer))) {
                 ESP_LOGE(TAG, "Failed format telemetry point");
                 format_failed = true;

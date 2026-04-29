@@ -1,11 +1,17 @@
 #include "NestedPidBalanceStrategy.hpp"
 
 #include <algorithm>
+#include <cmath>
+
+namespace {
+constexpr float YAW_COMMAND_DEADBAND_DPS = 1e-3f;
+}
 
 NestedPidBalanceStrategy::NestedPidBalanceStrategy() :
     m_anglePid("angle"),
     m_speedPidLeft("speed_left"),
     m_speedPidRight("speed_right"),
+    m_yawAnglePid("yaw_angle"),
     m_yawRatePid("yaw_rate") {}
 
 MotorEffort NestedPidBalanceStrategy::update(const BalanceControlInput& input)
@@ -23,22 +29,42 @@ MotorEffort NestedPidBalanceStrategy::update(const BalanceControlInput& input)
         input.currentPitchRate_dps,
         input.dt);
 
-    float commandedTurnDiff_dps = 0.0f;
-    if (m_wheel_radius_m > 1e-5f && m_robot_wheelbase_m > 1e-5f) {
-        commandedTurnDiff_dps =
-            (m_robot_wheelbase_m / (2.0f * m_wheel_radius_m)) *
-            input.targetAngularVelocity_dps;
+    if (!m_yaw_control_enabled) {
+        m_has_target_yaw = false;
+        m_target_yaw_deg = input.currentYaw_deg;
+    } else if (!m_has_target_yaw) {
+        m_target_yaw_deg = input.currentYaw_deg;
+        m_has_target_yaw = true;
+        m_yawAnglePid.reset();
+        m_yawRatePid.reset();
     }
 
-    const float yawRateError_dps = input.targetAngularVelocity_dps - input.currentYawRate_dps;
+    if (m_yaw_control_enabled && std::fabs(input.targetAngularVelocity_dps) > YAW_COMMAND_DEADBAND_DPS) {
+        m_target_yaw_deg += input.targetAngularVelocity_dps * input.dt;
+    }
+
+    const float targetYaw_deg = m_yaw_control_enabled ? m_target_yaw_deg : input.currentYaw_deg;
+    const float yawAngleError_deg = targetYaw_deg - input.currentYaw_deg;
+    float yawAngleCorrectionRate_dps = 0.0f;
+    if (m_yaw_control_enabled) {
+        yawAngleCorrectionRate_dps = m_yawAnglePid.computeWithMeasurementRate(
+            targetYaw_deg,
+            input.currentYaw_deg,
+            input.currentYawRate_dps,
+            input.dt);
+    }
+
+    const float desiredYawRate_dps = m_yaw_control_enabled
+        ? (input.targetAngularVelocity_dps + yawAngleCorrectionRate_dps)
+        : input.targetAngularVelocity_dps;
+    const float commandedTurnDiff_dps = yawRateToWheelDiffDps(desiredYawRate_dps);
+    const float yawRateError_dps = desiredYawRate_dps - input.currentYawRate_dps;
     float yawCorrectionDiff_dps = 0.0f;
     if (m_yaw_control_enabled) {
         yawCorrectionDiff_dps = m_yawRatePid.compute(
-            input.targetAngularVelocity_dps,
+            desiredYawRate_dps,
             input.currentYawRate_dps,
             input.dt);
-    } else {
-        m_yawRatePid.reset();
     }
 
     float speedSetpointLeft_dps = baseSpeed_dps - commandedTurnDiff_dps;
@@ -53,6 +79,8 @@ MotorEffort NestedPidBalanceStrategy::update(const BalanceControlInput& input)
 
     m_last_speed_setpoint_left_dps = speedSetpointLeft_dps;
     m_last_speed_setpoint_right_dps = speedSetpointRight_dps;
+    m_last_target_yaw_deg = targetYaw_deg;
+    m_last_desired_yaw_rate_dps = desiredYawRate_dps;
 
     effort.left = m_speedPidLeft.compute(speedSetpointLeft_dps, input.currentSpeedLeft_dps, input.dt);
     effort.right = m_speedPidRight.compute(speedSetpointRight_dps, input.currentSpeedRight_dps, input.dt);
@@ -60,10 +88,11 @@ MotorEffort NestedPidBalanceStrategy::update(const BalanceControlInput& input)
     effort.left = std::max(-m_max_control_effort, std::min(m_max_control_effort, effort.left));
     effort.right = std::max(-m_max_control_effort, std::min(m_max_control_effort, effort.right));
 
-    ESP_LOGV(TAG, "P:%.1f|PR:%.1f|TgtP:%.1f|Yaw:%.1f|TgtAV:%.1f|YawE:%.1f|YawC:%.1f|CmdDiff:%.1f|LSet:%.1f RSet:%.1f|LCur:%.1f RCur:%.1f|LEff:%.2f REff:%.2f",
+    ESP_LOGV(TAG, "P:%.1f|PR:%.1f|TgtP:%.1f|Yaw:%.1f|TgtYaw:%.1f|YawErr:%.1f|YawR:%.1f|CmdYawR:%.1f|DesYawR:%.1f|YawRE:%.1f|YawAC:%.1f|YawRC:%.1f|TurnFF:%.1f|LSet:%.1f RSet:%.1f|LCur:%.1f RCur:%.1f|LEff:%.2f REff:%.2f",
              input.currentPitch_deg, input.currentPitchRate_dps, input.targetPitchOffset_deg,
-             input.currentYawRate_dps, input.targetAngularVelocity_dps, yawRateError_dps,
-             yawCorrectionDiff_dps, commandedTurnDiff_dps,
+             input.currentYaw_deg, targetYaw_deg, yawAngleError_deg,
+             input.currentYawRate_dps, input.targetAngularVelocity_dps, desiredYawRate_dps, yawRateError_dps,
+             yawAngleCorrectionRate_dps, yawCorrectionDiff_dps, commandedTurnDiff_dps,
              speedSetpointLeft_dps, speedSetpointRight_dps,
              input.currentSpeedLeft_dps, input.currentSpeedRight_dps,
              effort.left, effort.right);
@@ -77,9 +106,14 @@ void NestedPidBalanceStrategy::reset()
     m_anglePid.reset();
     m_speedPidLeft.reset();
     m_speedPidRight.reset();
+    m_yawAnglePid.reset();
     m_yawRatePid.reset();
+    m_has_target_yaw = false;
+    m_target_yaw_deg = 0.0f;
     m_last_speed_setpoint_left_dps = 0.0f;
     m_last_speed_setpoint_right_dps = 0.0f;
+    m_last_target_yaw_deg = 0.0f;
+    m_last_desired_yaw_rate_dps = 0.0f;
 }
 
 void NestedPidBalanceStrategy::applyConfig(const ConfigData& config)
@@ -89,12 +123,15 @@ void NestedPidBalanceStrategy::applyConfig(const ConfigData& config)
     m_anglePid.updateParams(config.pid_angle);
     m_speedPidLeft.updateParams(config.pid_speed_left);
     m_speedPidRight.updateParams(config.pid_speed_right);
+    m_yawAnglePid.updateParams(config.pid_yaw_angle);
     m_yawRatePid.updateParams(config.pid_yaw_rate);
 
     const bool previousYawControlEnabled = m_yaw_control_enabled;
     m_yaw_control_enabled = config.control.yaw_control_enabled;
     if (previousYawControlEnabled != m_yaw_control_enabled) {
+        m_yawAnglePid.reset();
         m_yawRatePid.reset();
+        m_has_target_yaw = false;
     }
 
     m_angle_pid_output_min = config.pid_angle.getOutputMin();
@@ -115,6 +152,8 @@ void NestedPidBalanceStrategy::updatePidConfig(const std::string& pidName, const
         m_speedPidLeft.updateParams(config);
     } else if (pidName == "speed_right") {
         m_speedPidRight.updateParams(config);
+    } else if (pidName == "yaw_angle") {
+        m_yawAnglePid.updateParams(config);
     } else if (pidName == "yaw_rate") {
         m_yawRatePid.updateParams(config);
     } else {
@@ -134,6 +173,18 @@ float NestedPidBalanceStrategy::getLastSpeedSetpointRightDPS() const
     return m_last_speed_setpoint_right_dps;
 }
 
+float NestedPidBalanceStrategy::getLastTargetYawDeg() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_last_target_yaw_deg;
+}
+
+float NestedPidBalanceStrategy::getLastDesiredYawRateDPS() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_last_desired_yaw_rate_dps;
+}
+
 bool NestedPidBalanceStrategy::isYawControlEnabled() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -149,3 +200,11 @@ void NestedPidBalanceStrategy::updateDimensions(const EncoderConfig& encoderConf
              m_wheel_radius_m, m_robot_wheelbase_m);
 }
 
+float NestedPidBalanceStrategy::yawRateToWheelDiffDps(float yawRate_dps) const
+{
+    if (m_wheel_radius_m <= 1e-5f || m_robot_wheelbase_m <= 1e-5f) {
+        return 0.0f;
+    }
+
+    return (m_robot_wheelbase_m / (2.0f * m_wheel_radius_m)) * yawRate_dps;
+}

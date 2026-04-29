@@ -95,6 +95,15 @@
     "iterm_min": -10.0,
     "iterm_max": 10.0
   },
+  "pid_yaw_angle": {
+    "kp": 2.0,
+    "ki": 0.0,
+    "kd": 0.05,
+    "output_min": -60.0,
+    "output_max": 60.0,
+    "iterm_min": -20.0,
+    "iterm_max": 20.0
+  },
   "pid_yaw_rate": {
     "kp": 0.1,
     "ki": 0.01,

@@ -45,9 +45,10 @@ export async function showConfigForm(sectionKey, container) {
     }
     hideAllConfigForms();
     container.style.display = 'block';
-    const formDiv = container.querySelector('div');
-    if (formDiv) {
-        await loadPIDConfigSection(sectionKey, formDiv);
+    const pidForms = Array.from(container.querySelectorAll('[data-pid-section]'));
+    if (pidForms.length > 0) {
+        await Promise.all(pidForms.map((formDiv) =>
+            loadPIDConfigSection(formDiv.dataset.pidSection, formDiv)));
     } else {
         console.error(`Form div not found within container for section ${sectionKey}.`);
     }

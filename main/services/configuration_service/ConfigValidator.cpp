@@ -162,6 +162,7 @@ bool ConfigValidator::validate(const ConfigData& config, std::string& error) con
     if (!validate_pid(config.pid_angle, "pid_angle") ||
         !validate_pid(config.pid_speed_left, "pid_speed_left") ||
         !validate_pid(config.pid_speed_right, "pid_speed_right") ||
+        !validate_pid(config.pid_yaw_angle, "pid_yaw_angle") ||
         !validate_pid(config.pid_yaw_rate, "pid_yaw_rate")) {
         return false;
     }

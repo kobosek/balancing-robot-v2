@@ -16,6 +16,7 @@
 struct OrientationEstimate {
     float pitch_deg = 0.0f;
     float pitch_rate_dps = 0.0f;
+    float yaw_deg = 0.0f;
     float yaw_rate_dps = 0.0f;
 };
 
@@ -41,6 +42,7 @@ public:
     // Getters (thread-safe)
     float getPitchDeg() const;
     float getPitchRateDPS() const;
+    float getYawDeg() const;
     float getYawRateDPS() const;
     
     // Get all controller-facing IMU values through one read path.
@@ -63,6 +65,7 @@ private:
     // State variables updated from the IMU task and read by the control task.
     std::atomic<float> m_pitch_deg;
     std::atomic<float> m_pitch_rate_dps;
+    std::atomic<float> m_yaw_deg;
     std::atomic<float> m_yaw_rate_dps;
     std::atomic<float> m_pitch_bias_dps;
     std::atomic<float> m_p00;

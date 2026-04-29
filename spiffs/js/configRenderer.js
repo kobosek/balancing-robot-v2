@@ -52,6 +52,7 @@ function addFormField(parent, fieldConfig) {
 
 function createPIDFormDiv(idPrefix, saveButtonSuffix = 'PID') {
     const formDiv = document.createElement('div');
+    formDiv.dataset.pidSection = idPrefix;
     PID_FIELDS.forEach(field => {
         addFormField(formDiv, {
             label: field.label,
@@ -165,7 +166,7 @@ export function createConfigForms() {
     uiElements.angleConfigFormContainer.innerHTML = '<h3>Angle PID</h3>';
     uiElements.speedLeftConfigFormContainer.innerHTML = '<h3>Speed PID Left</h3>';
     uiElements.speedRightConfigFormContainer.innerHTML = '<h3>Speed PID Right</h3>';
-    uiElements.yawRateConfigFormContainer.innerHTML = '<h3>Yaw Rate PID</h3>';
+    uiElements.yawRateConfigFormContainer.innerHTML = '<h3>Yaw Control PIDs</h3>';
     uiElements.generalConfigFormContainer.innerHTML = '<h3>General Settings</h3>';
 
     uiElements.angleConfigFormContainer.appendChild(createPIDFormDiv('pid_angle', 'Angle PID'));
@@ -173,6 +174,7 @@ export function createConfigForms() {
     uiElements.speedLeftConfigFormContainer.appendChild(createPidTuningPanel('left', 'Left Motor PID Tuning'));
     uiElements.speedRightConfigFormContainer.appendChild(createPIDFormDiv('pid_speed_right', 'Speed R PID'));
     uiElements.speedRightConfigFormContainer.appendChild(createPidTuningPanel('right', 'Right Motor PID Tuning'));
+    uiElements.yawRateConfigFormContainer.appendChild(createPIDFormDiv('pid_yaw_angle', 'Yaw Angle PID'));
     uiElements.yawRateConfigFormContainer.appendChild(createPIDFormDiv('pid_yaw_rate', 'Yaw Rate PID'));
     createGeneralConfigForm(uiElements.generalConfigFormContainer);
     console.log('Config forms created.');

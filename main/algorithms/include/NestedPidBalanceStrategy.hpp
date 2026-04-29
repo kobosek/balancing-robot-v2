@@ -17,6 +17,8 @@ public:
 
     float getLastSpeedSetpointLeftDPS() const override;
     float getLastSpeedSetpointRightDPS() const override;
+    float getLastTargetYawDeg() const override;
+    float getLastDesiredYawRateDPS() const override;
     bool isYawControlEnabled() const override;
 
 private:
@@ -26,6 +28,7 @@ private:
     PIDController m_anglePid;
     PIDController m_speedPidLeft;
     PIDController m_speedPidRight;
+    PIDController m_yawAnglePid;
     PIDController m_yawRatePid;
 
     float m_max_control_effort = 1.0f;
@@ -34,9 +37,13 @@ private:
     float m_angle_pid_output_min = 0.0f;
     float m_angle_pid_output_max = 0.0f;
     bool m_yaw_control_enabled = false;
+    bool m_has_target_yaw = false;
+    float m_target_yaw_deg = 0.0f;
     float m_last_speed_setpoint_left_dps = 0.0f;
     float m_last_speed_setpoint_right_dps = 0.0f;
+    float m_last_target_yaw_deg = 0.0f;
+    float m_last_desired_yaw_rate_dps = 0.0f;
 
     void updateDimensions(const EncoderConfig& encoderConfig, const RobotDimensionsConfig& dimensionsConfig);
+    float yawRateToWheelDiffDps(float yawRate_dps) const;
 };
-

@@ -9,6 +9,7 @@ OrientationEstimator::OrientationEstimator() :
     m_sample_period_s(MPU6050Profile::DEFAULT_SAMPLE_PERIOD_S),
     m_pitch_deg(0.0f),
     m_pitch_rate_dps(0.0f),
+    m_yaw_deg(0.0f),
     m_yaw_rate_dps(0.0f),
     m_pitch_bias_dps(0.0f),
     m_p00(1.0f),
@@ -35,6 +36,7 @@ void OrientationEstimator::init(float alpha, float sample_period_s,
     m_gyro_offset_z_dps.store(gyro_offset_z_dps, std::memory_order_relaxed);
     m_pitch_deg.store(0.0f, std::memory_order_relaxed);
     m_pitch_rate_dps.store(0.0f, std::memory_order_relaxed);
+    m_yaw_deg.store(0.0f, std::memory_order_relaxed);
     m_yaw_rate_dps.store(0.0f, std::memory_order_relaxed);
     m_pitch_bias_dps.store(0.0f, std::memory_order_relaxed);
     m_p00.store(1.0f, std::memory_order_relaxed);
@@ -53,6 +55,7 @@ void OrientationEstimator::updateGyroOffsets(float gyro_offset_x_dps,
     m_gyro_offset_x_dps.store(gyro_offset_x_dps, std::memory_order_relaxed);
     m_gyro_offset_y_dps.store(gyro_offset_y_dps, std::memory_order_relaxed);
     m_gyro_offset_z_dps.store(gyro_offset_z_dps, std::memory_order_relaxed);
+    m_yaw_deg.store(0.0f, std::memory_order_relaxed);
     m_pitch_bias_dps.store(0.0f, std::memory_order_relaxed);
     m_p00.store(1.0f, std::memory_order_relaxed);
     m_p01.store(0.0f, std::memory_order_relaxed);
@@ -66,6 +69,7 @@ void OrientationEstimator::updateGyroOffsets(float gyro_offset_x_dps,
 void OrientationEstimator::reset() {
     m_pitch_deg.store(0.0f, std::memory_order_relaxed);
     m_pitch_rate_dps.store(0.0f, std::memory_order_relaxed);
+    m_yaw_deg.store(0.0f, std::memory_order_relaxed);
     m_yaw_rate_dps.store(0.0f, std::memory_order_relaxed);
     m_pitch_bias_dps.store(0.0f, std::memory_order_relaxed);
     m_p00.store(1.0f, std::memory_order_relaxed);
@@ -119,6 +123,7 @@ void OrientationEstimator::processSample(float ax_g, float ay_g, float az_g,
 
     float angle_deg = m_pitch_deg.load(std::memory_order_relaxed);
     float bias_dps = m_pitch_bias_dps.load(std::memory_order_relaxed);
+    float yaw_deg = m_yaw_deg.load(std::memory_order_relaxed);
     float p00 = m_p00.load(std::memory_order_relaxed);
     float p01 = m_p01.load(std::memory_order_relaxed);
     float p10 = m_p10.load(std::memory_order_relaxed);
@@ -167,9 +172,11 @@ void OrientationEstimator::processSample(float ax_g, float ay_g, float az_g,
     // --- Store Yaw Rate ---
     // We use the offset-corrected Z-axis gyro reading for yaw rate
     float latest_yaw_rate_dps = gyro_dps_z;
+    yaw_deg += dt * latest_yaw_rate_dps;
 
     m_pitch_deg.store(angle_deg, std::memory_order_relaxed);
     m_pitch_rate_dps.store(latest_pitch_rate_dps, std::memory_order_relaxed);
+    m_yaw_deg.store(yaw_deg, std::memory_order_relaxed);
     m_yaw_rate_dps.store(latest_yaw_rate_dps, std::memory_order_relaxed);
     m_pitch_bias_dps.store(bias_dps, std::memory_order_relaxed);
     m_p00.store(p00, std::memory_order_relaxed);
@@ -190,6 +197,10 @@ float OrientationEstimator::getPitchRateDPS() const {
     return m_pitch_rate_dps.load(std::memory_order_relaxed);
 }
 
+float OrientationEstimator::getYawDeg() const {
+    return m_yaw_deg.load(std::memory_order_relaxed);
+}
+
 float OrientationEstimator::getYawRateDPS() const {
     return m_yaw_rate_dps.load(std::memory_order_relaxed);
 }
@@ -198,6 +209,7 @@ OrientationEstimate OrientationEstimator::getOrientation() const {
     return {
         m_pitch_deg.load(std::memory_order_relaxed),
         m_pitch_rate_dps.load(std::memory_order_relaxed),
+        m_yaw_deg.load(std::memory_order_relaxed),
         m_yaw_rate_dps.load(std::memory_order_relaxed)
     };
 }

@@ -13,5 +13,8 @@ struct TelemetryDataPoint {
     float speedSetpointLeft_dps = 0.0f; // Index 5
     float speedSetpointRight_dps = 0.0f;// Index 6
     float desiredAngle_deg = 0.0f;    // Index 7
-    float yawRate_dps = 0.0f;         // <<< ADDED: Index 8
+    float yawAngle_deg = 0.0f;        // Index 8
+    float targetYawAngle_deg = 0.0f;  // Index 9
+    float yawRate_dps = 0.0f;         // Index 10
+    float targetYawRate_dps = 0.0f;   // Index 11
 };

@@ -22,4 +22,5 @@ export const GRAPH_COLORS = ['#6f42c1', '#0d6efd', '#dc3545', '#198754', '#ffc10
 export const Y_SPEED_RANGE_DPS = 800;
 export const Y_ANGLE_RANGE_DEG = 90;
 export const Y_EFFORT_RANGE = 1.0;
-export const Y_YAWRATE_RANGE_DPS = 180; // <<< ADDED: Range for Yaw Rate Graph (+/- 180 dps)
+export const Y_YAW_ANGLE_RANGE_DEG = 180;
+export const Y_YAWRATE_RANGE_DPS = 180;

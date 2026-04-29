@@ -79,6 +79,7 @@ void RobotController::runControlStep(float dt) {
     const OrientationEstimate orientation = m_estimator->getOrientation();
     const float pitch_deg = orientation.pitch_deg;
     const float pitch_rate_dps = orientation.pitch_rate_dps;
+    const float yaw_deg = orientation.yaw_deg;
     const float yaw_rate_dps = orientation.yaw_rate_dps;
 
     m_controlEventDispatcher.enqueueOrientation(
@@ -97,6 +98,7 @@ void RobotController::runControlStep(float dt) {
     modeInput.dt = dt;
     modeInput.pitch_deg = pitch_deg;
     modeInput.pitch_rate_dps = pitch_rate_dps;
+    modeInput.yaw_deg = yaw_deg;
     modeInput.yaw_rate_dps = yaw_rate_dps;
     modeInput.speedLeft_dps = speedL_dps;
     modeInput.speedRight_dps = speedR_dps;
@@ -110,14 +112,16 @@ void RobotController::runControlStep(float dt) {
     const TelemetryDataPoint snapshot = buildTelemetrySnapshot(startTimeMicros,
                                                                telemetryStateCode,
                                                                pitch_deg,
+                                                               yaw_deg,
                                                                yaw_rate_dps,
                                                                speedL_dps,
                                                                speedR_dps,
                                                                modeResult);
     m_controlEventDispatcher.enqueueTelemetry(snapshot);
 
-    ESP_LOGV(TAG, "Ctrl Step: dt=%.4f, P=%.1f YawR=%.1f | TgtPO=%.1f, TgtAV=%.1f | SSetL=%.1f, SSetR=%.1f | SActL=%.1f, SActR=%.1f | EffL=%.2f, EffR=%.2f",
-        dt, pitch_deg, yaw_rate_dps, modeResult.telemetryTargetPitchOffset_deg, modeResult.telemetryTargetAngularVelocity_dps,
+    ESP_LOGV(TAG, "Ctrl Step: dt=%.4f, P=%.1f Yaw=%.1f YawR=%.1f | TgtPO=%.1f, CmdYawR=%.1f, TgtYaw=%.1f, DesYawR=%.1f | SSetL=%.1f, SSetR=%.1f | SActL=%.1f, SActR=%.1f | EffL=%.2f, EffR=%.2f",
+        dt, pitch_deg, yaw_deg, yaw_rate_dps, modeResult.telemetryTargetPitchOffset_deg, modeResult.telemetryTargetAngularVelocity_dps,
+        modeResult.telemetryTargetYaw_deg, modeResult.telemetryDesiredYawRate_dps,
         snapshot.speedSetpointLeft_dps, snapshot.speedSetpointRight_dps,
         speedL_dps, speedR_dps, modeResult.effort.left, modeResult.effort.right);
 }
@@ -130,6 +134,7 @@ void RobotController::stopControlLoop() {
 TelemetryDataPoint RobotController::buildTelemetrySnapshot(int64_t timestamp_us,
                                                            int telemetryStateCode,
                                                            float pitch_deg,
+                                                           float yaw_deg,
                                                            float yaw_rate_dps,
                                                            float speedL_dps,
                                                            float speedR_dps,
@@ -142,7 +147,10 @@ TelemetryDataPoint RobotController::buildTelemetrySnapshot(int64_t timestamp_us,
     snapshot.batteryVoltage = m_batteryService.getLatestStatus().voltage;
     snapshot.systemState = telemetryStateCode;
     snapshot.desiredAngle_deg = modeResult.telemetryTargetPitchOffset_deg;
+    snapshot.yawAngle_deg = yaw_deg;
+    snapshot.targetYawAngle_deg = modeResult.telemetryTargetYaw_deg;
     snapshot.yawRate_dps = yaw_rate_dps;
+    snapshot.targetYawRate_dps = modeResult.telemetryDesiredYawRate_dps;
     snapshot.speedSetpointLeft_dps = modeResult.speedSetpointLeft_dps;
     snapshot.speedSetpointRight_dps = modeResult.speedSetpointRight_dps;
 

@@ -38,6 +38,7 @@ ControlModeResult ControlModeExecutor::executeBalancing(const ControlModeInput& 
     result.effort = m_balancingAlgorithm.update(input.dt,
                                                 input.pitch_deg,
                                                 input.pitch_rate_dps,
+                                                input.yaw_deg,
                                                 input.yaw_rate_dps,
                                                 input.speedLeft_dps,
                                                 input.speedRight_dps,
@@ -45,6 +46,8 @@ ControlModeResult ControlModeExecutor::executeBalancing(const ControlModeInput& 
                                                 input.targetAngularVelocity_dps);
     result.telemetryTargetPitchOffset_deg = input.targetPitchOffset_deg;
     result.telemetryTargetAngularVelocity_dps = input.targetAngularVelocity_dps;
+    result.telemetryTargetYaw_deg = m_balancingAlgorithm.getLastTargetYawDeg();
+    result.telemetryDesiredYawRate_dps = m_balancingAlgorithm.getLastDesiredYawRateDPS();
     result.speedSetpointLeft_dps = m_balancingAlgorithm.getLastSpeedSetpointLeftDPS();
     result.speedSetpointRight_dps = m_balancingAlgorithm.getLastSpeedSetpointRightDPS();
     return result;
