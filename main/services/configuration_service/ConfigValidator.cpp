@@ -1,8 +1,10 @@
+#include "MPU6050Profile.hpp"
 #include "ConfigValidator.hpp"
+#include <cmath>
 
 bool ConfigValidator::validate(const ConfigData& config, std::string& error) const {
-    if (config.config_version < 1 || config.config_version > 1000) {
-        error = "config_version out of range (1-1000)";
+    if (config.config_version != 2) {
+        error = "config_version must be 2";
         return false;
     }
     if (config.wifi.ssid.empty() || config.wifi.ssid.length() > 32) {
@@ -52,8 +54,8 @@ bool ConfigValidator::validate(const ConfigData& config, std::string& error) con
         error = "imu.gyro_range out of range (0-3)";
         return false;
     }
-    if (config.imu.dlpf_config < 0 || config.imu.dlpf_config > 7) {
-        error = "imu.dlpf_config out of range (0-7)";
+    if (config.imu.dlpf_config < 0 || config.imu.dlpf_config > 6) {
+        error = "imu.dlpf_config out of range (0-6)";
         return false;
     }
     if (config.imu.sample_rate_divisor < 0 || config.imu.sample_rate_divisor > 255) {
@@ -62,6 +64,11 @@ bool ConfigValidator::validate(const ConfigData& config, std::string& error) con
     }
     if (config.imu.calibration_samples < 10 || config.imu.calibration_samples > 10000) {
         error = "imu.calibration_samples out of range (10-10000)";
+        return false;
+    }
+    if (!std::isfinite(config.imu.gyro_offset_x) || !std::isfinite(config.imu.gyro_offset_y) ||
+        !std::isfinite(config.imu.gyro_offset_z) || !std::isfinite(config.imu.comp_filter_alpha)) {
+        error = "IMU offsets and filter coefficient must be finite";
         return false;
     }
     if (config.imu.comp_filter_alpha < 0.0f || config.imu.comp_filter_alpha > 1.0f) {
@@ -79,8 +86,8 @@ bool ConfigValidator::validate(const ConfigData& config, std::string& error) con
     }
     if (config.encoder.pcnt_high_limit < -32768 || config.encoder.pcnt_high_limit > 32767 ||
         config.encoder.pcnt_low_limit < -32768 || config.encoder.pcnt_low_limit > 32767 ||
-        config.encoder.pcnt_low_limit >= config.encoder.pcnt_high_limit) {
-        error = "encoder.pcnt limits out of range [-32768, 32767] or low >= high";
+        config.encoder.pcnt_low_limit >= 0 || config.encoder.pcnt_high_limit <= 0) {
+        error = "encoder.pcnt limits out of range [-32768, 32767] or limits do not straddle zero";
         return false;
     }
     if (config.encoder.pcnt_filter_ns < 0 || config.encoder.pcnt_filter_ns > 10000) {
@@ -239,18 +246,6 @@ bool ConfigValidator::validate(const ConfigData& config, std::string& error) con
         error = "behavior.battery_read_interval_ms [100,60k]";
         return false;
     }
-    if (config.behavior.imu_health_i2c_fail_threshold < 1 || config.behavior.imu_health_i2c_fail_threshold > 100) {
-        error = "behavior.imu_health_i2c_fail_threshold [1,100]";
-        return false;
-    }
-    if (config.behavior.imu_health_no_data_threshold < 1 || config.behavior.imu_health_no_data_threshold > 100) {
-        error = "behavior.imu_health_no_data_threshold [1,100]";
-        return false;
-    }
-    if (config.behavior.imu_health_data_timeout_ms < 1 || config.behavior.imu_health_data_timeout_ms > 10000) {
-        error = "behavior.imu_health_data_timeout_ms [1,10k]";
-        return false;
-    }
     if (config.dimensions.wheelbase_m <= 0.01f || config.dimensions.wheelbase_m > 1.0f) {
         error = "dimensions.wheelbase_m [0.01, 1.0]";
         return false;
@@ -272,5 +267,14 @@ bool ConfigValidator::validate(const ConfigData& config, std::string& error) con
         return false;
     }
 
+    if (config.behavior.imu_max_sample_age_ms < 10 || config.behavior.imu_max_sample_age_ms > 50 ||
+        config.behavior.imu_reconnect_interval_ms < 250 || config.behavior.imu_reconnect_interval_ms > 10000) {
+        error = "IMU sample age must be 10-50 ms; reconnect interval 250-10000 ms";
+        return false;
+    }
+    if (!MPU6050Profile::timingValid(config.imu, config.behavior.imu_max_sample_age_ms, config.mainLoop.interval_ms)) {
+        error = "IMU sample rate, FIFO threshold, bus speed and control interval exceed freshness/transport budget";
+        return false;
+    }
     return true;
 }

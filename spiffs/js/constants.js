@@ -24,3 +24,8 @@ export const Y_ANGLE_RANGE_DEG = 90;
 export const Y_EFFORT_RANGE = 1.0;
 export const Y_YAW_ANGLE_RANGE_DEG = 180;
 export const Y_YAWRATE_RANGE_DPS = 180;
+
+export const TELEMETRY_FORMAT_VERSION = 3;
+export const TELEMETRY_IMU_VALID_INDEX = 12;
+export const TELEMETRY_IMU_AGE_INDEX = 13;
+export const TELEMETRY_IMU_GENERATION_INDEX = 14;

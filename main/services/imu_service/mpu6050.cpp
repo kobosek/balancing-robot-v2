@@ -67,7 +67,7 @@ esp_err_t MPU6050Driver::readRawGyroXYZ(int16_t& gx, int16_t& gy, int16_t& gz) c
 
 esp_err_t MPU6050Driver::readFifoCount(uint16_t& count) const {
     uint8_t data[2] = {0};
-    esp_err_t ret = readRegisters(MPU6050Register::FIFO_COUNT_H, data, sizeof(data));
+    esp_err_t ret = m_device.readRegisters(static_cast<uint8_t>(MPU6050Register::FIFO_COUNT_H), data, sizeof(data), 2);
     if (ret != ESP_OK) {
         count = 0;
         return ret;
@@ -92,18 +92,6 @@ esp_err_t MPU6050Driver::getInterruptStatus(uint8_t& status) const {
     return readRegisters(MPU6050Register::INTERRUPT_STATUS, &status, 1);
 }
 
-esp_err_t MPU6050Driver::isFIFOOverflow(bool& isOverflow) const {
-    uint8_t status = 0;
-    esp_err_t ret = getInterruptStatus(status);
-    if (ret != ESP_OK) {
-        isOverflow = false;
-        return ret;
-    }
-
-    isOverflow = (status & static_cast<uint8_t>(MPU6050Interrupt::FIFO_OVERFLOW)) != 0;
-    return ESP_OK;
-}
-
 esp_err_t MPU6050Driver::getDeviceID(uint8_t& id) const {
     return readRegisters(MPU6050Register::WHO_AM_I, &id, 1);
 }
@@ -125,19 +113,6 @@ esp_err_t MPU6050Driver::resetSignalPath() {
     return writeRegister(MPU6050Register::USER_CTRL, static_cast<uint8_t>(MPU6050UserControl::SIG_COND_RESET));
 }
 
-esp_err_t MPU6050Driver::performFullFIFOReset() {
-    esp_err_t ret = disableFIFO();
-    if (ret != ESP_OK) {
-        return ret;
-    }
-
-    ret = resetFIFO();
-    if (ret != ESP_OK) {
-        return ret;
-    }
-
-    return resetSignalPath();
-}
 
 esp_err_t MPU6050Driver::readRegisters(MPU6050Register reg, uint8_t* data, size_t len) const {
     return m_device.readRegisters(static_cast<uint8_t>(reg), data, len);

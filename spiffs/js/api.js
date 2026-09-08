@@ -98,6 +98,7 @@ export async function fetchStateApi() {
     } catch (error) {
         console.error('Error fetching state:', error);
         updateCurrentSystemState({
+            imu: { state: 'UNKNOWN', ready: null },
             state_id: -1,
             name: 'ERROR',
             state_name: 'ERROR',

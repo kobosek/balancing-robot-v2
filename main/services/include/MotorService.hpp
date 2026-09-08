@@ -7,7 +7,7 @@
 #include "config/MotorConfig.hpp"
 // #include "esp_log.h" // Moved to .cpp
 #include <memory>
-#include <atomic>
+#include <mutex>
 #include <algorithm>                    // Not needed in header
 #include <cmath>                        // Not needed in header
  // Forward declare event class
@@ -21,7 +21,10 @@ public:
 
     // Declarations only
     esp_err_t init();
-    esp_err_t setMotorEffort(float leftEffort, float rightEffort);
+    esp_err_t setMotorEffort(float leftEffort, float rightEffort, uint64_t armId = 0, uint32_t generation = 0,
+                             int64_t sampleTimestampUs = 0, int64_t maxAgeUs = 0);
+    void inhibitImu(uint64_t armId);
+    bool isArmAllowed(uint64_t armId, uint32_t generation);
 
     // Event handling via EventHandler interface
     void handleEvent(const BaseEvent& event) override;
@@ -40,11 +43,18 @@ private:
     std::unique_ptr<MX1616H_HWDriver> m_hw_driver_left;
     std::unique_ptr<MX1616H_HWDriver> m_hw_driver_right;
 
-    std::atomic<bool> m_enabled{false};
+    // Serializes the enable decision and both motor writes with the stop path.
+    std::mutex m_outputMutex;
+    uint64_t m_armId = 0, m_revokedArm = 0;
+    uint32_t m_generation = 0;
+    bool m_enabled = false; // Protected by m_outputMutex after initialization.
     uint32_t m_pwm_max_duty = 0;
 
     // Event handlers for specific event types
     void handleMotorOutputEnabledChanged(const MOTOR_OutputEnabledChanged& event);
     // Declaration only
     esp_err_t configureLEDCTimer();
+    // Caller holds m_outputMutex; no event publication or sensor operations.
+    esp_err_t writeDutyLocked(uint32_t leftDuty1, uint32_t leftDuty2,
+                              uint32_t rightDuty1, uint32_t rightDuty2);
 };

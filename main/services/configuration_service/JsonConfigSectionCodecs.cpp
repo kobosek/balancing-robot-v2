@@ -304,9 +304,8 @@ cJSON* serializeBehavior(const SystemBehaviorConfig& config) {
     cJSON_AddNumberToObject(obj, "auto_balance_hold_duration_ms", config.auto_balance_hold_duration_ms);
     cJSON_AddNumberToObject(obj, "battery_oversampling_count", config.battery_oversampling_count);
     cJSON_AddNumberToObject(obj, "battery_read_interval_ms", config.battery_read_interval_ms);
-    cJSON_AddNumberToObject(obj, "imu_health_i2c_fail_threshold", config.imu_health_i2c_fail_threshold);
-    cJSON_AddNumberToObject(obj, "imu_health_no_data_threshold", config.imu_health_no_data_threshold);
-    cJSON_AddNumberToObject(obj, "imu_health_data_timeout_ms", config.imu_health_data_timeout_ms);
+    cJSON_AddNumberToObject(obj, "imu_reconnect_interval_ms", config.imu_reconnect_interval_ms);
+    cJSON_AddNumberToObject(obj, "imu_max_sample_age_ms", config.imu_max_sample_age_ms);
     return obj;
 }
 
@@ -337,9 +336,14 @@ bool deserializeBehavior(cJSON* obj, SystemBehaviorConfig& config) {
 
     GET_JSON_NUMBER_INT(obj, "battery_oversampling_count", config.battery_oversampling_count);
     GET_JSON_NUMBER_INT(obj, "battery_read_interval_ms", config.battery_read_interval_ms);
-    GET_JSON_NUMBER_INT(obj, "imu_health_i2c_fail_threshold", config.imu_health_i2c_fail_threshold);
-    GET_JSON_NUMBER_INT(obj, "imu_health_no_data_threshold", config.imu_health_no_data_threshold);
-    GET_JSON_NUMBER_INT(obj, "imu_health_data_timeout_ms", config.imu_health_data_timeout_ms);
+    if (const auto item = cJSON_GetObjectItem(obj, "imu_reconnect_interval_ms")) {
+        if (!cJSON_IsNumber(item) || item->valuedouble != item->valueint) return false;
+        config.imu_reconnect_interval_ms = item->valueint;
+    }
+    if (const auto item = cJSON_GetObjectItem(obj, "imu_max_sample_age_ms")) {
+        if (!cJSON_IsNumber(item) || item->valuedouble != item->valueint) return false;
+        config.imu_max_sample_age_ms = item->valueint;
+    }
     return true;
 }
 

@@ -11,6 +11,7 @@
 #include "esp_timer.h"
 
 // Forward declarations
+class IMUService;
 class BaseEvent;
 class BALANCE_FallDetected;
 class BALANCE_AutoBalanceReady;
@@ -70,6 +71,7 @@ public:
     void markFatalError();
 
     esp_err_t init();
+    void bindImu(IMUService& imu) { m_imu = &imu; }
     // EventHandler interface implementation
     void handleEvent(const BaseEvent& event) override;
     std::string getHandlerName() const override { return TAG; }
@@ -83,6 +85,11 @@ private:
     EventBus& m_eventBus;
     mutable std::recursive_mutex m_mutex;
     SystemState m_currentState;
+    IMUService* m_imu = nullptr;
+    uint64_t m_armId = 0, m_imuRevision = 0;
+    uint32_t m_generation = 0;
+    int64_t m_maxSampleAgeUs = 20000, m_lastStopUs = 0;
+    bool m_calibrationBusy = false;
     bool m_imu_available = false;
     bool m_pending_calibration = false;
     bool m_pending_start = false;

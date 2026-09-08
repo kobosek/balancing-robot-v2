@@ -2,6 +2,8 @@
 // File: main/core/StateManager.cpp
 // ================================================
 #include "StateManager.hpp"
+#include "IMUService.hpp"
+#include "CONTROL_ImuDataInvalid.hpp"
 
 #include "BALANCE_FallDetected.hpp"
 #include "BALANCE_AutoBalanceReady.hpp"
@@ -57,7 +59,7 @@ esp_err_t StateManager::init() {
 
 void StateManager::applyConfig(const SystemBehaviorConfig& behaviorConfig, const BatteryConfig& batteryConfig) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    (void)behaviorConfig;
+    m_maxSampleAgeUs = behaviorConfig.imu_max_sample_age_ms * 1000LL;
     m_criticalBatteryMotorShutdownEnabled = batteryConfig.critical_battery_motor_shutdown_enabled;
 }
 
@@ -82,9 +84,19 @@ void StateManager::markFatalError() {
 
 void StateManager::setState(SystemState newState) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (policy::isMotorActiveState(newState) && newState != m_currentState) {
+        if (m_calibrationBusy || !m_imu || !m_imu_available ||
+            policy::batteryBlocksMotion(m_criticalBatteryMotorShutdownEnabled, m_battery_critical) ||
+            !m_imu->reserveMotion(m_generation)) {
+            ESP_LOGW(TAG, "Start rejected: IMU not ready, busy, stale or policy inhibited");
+            return;
+        }
+    }
     const SystemState previousState = m_currentState;
     bool stateChanged = false;
     if (m_currentState != newState) {
+        ++m_armId;
+        if (!policy::isMotorActiveState(newState)) m_lastStopUs = esp_timer_get_time();
         m_currentState = newState;
         stateChanged = true;
         ESP_LOGI(TAG, "State changed from %d (%s) to %d (%s)",
@@ -105,7 +117,14 @@ void StateManager::setState(SystemState newState) {
 
 void StateManager::handleEvent(const BaseEvent& event) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    if (event.is<BALANCE_FallDetected>()) {
+    if (event.is<CONTROL_ImuDataInvalid>()) {
+        const auto& fault = event.as<CONTROL_ImuDataInvalid>().fault;
+        if (fault.armId != m_armId) return;
+        m_pending_start = false;
+        m_lastStopUs = esp_timer_get_time();
+        if (policy::isMotorActiveState(m_currentState)) setState(SystemState::IDLE);
+        else publishStateDerivedModes();
+    } else if (event.is<BALANCE_FallDetected>()) {
         handleFallDetected(event.as<BALANCE_FallDetected>());
     } else if (event.is<BALANCE_AutoBalanceReady>()) {
         handleAutoBalanceReady(event.as<BALANCE_AutoBalanceReady>());
@@ -171,7 +190,9 @@ void StateManager::handleFallDetected(const BALANCE_FallDetected& event) {
 }
 
 void StateManager::handleAutoBalanceReady(const BALANCE_AutoBalanceReady& event) {
-    (void)event;
+    if (!m_autoBalancingEnabled || m_calibrationBusy || event.generation != m_generation ||
+        event.sampleTimestampUs <= m_lastStopUs || esp_timer_get_time() < event.sampleTimestampUs ||
+        esp_timer_get_time() - event.sampleTimestampUs > m_maxSampleAgeUs) return;
     ESP_LOGI(TAG, "Auto balance ready event received.");
 
     if (!policy::canStartBalancingFrom(m_currentState)) {
@@ -219,7 +240,8 @@ void StateManager::handleStartBalancing(const UI_StartBalancing& event) {
         if (m_currentState == SystemState::FALLEN) {
             setState(SystemState::IDLE);
         }
-        m_pending_start = true;
+        m_pending_start = false;
+        ESP_LOGW(TAG, "Start rejected while IMU unavailable; request again when ready");
         m_eventBus.publish(IMU_AttachRequested());
         return;
     }
@@ -231,7 +253,11 @@ void StateManager::handleStop(const UI_Stop& event) {
     (void)event;
     ESP_LOGI(TAG, "Stop Command Received by StateManager.");
     m_pending_start = false;
-    setState(SystemState::IDLE);
+    m_lastStopUs = esp_timer_get_time();
+    if (m_currentState != SystemState::SHUTDOWN && m_currentState != SystemState::FATAL_ERROR) {
+        setState(SystemState::IDLE);
+        publishStateDerivedModes();
+    }
 }
 
 void StateManager::handleEnableAutoBalancing(const UI_EnableAutoBalancing& event) {
@@ -351,35 +377,39 @@ void StateManager::handleGuidedCalibrationFinished(const GUIDED_CalibrationFinis
 
 void StateManager::handleCalibrationComplete(const IMU_CalibrationCompleted& event) {
     ESP_LOGI(TAG, "Calibration Complete Event Received (Status: %s).", esp_err_to_name(event.status));
-    setState(SystemState::IDLE);
+    m_calibrationBusy = false;
+    publishStateDerivedModes();
 }
 
 void StateManager::handleImuCommunicationError(const IMU_CommunicationError& event) {
     ESP_LOGE(TAG, "IMU communication error: %s (%d)", esp_err_to_name(event.errorCode), event.errorCode);
-    m_pending_start = false;
 
-    if (policy::shouldReturnToIdleOnImuError(m_currentState)) {
-        setState(SystemState::IDLE);
-    }
 }
 
 void StateManager::handleImuAvailabilityChanged(const IMU_AvailabilityChanged& event) {
+    if (event.revision <= m_imuRevision && event.revision != 0) return;
+    if (event.revision == 0 && m_imuRevision != 0) return;
+    m_imuRevision = event.revision;
     m_imu_available = event.available;
-    ESP_LOGI(TAG, "IMU availability changed: %s", m_imu_available ? "available" : "unavailable");
-
-    if (m_imu_available &&
-        m_pending_start &&
-        m_currentState == SystemState::IDLE &&
-        (!m_criticalBatteryMotorShutdownEnabled || !m_battery_critical)) {
+    if (!event.available) {
         m_pending_start = false;
-        setState(SystemState::BALANCING);
+        m_lastStopUs = esp_timer_get_time();
+        if (policy::shouldReturnToIdleOnImuError(m_currentState)) setState(SystemState::IDLE);
     }
+    if (!policy::isMotorActiveState(m_currentState)) m_generation = event.generation;
+    publishBalanceMonitorMode();
+
 }
 
 void StateManager::initiateCalibration(bool force) {
     ESP_LOGI(TAG, "Initiating calibration (force: %s)", force ? "true" : "false");
 
+    if (m_calibrationBusy) return;
+    if (force && policy::isMotorActiveState(m_currentState)) setState(SystemState::IDLE);
     if (policy::shouldRequestCalibrationNow(m_currentState, force)) {
+        m_calibrationBusy = true; // Before dispatch: the request is asynchronous.
+        m_pending_calibration = false;
+        publishOtaUpdatePolicy();
         IMU_CalibrationRequest requestEvent;
         m_eventBus.publish(requestEvent);
         m_pending_calibration = false;
@@ -398,6 +428,8 @@ void StateManager::initiateCalibration(bool force) {
 }
 
 void StateManager::handleCalibrationRejected(const IMU_CalibrationRequestRejected& event) {
+    m_calibrationBusy = false;
+    publishOtaUpdatePolicy();
     ESP_LOGW(TAG, "Calibration was rejected.");
     if (event.retryWhenPossible) {
         m_pending_calibration = true;
@@ -405,11 +437,14 @@ void StateManager::handleCalibrationRejected(const IMU_CalibrationRequestRejecte
 }
 
 void StateManager::publishStateDerivedModes() {
-    publishBalanceMonitorMode();
+    const auto decision = m_armId;
     publishMotorOutputMode();
+    if (decision != m_armId) return;
     publishRoutineRunModes();
-    publishCommandInputMode();
+    if (decision != m_armId) return;
     publishControlRunMode();
+    publishCommandInputMode();
+    publishBalanceMonitorMode();
     publishImuSystemPolicy();
     publishOtaUpdatePolicy();
 }
@@ -417,13 +452,14 @@ void StateManager::publishStateDerivedModes() {
 void StateManager::publishBalanceMonitorMode() {
     BALANCE_MonitorModeChanged event(
         policy::isFallDetectionActive(m_currentState, m_fallDetectionEnabled),
-        policy::isAutoBalancingActive(m_currentState, m_autoBalancingEnabled));
+        policy::isAutoBalancingActive(m_currentState, m_autoBalancingEnabled) && m_imu_available && !m_calibrationBusy);
     m_eventBus.publish(event);
 }
 
 void StateManager::publishMotorOutputMode() {
-    MOTOR_OutputEnabledChanged event(policy::isMotorActiveState(m_currentState));
+    MOTOR_OutputEnabledChanged event(policy::isMotorActiveState(m_currentState), m_armId, m_generation);
     m_eventBus.publish(event);
+    if (!policy::isMotorActiveState(m_currentState) && m_imu) m_imu->releaseMotion();
 }
 
 void StateManager::publishRoutineRunModes() {
@@ -443,7 +479,7 @@ void StateManager::publishControlRunMode() {
     CONTROL_RunModeChanged event(
         policy::controlRunModeFor(m_currentState),
         static_cast<int>(m_currentState),
-        policy::isTelemetryEnabled(m_currentState));
+        policy::isTelemetryEnabled(m_currentState), m_armId, m_generation);
     m_eventBus.publish(event);
 }
 
@@ -456,6 +492,6 @@ void StateManager::publishImuSystemPolicy() {
 }
 
 void StateManager::publishOtaUpdatePolicy() {
-    OTA_UpdatePolicyChanged event(policy::isOtaUpdateAllowed(m_currentState));
+    OTA_UpdatePolicyChanged event(policy::isOtaUpdateAllowed(m_currentState) && !m_calibrationBusy && !m_pending_calibration);
     m_eventBus.publish(event);
 }

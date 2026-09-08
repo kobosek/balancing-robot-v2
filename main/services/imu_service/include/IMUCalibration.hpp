@@ -14,7 +14,8 @@ public:
 
     esp_err_t calibrate(const MPU6050Profile& profile,
                         int calibrationSamples,
-                        std::function<void(int, int)> progressCallback = nullptr);
+                        std::function<void(int, int)> progressCallback = nullptr,
+                        std::function<bool()> canceled = nullptr);
 
     float getGyroOffsetXDPS() const { return m_gyro_offset_dps[0]; }
     float getGyroOffsetYDPS() const { return m_gyro_offset_dps[1]; }

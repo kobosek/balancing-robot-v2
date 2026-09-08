@@ -102,10 +102,12 @@ esp_err_t JsonConfigParser::deserialize(const std::string& input, ConfigData& co
 
     if (!root) {
         const char *error_ptr = cJSON_GetErrorPtr();
-        ESP_LOGE(TAG, "JSON Parse Error: %s", error_ptr ? error_ptr : "Unknown");
+        (void)error_ptr;
+        ESP_LOGE(TAG, "Invalid configuration JSON");
         return ESP_FAIL;
     }
 
+    if (!cJSON_IsObject(root)) return ESP_ERR_INVALID_ARG;
     ConfigData tempConfig; // Start with defaults
     bool pid_success = true;
     bool control_success = true;
@@ -115,11 +117,14 @@ esp_err_t JsonConfigParser::deserialize(const std::string& input, ConfigData& co
 
     // --- Config Version ---
     cJSON *version_item = cJSON_GetObjectItem(root, "config_version");
-    if (version_item && cJSON_IsNumber(version_item)) {
-        tempConfig.config_version = version_item->valueint;
-    } else {
-        ESP_LOGW(TAG, "'config_version' missing or invalid. Using default %d.", tempConfig.config_version);
+    if (version_item && (!cJSON_IsNumber(version_item) ||
+        (version_item->valuedouble != 1 && version_item->valuedouble != 2))) {
+        ESP_LOGE(TAG, "Unsupported config_version (supported: 1, 2)");
+        return ESP_ERR_NOT_SUPPORTED;
     }
+    if (!version_item || version_item->valueint == 1)
+        ESP_LOGI(TAG, "Migrating legacy configuration to version 2 in memory");
+    tempConfig.config_version = 2;
 
     // --- WiFi ---
     cJSON *wifi_section = cJSON_GetObjectItem(root, "wifi");

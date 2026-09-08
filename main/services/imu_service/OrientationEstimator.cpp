@@ -29,68 +29,68 @@ void OrientationEstimator::init(float alpha, float sample_period_s,
                                 float gyro_offset_x_dps,
                                 float gyro_offset_y_dps,
                                 float gyro_offset_z_dps) {
-    m_alpha.store(alpha, std::memory_order_relaxed);
-    m_sample_period_s.store(sample_period_s, std::memory_order_relaxed);
-    m_gyro_offset_x_dps.store(gyro_offset_x_dps, std::memory_order_relaxed);
-    m_gyro_offset_y_dps.store(gyro_offset_y_dps, std::memory_order_relaxed);
-    m_gyro_offset_z_dps.store(gyro_offset_z_dps, std::memory_order_relaxed);
-    m_pitch_deg.store(0.0f, std::memory_order_relaxed);
-    m_pitch_rate_dps.store(0.0f, std::memory_order_relaxed);
-    m_yaw_deg.store(0.0f, std::memory_order_relaxed);
-    m_yaw_rate_dps.store(0.0f, std::memory_order_relaxed);
-    m_pitch_bias_dps.store(0.0f, std::memory_order_relaxed);
-    m_p00.store(1.0f, std::memory_order_relaxed);
-    m_p01.store(0.0f, std::memory_order_relaxed);
-    m_p10.store(0.0f, std::memory_order_relaxed);
-    m_p11.store(1.0f, std::memory_order_relaxed);
-    m_has_estimate.store(false, std::memory_order_relaxed);
+    m_alpha = alpha;
+    m_sample_period_s = sample_period_s;
+    m_gyro_offset_x_dps = gyro_offset_x_dps;
+    m_gyro_offset_y_dps = gyro_offset_y_dps;
+    m_gyro_offset_z_dps = gyro_offset_z_dps;
+    m_pitch_deg = 0.0f;
+    m_pitch_rate_dps = 0.0f;
+    m_yaw_deg = 0.0f;
+    m_yaw_rate_dps = 0.0f;
+    m_pitch_bias_dps = 0.0f;
+    m_p00 = 1.0f;
+    m_p01 = 0.0f;
+    m_p10 = 0.0f;
+    m_p11 = 1.0f;
+    m_has_estimate = false;
     
-    ESP_LOGI(TAG, "Estimator init: accelTrust=%.3f, dt=%.4fs, Offsets(X:%.3f Y:%.3f Z:%.3f)",
+    reset();
+    ESP_LOGD(TAG, "Estimator init: accelTrust=%.3f, dt=%.4fs, Offsets(X:%.3f Y:%.3f Z:%.3f)",
              alpha, sample_period_s, gyro_offset_x_dps, gyro_offset_y_dps, gyro_offset_z_dps);
 }
 
-void OrientationEstimator::updateGyroOffsets(float gyro_offset_x_dps,
-                                             float gyro_offset_y_dps,
-                                             float gyro_offset_z_dps) {
-    m_gyro_offset_x_dps.store(gyro_offset_x_dps, std::memory_order_relaxed);
-    m_gyro_offset_y_dps.store(gyro_offset_y_dps, std::memory_order_relaxed);
-    m_gyro_offset_z_dps.store(gyro_offset_z_dps, std::memory_order_relaxed);
-    m_yaw_deg.store(0.0f, std::memory_order_relaxed);
-    m_pitch_bias_dps.store(0.0f, std::memory_order_relaxed);
-    m_p00.store(1.0f, std::memory_order_relaxed);
-    m_p01.store(0.0f, std::memory_order_relaxed);
-    m_p10.store(0.0f, std::memory_order_relaxed);
-    m_p11.store(1.0f, std::memory_order_relaxed);
-    
-    ESP_LOGI(TAG, "Estimator gyro offsets updated: X:%.3f Y:%.3f Z:%.3f",
-             gyro_offset_x_dps, gyro_offset_y_dps, gyro_offset_z_dps);
-}
-
 void OrientationEstimator::reset() {
-    m_pitch_deg.store(0.0f, std::memory_order_relaxed);
-    m_pitch_rate_dps.store(0.0f, std::memory_order_relaxed);
-    m_yaw_deg.store(0.0f, std::memory_order_relaxed);
-    m_yaw_rate_dps.store(0.0f, std::memory_order_relaxed);
-    m_pitch_bias_dps.store(0.0f, std::memory_order_relaxed);
-    m_p00.store(1.0f, std::memory_order_relaxed);
-    m_p01.store(0.0f, std::memory_order_relaxed);
-    m_p10.store(0.0f, std::memory_order_relaxed);
-    m_p11.store(1.0f, std::memory_order_relaxed);
-    m_has_estimate.store(false, std::memory_order_relaxed);
+    portENTER_CRITICAL(&m_snapshotMux);
+    const auto generation = m_snapshot.generation + 1;
+    const auto sequence = m_snapshot.sample_sequence;
+    const auto lost = m_snapshot.lostSamples;
+    const bool uncertain = m_snapshot.lossCountUncertain || m_snapshot.sample_timestamp_us > 0;
+    m_snapshot = {};
+    m_snapshot.lostSamples = lost;
+    m_snapshot.lossCountUncertain = uncertain;
+    m_snapshot.generation = generation;
+    m_snapshot.sample_sequence = sequence;
+    portEXIT_CRITICAL(&m_snapshotMux);
+    m_pitch_deg = 0.0f;
+    m_pitch_rate_dps = 0.0f;
+    m_yaw_deg = 0.0f;
+    m_yaw_rate_dps = 0.0f;
+    m_pitch_bias_dps = 0.0f;
+    m_p00 = 1.0f;
+    m_p01 = 0.0f;
+    m_p10 = 0.0f;
+    m_p11 = 1.0f;
+    m_has_estimate = false;
     
-    ESP_LOGI(TAG, "Orientation Estimator state reset.");
+    ESP_LOGD(TAG, "Orientation Estimator state reset.");
 }
 
-void OrientationEstimator::processSample(float ax_g, float ay_g, float az_g,
-                                        float raw_gyro_dps_x, float raw_gyro_dps_y, float raw_gyro_dps_z)
+bool OrientationEstimator::processSample(float ax_g, float ay_g, float az_g,
+                                        float raw_gyro_dps_x, float raw_gyro_dps_y, float raw_gyro_dps_z,
+                                        int64_t sampleTimestampUs, uint32_t generation,
+                                        const IMUSampleMetadata& metadata)
 {
+    if (!std::isfinite(ax_g) || !std::isfinite(ay_g) || !std::isfinite(az_g) ||
+        !std::isfinite(raw_gyro_dps_x) || !std::isfinite(raw_gyro_dps_y) || !std::isfinite(raw_gyro_dps_z) ||
+        sampleTimestampUs <= 0 || generation != getOrientation().generation) return false;
     // Suppress unused parameter warning for raw_gyro_dps_x (kept for interface compatibility)
     (void)raw_gyro_dps_x;
-    const float current_pitch_deg_local = m_pitch_deg.load(std::memory_order_relaxed);
-    const float gy_offset_local = m_gyro_offset_y_dps.load(std::memory_order_relaxed);
-    const float gz_offset_local = m_gyro_offset_z_dps.load(std::memory_order_relaxed);
-    const float sample_period_s_local = m_sample_period_s.load(std::memory_order_relaxed);
-    const float alpha_local = m_alpha.load(std::memory_order_relaxed);
+    const float current_pitch_deg_local = m_pitch_deg;
+    const float gy_offset_local = m_gyro_offset_y_dps;
+    const float gz_offset_local = m_gyro_offset_z_dps;
+    const float sample_period_s_local = m_sample_period_s;
+    const float alpha_local = m_alpha;
 
     // Apply gyro offsets (only Y and Z are used in current implementation)
     float gyro_dps_y = raw_gyro_dps_y - gy_offset_local;
@@ -116,18 +116,18 @@ void OrientationEstimator::processSample(float ax_g, float ay_g, float az_g,
          dt = MPU6050Profile::DEFAULT_SAMPLE_PERIOD_S;
      }
 
-    if (accel_pitch_valid && !m_has_estimate.load(std::memory_order_relaxed)) {
-        m_pitch_deg.store(accel_pitch_deg, std::memory_order_relaxed);
-        m_has_estimate.store(true, std::memory_order_relaxed);
+    if (accel_pitch_valid && !m_has_estimate) {
+        m_pitch_deg = accel_pitch_deg;
+        m_has_estimate = true;
     }
 
-    float angle_deg = m_pitch_deg.load(std::memory_order_relaxed);
-    float bias_dps = m_pitch_bias_dps.load(std::memory_order_relaxed);
-    float yaw_deg = m_yaw_deg.load(std::memory_order_relaxed);
-    float p00 = m_p00.load(std::memory_order_relaxed);
-    float p01 = m_p01.load(std::memory_order_relaxed);
-    float p10 = m_p10.load(std::memory_order_relaxed);
-    float p11 = m_p11.load(std::memory_order_relaxed);
+    float angle_deg = m_pitch_deg;
+    float bias_dps = m_pitch_bias_dps;
+    float yaw_deg = m_yaw_deg;
+    float p00 = m_p00;
+    float p01 = m_p01;
+    float p10 = m_p10;
+    float p11 = m_p11;
 
     const float unbiased_rate_dps = gyro_dps_y - bias_dps;
     angle_deg += dt * unbiased_rate_dps;
@@ -174,49 +174,70 @@ void OrientationEstimator::processSample(float ax_g, float ay_g, float az_g,
     float latest_yaw_rate_dps = gyro_dps_z;
     yaw_deg += dt * latest_yaw_rate_dps;
 
-    m_pitch_deg.store(angle_deg, std::memory_order_relaxed);
-    m_pitch_rate_dps.store(latest_pitch_rate_dps, std::memory_order_relaxed);
-    m_yaw_deg.store(yaw_deg, std::memory_order_relaxed);
-    m_yaw_rate_dps.store(latest_yaw_rate_dps, std::memory_order_relaxed);
-    m_pitch_bias_dps.store(bias_dps, std::memory_order_relaxed);
-    m_p00.store(p00, std::memory_order_relaxed);
-    m_p01.store(p01, std::memory_order_relaxed);
-    m_p10.store(p10, std::memory_order_relaxed);
-    m_p11.store(p11, std::memory_order_relaxed);
+    m_pitch_deg = angle_deg;
+    m_pitch_rate_dps = latest_pitch_rate_dps;
+    m_yaw_deg = yaw_deg;
+    m_yaw_rate_dps = latest_yaw_rate_dps;
+    m_pitch_bias_dps = bias_dps;
+    m_p00 = p00;
+    m_p01 = p01;
+    m_p10 = p10;
+    m_p11 = p11;
 
-    ESP_LOGV(TAG, "Processed Sample: Acc(%.2f,%.2f,%.2f) RawGyro(%.2f,%.2f,%.2f) -> P:%.2f PR:%.2f Bias:%.3f YawR:%.2f",
-             ax_g, ay_g, az_g, raw_gyro_dps_x, raw_gyro_dps_y, raw_gyro_dps_z,
-             angle_deg, latest_pitch_rate_dps, bias_dps, latest_yaw_rate_dps);
+    if (!m_has_estimate || !std::isfinite(angle_deg) || !std::isfinite(yaw_deg) ||
+        !std::isfinite(latest_pitch_rate_dps) || !std::isfinite(latest_yaw_rate_dps)) return false;
+    portENTER_CRITICAL(&m_snapshotMux);
+    if (m_snapshot.generation != generation) {
+        portEXIT_CRITICAL(&m_snapshotMux);
+        return false;
+    }
+    m_snapshot.ax_g = ax_g;
+    m_snapshot.ay_g = ay_g;
+    m_snapshot.az_g = az_g;
+    m_snapshot.saturationMask = metadata.saturationMask;
+    m_snapshot.fifoRemainingPackets = metadata.fifoRemainingPackets;
+    m_snapshot.fifoState = metadata.fifoRemainingPackets ? SensorFIFOState::BACKLOG : SensorFIFOState::STREAMING;
+    m_snapshot.pitch_deg = angle_deg;
+    m_snapshot.pitch_rate_dps = latest_pitch_rate_dps;
+    m_snapshot.yaw_deg = yaw_deg;
+    m_snapshot.yaw_rate_dps = latest_yaw_rate_dps;
+    m_snapshot.sample_timestamp_us = std::max(sampleTimestampUs, m_snapshot.sample_timestamp_us + 1);
+    ++m_snapshot.sample_sequence;
+    portEXIT_CRITICAL(&m_snapshotMux);
+    return true;
 }
 
-float OrientationEstimator::getPitchDeg() const {
-    return m_pitch_deg.load(std::memory_order_relaxed);
+void OrientationEstimator::recordFifoLoss(uint64_t knownDiscarded, bool uncertain) {
+    portENTER_CRITICAL(&m_snapshotMux);
+    m_snapshot.lostSamples += knownDiscarded;
+    m_snapshot.lossCountUncertain |= uncertain;
+    m_snapshot.fifoState = SensorFIFOState::DISCONTINUITY;
+    m_snapshot.valid = false;
+    portEXIT_CRITICAL(&m_snapshotMux);
 }
 
-float OrientationEstimator::getPitchRateDPS() const {
-    return m_pitch_rate_dps.load(std::memory_order_relaxed);
+void OrientationEstimator::setValidated() {
+    portENTER_CRITICAL(&m_snapshotMux);
+    m_snapshot.valid = m_snapshot.sample_timestamp_us > 0;
+    portEXIT_CRITICAL(&m_snapshotMux);
 }
 
-float OrientationEstimator::getYawDeg() const {
-    return m_yaw_deg.load(std::memory_order_relaxed);
-}
+float OrientationEstimator::getPitchDeg() const { return getOrientation().pitch_deg; }
 
-float OrientationEstimator::getYawRateDPS() const {
-    return m_yaw_rate_dps.load(std::memory_order_relaxed);
-}
+float OrientationEstimator::getPitchRateDPS() const { return getOrientation().pitch_rate_dps; }
+
+float OrientationEstimator::getYawDeg() const { return getOrientation().yaw_deg; }
+
+float OrientationEstimator::getYawRateDPS() const { return getOrientation().yaw_rate_dps; }
 
 OrientationEstimate OrientationEstimator::getOrientation() const {
-    return {
-        m_pitch_deg.load(std::memory_order_relaxed),
-        m_pitch_rate_dps.load(std::memory_order_relaxed),
-        m_yaw_deg.load(std::memory_order_relaxed),
-        m_yaw_rate_dps.load(std::memory_order_relaxed)
-    };
+    portENTER_CRITICAL(&m_snapshotMux);
+    const auto snapshot = m_snapshot;
+    portEXIT_CRITICAL(&m_snapshotMux);
+    return snapshot;
 }
 
 std::pair<float, float> OrientationEstimator::getPitchAndYawRate() const {
-    return {
-        m_pitch_deg.load(std::memory_order_relaxed),
-        m_yaw_rate_dps.load(std::memory_order_relaxed)
-    };
+    const auto snapshot = getOrientation();
+    return {snapshot.pitch_deg, snapshot.yaw_rate_dps};
 }

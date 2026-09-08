@@ -8,7 +8,6 @@
 
 namespace {
 constexpr const char* TAG = "MPU6050HwCtrl";
-constexpr uint32_t SAFE_I2C_FREQUENCY_HZ = 100000;
 constexpr TickType_t DEVICE_RESET_DELAY_TICKS = pdMS_TO_TICKS(100);
 constexpr TickType_t CLOCK_SETTLE_DELAY_TICKS = pdMS_TO_TICKS(30);
 }
@@ -36,14 +35,6 @@ esp_err_t MPU6050HardwareController::connectAndConfigure(const MPU6050Config& co
         }
 
         profile = MPU6050Profile::fromConfig(config);
-        if (profile.sampleRateLimitedByTransport) {
-            ESP_LOGW(
-                TAG,
-                "Limiting MPU sample rate divisor from %u to %u for %lu Hz I2C",
-                static_cast<unsigned>(config.sample_rate_divisor & 0xFF),
-                static_cast<unsigned>(static_cast<uint8_t>(profile.sampleRateDivReg)),
-                static_cast<unsigned long>(i2cFrequencyHz));
-        }
         ret = applyConfiguration(config, profile);
         if (ret != ESP_OK) {
             m_i2cDevice.close();
@@ -51,18 +42,7 @@ esp_err_t MPU6050HardwareController::connectAndConfigure(const MPU6050Config& co
         return ret;
     };
 
-    esp_err_t ret = tryConnectAtFrequency(config.i2c_freq_hz);
-    if (ret == ESP_OK || config.i2c_freq_hz <= SAFE_I2C_FREQUENCY_HZ) {
-        return ret;
-    }
-
-    ESP_LOGW(
-        TAG,
-        "IMU attach failed at %lu Hz (%s), retrying at %lu Hz",
-        static_cast<unsigned long>(config.i2c_freq_hz),
-        esp_err_to_name(ret),
-        static_cast<unsigned long>(SAFE_I2C_FREQUENCY_HZ));
-    return tryConnectAtFrequency(SAFE_I2C_FREQUENCY_HZ);
+    return tryConnectAtFrequency(config.i2c_freq_hz);
 }
 
 esp_err_t MPU6050HardwareController::applyConfiguration(const MPU6050Config& config, const MPU6050Profile& profile) {
@@ -101,16 +81,23 @@ esp_err_t MPU6050HardwareController::applyConfiguration(const MPU6050Config& con
         ret = clearFifoState();
     }
 
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "IMU configuration failed (%s), resetting sensor", esp_err_to_name(ret));
-        (void)m_driver.resetSensor();
+    if (ret == ESP_OK) {
+        const uint8_t registers[] = {0x19, 0x1a, 0x1b, 0x1c, 0x6b};
+        const uint8_t expected[] = {static_cast<uint8_t>(profile.sampleRateDivReg),
+            static_cast<uint8_t>(profile.dlpfReg), static_cast<uint8_t>(profile.gyroRangeReg),
+            static_cast<uint8_t>(profile.accelRangeReg), 0x01};
+        for (unsigned i = 0; i < sizeof(registers); ++i) {
+            uint8_t value = 0;
+            ret = m_i2cDevice.readRegisters(registers[i], &value, 1);
+            if (ret != ESP_OK) break;
+            if (value != expected[i]) { ret = ESP_ERR_INVALID_RESPONSE; break; }
+        }
     }
-
     return ret;
 }
 
-void MPU6050HardwareController::disconnect() {
-    m_i2cDevice.close();
+esp_err_t MPU6050HardwareController::disconnect() {
+    return m_i2cDevice.close();
 }
 
 esp_err_t MPU6050HardwareController::probeSensor() const {

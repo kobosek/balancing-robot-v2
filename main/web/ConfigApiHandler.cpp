@@ -85,9 +85,10 @@ esp_err_t ConfigApiHandler::handlePostRequest(httpd_req_t *req) {
         }
     }
     buf[recv_len] = '\0';
-    ESP_LOGD(TAG, "Received JSON: %s", buf);
 
-    esp_err_t ret = m_configService.updateConfigFromJson(std::string(buf));
+
+    std::string validationError;
+    esp_err_t ret = m_configService.updateConfigFromJson(std::string(buf), &validationError);
     if (ret == ESP_OK) {
         ESP_LOGI(TAG, "Config updated via POST.");
         httpd_resp_set_type(req, "application/json");
@@ -95,6 +96,7 @@ esp_err_t ConfigApiHandler::handlePostRequest(httpd_req_t *req) {
         return ESP_OK;
     } else {
         ESP_LOGE(TAG, "Config update failed (err: %s)", esp_err_to_name(ret));
+        if (!validationError.empty()) return sendHttpError(req, HTTPD_400_BAD_REQUEST, validationError.c_str());
         // Provide a slightly more specific error message if possible
         if (ret == ESP_FAIL) { // Assuming ESP_FAIL is used for validation errors by ConfigurationService
              return sendHttpError(req, HTTPD_400_BAD_REQUEST, "Invalid config data provided");

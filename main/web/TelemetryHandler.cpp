@@ -14,6 +14,7 @@
 #include <algorithm> // For std::max
 #include <cstdio>
 #include <string>
+#include <cmath>
 
 // Constructor takes initial WebServerConfig
 TelemetryHandler::TelemetryHandler(const WebServerConfig& initialWebConfig) :
@@ -79,30 +80,38 @@ esp_err_t TelemetryHandler::handleRequest(httpd_req_t *req) {
             m_telemetryBuffer.clear();
         }
 
-        json.reserve(12 + dataToSend.size() * 144);
-        json = "{\"data\":[";
+        json.reserve(32 + dataToSend.size() * 180);
+        json = "{\"format_version\":3,\"data\":[";
 
-        char pointBuffer[256];
+        char pointBuffer[512];
         bool format_failed = false;
         for (size_t i = 0; i < dataToSend.size(); ++i) {
             const auto& point = dataToSend[i];
+            const auto finite = [](float value) { return std::isfinite(value) ? static_cast<double>(value) : 0.0; };
+            char age[32] = "null";
+            if (std::isfinite(point.imuAgeMs) && point.imuAgeMs >= 0)
+                std::snprintf(age, sizeof(age), "%.3f", static_cast<double>(point.imuAgeMs));
             const int written = std::snprintf(
                 pointBuffer,
                 sizeof(pointBuffer),
-                "%s[%.3f,%.3f,%.3f,%.3f,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f]",
+                "%s[%.3f,%.3f,%.3f,%.3f,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%s,%s,%lu,%s,%s,%s]",
                 i == 0 ? "" : ",",
-                static_cast<double>(point.pitch_deg),
-                static_cast<double>(point.speedLeft_dps),
-                static_cast<double>(point.speedRight_dps),
-                static_cast<double>(point.batteryVoltage),
+                finite(point.pitch_deg),
+                finite(point.speedLeft_dps),
+                finite(point.speedRight_dps),
+                finite(point.batteryVoltage),
                 point.systemState,
-                static_cast<double>(point.speedSetpointLeft_dps),
-                static_cast<double>(point.speedSetpointRight_dps),
-                static_cast<double>(point.desiredAngle_deg),
-                static_cast<double>(point.yawAngle_deg),
-                static_cast<double>(point.targetYawAngle_deg),
-                static_cast<double>(point.yawRate_dps),
-                static_cast<double>(point.targetYawRate_dps));
+                finite(point.speedSetpointLeft_dps),
+                finite(point.speedSetpointRight_dps),
+                finite(point.desiredAngle_deg),
+                finite(point.yawAngle_deg),
+                finite(point.targetYawAngle_deg),
+                finite(point.yawRate_dps),
+                finite(point.targetYawRate_dps), point.imuValid ? "true" : "false", age,
+                static_cast<unsigned long>(point.imuGeneration),
+                point.encoderLeftValid ? "true" : "false",
+                point.encoderRightValid ? "true" : "false",
+                point.imuSampleRepeated ? "true" : "false");
             if (written < 0 || written >= static_cast<int>(sizeof(pointBuffer))) {
                 ESP_LOGE(TAG, "Failed format telemetry point");
                 format_failed = true;

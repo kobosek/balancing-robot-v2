@@ -29,9 +29,11 @@ struct OTAStatus {
     std::string message;
 };
 
+class IMUService;
 class OTAService : public EventHandler {
 public:
     esp_err_t init();
+    void bindImu(IMUService& imu) { m_imu = &imu; }
 
     void handleEvent(const BaseEvent& event) override;
     std::string getHandlerName() const override { return TAG; }
@@ -48,6 +50,7 @@ private:
     static constexpr const char* TAG = "OTAService";
     static constexpr const char* SPIFFS_PARTITION_LABEL = "storage";
 
+    IMUService* m_imu = nullptr;
     mutable std::mutex m_mutex;
     const esp_partition_t* m_runningPartition = nullptr;
     const esp_partition_t* m_updatePartition = nullptr;

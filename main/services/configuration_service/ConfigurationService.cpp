@@ -55,14 +55,7 @@ esp_err_t ConfigurationService::init() {
     if (useDefaults) {
         ESP_LOGW(TAG, "%s. Using default values.", reasonForDefaults.c_str());
         m_configData = ConfigData(); // Re-assign defaults
-        ESP_LOGW(TAG, "Attempting to save default configuration (Version: %d) to storage...", m_configData.config_version);
-        esp_err_t save_ret = saveInternal(); // Attempt to save defaults
-        if (save_ret != ESP_OK) {
-           ESP_LOGE(TAG, "Failed to save default configuration to '%s'.", m_configKey.c_str());
-           // This might be serious, but we continue with defaults in memory
-        } else {
-            ESP_LOGI(TAG, "Default configuration saved successfully.");
-        }
+        ESP_LOGW(TAG, "Stored configuration preserved; defaults are in memory only.");
     }
 
     // Publish initial config state regardless of load source
@@ -83,16 +76,18 @@ esp_err_t ConfigurationService::save() {
     return saveInternal();
 }
 
-esp_err_t ConfigurationService::updateConfigFromJson(const std::string& json) {
+esp_err_t ConfigurationService::updateConfigFromJson(const std::string& json, std::string* error) {
     ConfigData tempConfig; // Create a temporary config to parse into
     esp_err_t ret = m_configParser.deserialize(json, tempConfig);
     if (ret != ESP_OK) {
+        if (error) *error = ret == ESP_ERR_NOT_SUPPORTED ? "Unsupported config_version; supported versions are 1 and 2" : "Invalid configuration JSON or field type";
         ESP_LOGE(TAG, "Failed to deserialize JSON for update: %s", esp_err_to_name(ret));
         return ret;
     }
 
     std::string validationError;
     if (!m_configValidator.validate(tempConfig, validationError)) {
+        if (error) *error = validationError;
         ESP_LOGE(TAG, "Validation failed for config update: %s", validationError.c_str());
         return ESP_FAIL; // Return specific validation failure (maybe a different error code?)
     }

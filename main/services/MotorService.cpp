@@ -4,9 +4,9 @@
 #include "MX1616H_HWDriver.hpp"         // Found via INCLUDE_DIRS (needed for make_unique)
 #include "BaseEvent.hpp"                // Found via INCLUDE_DIRS (needed for handle state change)
 #include "esp_check.h"
+#include "esp_timer.h"
 #include "driver/ledc.h"
 #include <cmath>
-#include <mutex> // <<< ADDED: Needed if accessing state concurrently
 #include <algorithm>
 #include "esp_log.h"                    // Moved from header
 #include <memory>                        // Moved from header
@@ -113,13 +113,16 @@ esp_err_t MotorService::configureLEDCTimer() {
     return ESP_OK;
 }
 
-esp_err_t MotorService::setMotorEffort(float leftEffort, float rightEffort) {
-    // (Implementation remains the same)
+esp_err_t MotorService::setMotorEffort(float leftEffort, float rightEffort, uint64_t armId, uint32_t generation,
+                                        int64_t sampleTimestampUs, int64_t maxAgeUs) {
+    const bool finite = std::isfinite(leftEffort) && std::isfinite(rightEffort);
+    if (!finite) {
+        leftEffort = rightEffort = 0.0f;
+    }
     leftEffort = std::max(-1.0f, std::min(1.0f, leftEffort));
     rightEffort = std::max(-1.0f, std::min(1.0f, rightEffort));
     uint32_t leftDuty1 = 0, leftDuty2 = 0, rightDuty1 = 0, rightDuty2 = 0;
-    const bool enabled = m_enabled.load();
-    if (enabled) {
+    {
         if (std::fabs(leftEffort) > 1e-3) {
             float mag = std::fabs(leftEffort);
             uint32_t effective_max_duty = m_pwm_max_duty;
@@ -139,26 +142,61 @@ esp_err_t MotorService::setMotorEffort(float leftEffort, float rightEffort) {
              if (rightEffort > 0) { rightDuty1 = dutyMag; } else { rightDuty2 = dutyMag; }
         }
     }
-    ESP_LOGV(TAG, "Set Effort: L=%.2f R=%.2f => Raw Duty L(%lu,%lu) R(%lu,%lu) | Enabled:%d", leftEffort, rightEffort, leftDuty1, leftDuty2, rightDuty1, rightDuty2, enabled);
-    esp_err_t ret_l = ESP_FAIL, ret_r = ESP_FAIL;
-    if (m_hw_driver_left) { ret_l = m_hw_driver_left->setRawDuty(leftDuty1, leftDuty2); if (ret_l != ESP_OK) ESP_LOGE(TAG, "Failed set left motor duty: %s", esp_err_to_name(ret_l)); } else { ESP_LOGE(TAG, "Left HW Driver null!"); }
-    if (m_hw_driver_right) { ret_r = m_hw_driver_right->setRawDuty(rightDuty1, rightDuty2); if (ret_r != ESP_OK) ESP_LOGE(TAG, "Failed set right motor duty: %s", esp_err_to_name(ret_r)); } else { ESP_LOGE(TAG, "Right HW Driver null!"); }
-    return (ret_l == ESP_OK && ret_r == ESP_OK) ? ESP_OK : ESP_FAIL;
+    esp_err_t result;
+    bool expired = false;
+    {
+        std::lock_guard<std::mutex> lock(m_outputMutex);
+        const auto now = esp_timer_get_time();
+        expired = maxAgeUs > 0 && (sampleTimestampUs <= 0 || now < sampleTimestampUs || now - sampleTimestampUs > maxAgeUs);
+        if (expired) { m_revokedArm = std::max(m_revokedArm, armId); if (m_armId <= m_revokedArm) m_enabled = false; }
+        if (!finite) { m_revokedArm = std::max(m_revokedArm, m_armId); m_enabled = false; }
+        if (!m_enabled || armId != m_armId || generation != m_generation || armId <= m_revokedArm) {
+            leftDuty1 = leftDuty2 = rightDuty1 = rightDuty2 = 0;
+        }
+        result = writeDutyLocked(leftDuty1, leftDuty2, rightDuty1, rightDuty2);
+    }
+    return result != ESP_OK ? result : (expired ? ESP_ERR_TIMEOUT : (finite ? ESP_OK : ESP_ERR_INVALID_ARG));
+}
+
+esp_err_t MotorService::writeDutyLocked(uint32_t leftDuty1, uint32_t leftDuty2,
+                                        uint32_t rightDuty1, uint32_t rightDuty2) {
+    // Always attempt both sides, including when one driver reports an error.
+    const esp_err_t leftResult = m_hw_driver_left
+        ? m_hw_driver_left->setRawDuty(leftDuty1, leftDuty2) : ESP_ERR_INVALID_STATE;
+    const esp_err_t rightResult = m_hw_driver_right
+        ? m_hw_driver_right->setRawDuty(rightDuty1, rightDuty2) : ESP_ERR_INVALID_STATE;
+    return leftResult != ESP_OK ? leftResult : rightResult;
 }
 
 void MotorService::handleMotorOutputEnabledChanged(const MOTOR_OutputEnabledChanged& event) {
-    const bool should_be_enabled = event.enabled;
-
-    const bool was_enabled = m_enabled.load();
-    if (should_be_enabled && !was_enabled) {
-        ESP_LOGI(TAG, "Enabling motors."); 
-        m_enabled.store(true);
-    } else if (!should_be_enabled && was_enabled) {
-        ESP_LOGI(TAG, "Disabling motors."); 
-        m_enabled.store(false);
-        esp_err_t stop_ret = setMotorEffort(0.0f, 0.0f); 
-        if(stop_ret != ESP_OK) { 
-            ESP_LOGE(TAG, "Failed stop motors!"); 
-        } 
+    esp_err_t stopResult = ESP_OK;
+    {
+        std::lock_guard<std::mutex> lock(m_outputMutex);
+        if (event.armId < m_armId) return;
+        m_armId = event.armId;
+        m_generation = event.generation;
+        if (!event.enabled) m_revokedArm = std::max(m_revokedArm, event.armId);
+        m_enabled = event.enabled && event.armId > m_revokedArm;
+        if (!m_enabled) {
+            // Repeat the zero write even for an already-disabled state, so a
+            // previous failed stop can be retried. Do not recursively lock.
+            stopResult = writeDutyLocked(0, 0, 0, 0);
+        }
     }
+    if (stopResult != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to stop motors: %s", esp_err_to_name(stopResult));
+    }
+}
+
+void MotorService::inhibitImu(uint64_t armId) {
+    std::lock_guard<std::mutex> lock(m_outputMutex);
+    m_revokedArm = std::max(m_revokedArm, armId);
+    if (m_armId <= m_revokedArm) {
+        m_enabled = false;
+        (void)writeDutyLocked(0, 0, 0, 0);
+    }
+}
+bool MotorService::isArmAllowed(uint64_t armId, uint32_t generation) {
+    std::lock_guard<std::mutex> lock(m_outputMutex);
+    return m_enabled && armId == m_armId && generation == m_generation && armId > m_revokedArm;
 }

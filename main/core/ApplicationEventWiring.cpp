@@ -16,6 +16,7 @@
 #include "CONFIG_PidConfigUpdate.hpp"
 #include "COMMAND_InputModeChanged.hpp"
 #include "CONTROL_RunModeChanged.hpp"
+#include "CONTROL_ImuDataInvalid.hpp"
 #include "ConfigurationService.hpp"
 #include "EventBus.hpp"
 #include "EventHandler.hpp"
@@ -75,7 +76,7 @@ esp_err_t ApplicationEventWiring::wire(const ApplicationContext& context) const
                        UI_JoystickInput,
                        CONFIG_FullConfigUpdate>(asHandler(context.commandProcessorHandle()));
     eventBus.subscribe<CONFIG_FullConfigUpdate, CONFIG_PidConfigUpdate>(asHandler(context.balancingAlgorithmHandle()));
-    eventBus.subscribe<IMU_OrientationData,
+    eventBus.subscribe<IMU_OrientationData, IMU_AvailabilityChanged,
                        BALANCE_MonitorModeChanged,
                        CONFIG_BehaviorConfigUpdate>(asHandler(context.balanceMonitorHandle()));
     eventBus.subscribe<MOTOR_OutputEnabledChanged>(asHandler(context.motorServiceHandle()));
@@ -108,7 +109,7 @@ esp_err_t ApplicationEventWiring::wire(const ApplicationContext& context) const
                        GUIDED_CalibrationFinished,
                        IMU_CalibrationCompleted,
                        IMU_CalibrationRequestRejected,
-                       IMU_CommunicationError,
+                       CONTROL_ImuDataInvalid,
                        IMU_AvailabilityChanged,
                        CONFIG_FullConfigUpdate>(asHandler(context.stateManagerHandle()));
     eventBus.subscribe<IMU_GyroOffsetsUpdated>(asHandler(context.configServiceHandle()));
@@ -116,8 +117,8 @@ esp_err_t ApplicationEventWiring::wire(const ApplicationContext& context) const
                        CONFIG_BehaviorConfigUpdate,
                        IMU_CalibrationRequest,
                        IMU_AttachRequested,
-                       IMU_SystemPolicyChanged>(asHandler(context.imuServiceHandle()));
-    eventBus.subscribe<MOTION_TargetMovement,
+                       IMU_SystemPolicyChanged, UI_Stop>(asHandler(context.imuServiceHandle()));
+    eventBus.subscribe<MOTION_TargetMovement, CONFIG_BehaviorConfigUpdate,
                        CONTROL_RunModeChanged>(asHandler(context.robotControllerHandle()));
     eventBus.subscribe<OTA_UpdatePolicyChanged>(asHandler(context.otaServiceHandle()));
     eventBus.subscribe<CONFIG_FullConfigUpdate, TELEMETRY_Snapshot>(asHandler(context.webServerHandle()));

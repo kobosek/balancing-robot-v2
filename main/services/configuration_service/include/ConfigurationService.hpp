@@ -21,7 +21,7 @@ public:
 
     esp_err_t init();
     esp_err_t save();
-    esp_err_t updateConfigFromJson(const std::string& json);
+    esp_err_t updateConfigFromJson(const std::string& json, std::string* error = nullptr);
     esp_err_t applyPidConfig(const std::string& pidName, const PIDConfig& config, bool persist);
     esp_err_t getJsonString(std::string& jsonOutput) const;
 

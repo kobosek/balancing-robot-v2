@@ -1,5 +1,7 @@
 // main/web/StateApiHandler.cpp
 #include "StateApiHandler.hpp"
+#include "IMUService.hpp"
+#include "esp_timer.h"
 #include "StateManager.hpp"
 #include "BatteryService.hpp"
 #include "PidTuningService.hpp"
@@ -19,8 +21,8 @@ StateApiHandler::StateApiHandler(StateManager& stateManager,
                                  PidTuningService& pidTuningService,
                                  GuidedCalibrationService& guidedCalibrationService,
                                  ConfigurationService& configService,
-                                 OTAService& otaService)
-    : m_stateManager(stateManager),
+                                 OTAService& otaService, IMUService& imuService)
+    : m_imuService(imuService), m_stateManager(stateManager),
       m_batteryService(batteryService),
       m_pidTuningService(pidTuningService),
       m_guidedCalibrationService(guidedCalibrationService),
@@ -153,6 +155,30 @@ esp_err_t StateApiHandler::handleRequest(httpd_req_t *req) {
     cJSON_AddBoolToObject(root, "battery_is_low", batteryStatus.isLow);
     cJSON_AddBoolToObject(root, "battery_is_critical", batteryStatus.isCritical);
     cJSON_AddBoolToObject(root, "battery_adc_calibrated", batteryStatus.adcCalibrated);
+
+    const auto imu = m_imuService.getStatusSnapshot();
+    cJSON* imuObj = cJSON_AddObjectToObject(root, "imu");
+    if (imuObj) {
+        cJSON_AddStringToObject(imuObj, "state", imu.state);
+        cJSON_AddBoolToObject(imuObj, "ready", imu.ready);
+        cJSON_AddBoolToObject(imuObj, "busy", imu.busy);
+        cJSON_AddBoolToObject(imuObj, "configuration_pending", imu.configurationPending);
+        cJSON_AddNumberToObject(imuObj, "generation", imu.generation);
+        cJSON_AddNumberToObject(imuObj, "revision", imu.revision);
+        if (imu.sampleTimestampUs > 0)
+            cJSON_AddNumberToObject(imuObj, "sample_age_ms", (esp_timer_get_time() - imu.sampleTimestampUs) / 1000.0);
+        else cJSON_AddNullToObject(imuObj, "sample_age_ms");
+        cJSON_AddNumberToObject(imuObj, "last_error", imu.lastError);
+        cJSON_AddNumberToObject(imuObj, "last_reason", static_cast<unsigned>(imu.lastReason));
+        cJSON_AddNumberToObject(imuObj, "state_changed_us", imu.stateChangedUs);
+        cJSON_AddNumberToObject(imuObj, "transport_errors", imu.transportErrors);
+        cJSON_AddNumberToObject(imuObj, "fifo_resyncs", imu.fifoResyncs);
+        cJSON_AddNumberToObject(imuObj, "reconnect_attempts", imu.reconnectAttempts);
+        cJSON_AddNumberToObject(imuObj, "reconnect_successes", imu.reconnectSuccesses);
+        cJSON_AddNumberToObject(imuObj, "irq_fallbacks", imu.irqFallbacks);
+        cJSON_AddNumberToObject(imuObj, "bus_frequency_hz", imu.busFrequencyHz);
+        cJSON_AddNumberToObject(imuObj, "sample_rate_hz", imu.samplePeriodUs ? 1000000.0 / imu.samplePeriodUs : 0);
+    }
 
     cJSON* otaObj = cJSON_AddObjectToObject(root, "ota");
     if (otaObj) {

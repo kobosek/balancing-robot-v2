@@ -1,4 +1,5 @@
 #include "OTAService.hpp"
+#include "IMUService.hpp"
 
 #include "BaseEvent.hpp"
 #include "OTA_UpdatePolicyChanged.hpp"
@@ -97,12 +98,18 @@ esp_err_t OTAService::begin(size_t expectedSize) {
 
 esp_err_t OTAService::beginAppUpdate(size_t expectedSize) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    return beginAppUpdateLocked(expectedSize);
+    if (!m_status.updateAllowed || !m_imu || !m_imu->reserveOta()) return ESP_ERR_INVALID_STATE;
+    const auto result = beginAppUpdateLocked(expectedSize);
+    if (result != ESP_OK && !m_status.updateInProgress && !m_bundleSpiffsReady) m_imu->releaseOta();
+    return result;
 }
 
 esp_err_t OTAService::beginSpiffsUpdate(size_t expectedSize) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    return beginSpiffsUpdateLocked(expectedSize);
+    if (!m_status.updateAllowed || !m_imu || !m_imu->reserveOta()) return ESP_ERR_INVALID_STATE;
+    const auto result = beginSpiffsUpdateLocked(expectedSize);
+    if (result != ESP_OK && !m_status.updateInProgress && !m_bundleSpiffsReady) m_imu->releaseOta();
+    return result;
 }
 
 esp_err_t OTAService::beginAppUpdateLocked(size_t expectedSize) {
@@ -317,4 +324,5 @@ void OTAService::abort() {
         m_status.message = "OTA upload aborted";
     }
     m_status.activeTarget = "none";
+    if (m_imu) m_imu->releaseOta();
 }

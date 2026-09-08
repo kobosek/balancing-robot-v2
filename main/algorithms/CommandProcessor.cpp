@@ -149,7 +149,7 @@ void CommandProcessor::handleInputModeChange(const COMMAND_InputModeChanged& eve
 
     // --- Stop/Start Timer based on Balancing State ---
     if (accepting_input && !was_accepting_input) {
-        ESP_LOGI(TAG, "CP: Enabling command input, resetting targets, starting timeout timer.");
+        ESP_LOGD(TAG, "CP: Enabling command input, resetting targets, starting timeout timer.");
         {
             std::lock_guard<std::mutex> lock(m_target_mutex);
             m_target_pitch_offset_deg = 0.0f;
@@ -161,7 +161,7 @@ void CommandProcessor::handleInputModeChange(const COMMAND_InputModeChanged& eve
         startTimeoutTimer();
 
     } else if (!accepting_input && was_accepting_input) {
-        ESP_LOGI(TAG, "CP: Disabling command input, stopping timeout timer, resetting targets.");
+        ESP_LOGD(TAG, "CP: Disabling command input, stopping timeout timer, resetting targets.");
         stopTimeoutTimer();
         bool had_velocity = false;
         {
@@ -284,7 +284,7 @@ esp_err_t CommandProcessor::startTimeoutTimer() {
     }
     esp_err_t ret = esp_timer_start_periodic(m_timeout_timer, timeout_check_interval_us);
     if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "Started periodic timeout timer (%llu us interval).", timeout_check_interval_us);
+        ESP_LOGD(TAG, "Started periodic timeout timer (%llu us interval).", timeout_check_interval_us);
     } else {
         ESP_LOGE(TAG, "Failed to start timeout timer: %s", esp_err_to_name(ret));
     }
@@ -296,7 +296,7 @@ esp_err_t CommandProcessor::stopTimeoutTimer() {
     if (!esp_timer_is_active(m_timeout_timer)) { return ESP_OK; }
     esp_err_t ret = esp_timer_stop(m_timeout_timer);
     if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "Stopped periodic timeout timer.");
+        ESP_LOGD(TAG, "Stopped periodic timeout timer.");
     } else {
         ESP_LOGE(TAG, "Failed to stop timeout timer: %s", esp_err_to_name(ret));
     }

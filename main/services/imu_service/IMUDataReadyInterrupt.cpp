@@ -89,11 +89,14 @@ esp_err_t IMUDataReadyInterrupt::init(gpio_num_t pin, bool activeHigh, gpio_isr_
         return ret;
     }
 
+    m_pin = pin;
+    m_activeHigh = activeHigh;
+    m_handlerInstalled = true;
     ret = gpio_intr_enable(pin);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG_IRQ, "Failed to enable GPIO interrupt on pin %d: %s", pin, esp_err_to_name(ret));
-        (void)gpio_isr_handler_remove(pin);
-        return ret;
+        const auto cleanup = deinit();
+        return cleanup == ESP_OK ? ret : cleanup;
     }
 
     m_pin = pin;

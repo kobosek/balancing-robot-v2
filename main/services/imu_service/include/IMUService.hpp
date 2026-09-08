@@ -1,121 +1,70 @@
 #pragma once
-
 #include "EventHandler.hpp"
-#include "IIMUFaultSink.hpp"
 #include "IMUState.hpp"
+#include "IMUDataTypes.hpp"
 #include "MPU6050Profile.hpp"
-#include "config/MPU6050Config.hpp"
+#include "IMUDataReadyInterrupt.hpp"
 #include "config/SystemBehaviorConfig.hpp"
-#include "esp_err.h"
 #include <atomic>
-#include <cstdint>
-#include <functional>
 #include <memory>
 #include <mutex>
-
-class BaseEvent;
-class CONFIG_BehaviorConfigUpdate;
-class CONFIG_ImuConfigUpdate;
-class FIFOProcessor;
-class FIFOTask;
-class HealthMonitorTask;
+class EventBus;
 class I2CDevice;
-class IMUCalibration;
-class IMUHealthMonitor;
-class IMU_AttachRequested;
-class IMU_CalibrationRequest;
-class IMU_SystemPolicyChanged;
 class MPU6050Driver;
 class MPU6050HardwareController;
+class FIFOProcessor;
+class IMUCalibration;
 class OrientationEstimator;
-class EventBus;
-
-class IMUService : public EventHandler, public IIMUFaultSink {
+class IMUTask;
+class IMUService : public EventHandler {
 public:
-    IMUService(std::shared_ptr<OrientationEstimator> estimator,
-               const MPU6050Config& config,
-               const SystemBehaviorConfig& behaviorConfig,
-               EventBus& bus);
+    IMUService(std::shared_ptr<OrientationEstimator>, const MPU6050Config&, const SystemBehaviorConfig&, EventBus&);
     ~IMUService();
-
     esp_err_t init();
     bool startTasks();
     void stopTasks();
-
-    void handleEvent(const BaseEvent& event) override;
-    std::string getHandlerName() const override { return TAG; }
-    void onIMUHardFault(esp_err_t errorCode) override;
-    void pollBackgroundMaintenance();
-
+    void handleEvent(const BaseEvent&) override;
+    std::string getHandlerName() const override { return "IMUService"; }
     IMUState getCurrentState() const;
     bool isAvailable() const;
-
-    static const char* stateToString(IMUState state);
-
+    IMUStatusSnapshot getStatusSnapshot() const;
+    bool reserveMotion(uint32_t& generation);
+    void releaseMotion();
+    bool reserveOta();
+    void releaseOta();
+    void runWorker(IMUTask&);
+    static const char* stateToString(IMUState);
 private:
     static constexpr const char* TAG = "IMUService";
-
-    std::unique_ptr<I2CDevice> m_i2cDevice;
-    std::unique_ptr<MPU6050Driver> m_driver;
-    std::unique_ptr<MPU6050HardwareController> m_hardwareController;
+    EventBus& m_bus;
     std::shared_ptr<OrientationEstimator> m_estimator;
-    MPU6050Config m_config;
-    SystemBehaviorConfig m_behaviorConfig;
-    EventBus& m_eventBus;
-
-    std::unique_ptr<IMUHealthMonitor> m_healthMonitor;
-    std::unique_ptr<FIFOProcessor> m_fifoProcessor;
+    std::unique_ptr<I2CDevice> m_device;
+    std::unique_ptr<MPU6050Driver> m_driver;
+    std::unique_ptr<MPU6050HardwareController> m_hardware;
+    std::unique_ptr<FIFOProcessor> m_fifo;
     std::unique_ptr<IMUCalibration> m_calibration;
-    std::unique_ptr<FIFOTask> m_fifoTask;
-    std::unique_ptr<HealthMonitorTask> m_healthMonitorTask;
-
-    std::atomic<bool> m_is_calibrating_flag;
-    IMUState m_current_state;
-    std::atomic<bool> m_calibration_allowed;
-    std::atomic<bool> m_auto_attach_allowed;
-    std::atomic<bool> m_hardware_config_apply_allowed;
-    std::atomic<bool> m_pending_hardware_apply;
-    std::atomic<bool> m_fault_reported;
-    std::atomic<int64_t> m_next_auto_attach_time_us;
-    std::atomic<bool> m_initialized;
+    std::unique_ptr<IMUTask> m_task;
+    IMUDataReadyInterrupt m_irq;
+    mutable std::mutex m_mutex;
+    MPU6050Config m_desired, m_applied;
+    SystemBehaviorConfig m_behavior;
+    IMUStatusSnapshot m_status;
+    IMUState m_state = IMUState::INITIALIZED;
+    bool m_otaReserved = false;
+    std::atomic<bool> m_cancelCalibration{false};
+    bool m_motionReserved = false, m_calibrationPending = false, m_attachPending = true;
+    bool m_applyAllowed = false, m_attachAllowed = false;
+    std::atomic<bool> m_calibrationAllowed{false};
+    bool m_configPending = true, m_initialized = false;
+    // Worker-owned state below.
     MPU6050Profile m_profile;
-
-    mutable std::mutex m_state_mutex;
-    mutable std::mutex m_config_mutex;
-    mutable std::mutex m_attach_mutex;
-
-    bool transitionToState(IMUState newState);
-    esp_err_t enterInitializedState();
-    esp_err_t exitInitializedState();
-    esp_err_t enterOperationalState();
-    esp_err_t exitOperationalState();
-    esp_err_t enterCalibrationState();
-    esp_err_t exitCalibrationState();
-    esp_err_t enterUnavailableState();
-    esp_err_t exitUnavailableState();
-    static bool isValidTransition(IMUState from, IMUState to);
-
-    void refreshDerivedStateLocked();
-    void applyRuntimeProfile(const MPU6050Config& config,
-                             const MPU6050Profile& profile,
-                             bool reinitializeEstimator);
-    bool applyConfig(const MPU6050Config& newConfig);
-    void applyConfig(const SystemBehaviorConfig& config);
-    bool canApplyHardwareConfigNow() const;
-    void applyPendingHardwareConfigIfSafe();
-    void publishAvailabilityIfOperational(bool shouldPublishAvailabilityEvent);
-    esp_err_t attachAndConfigureCurrentProfile(bool publishAvailabilityEvent);
-    esp_err_t attachAndConfigureCurrentProfileLocked(bool publishAvailabilityEvent,
-                                                     bool* shouldPublishAvailabilityEvent = nullptr);
-    void markSensorUnavailable(esp_err_t errorCode, bool publishErrorEvent);
-    esp_err_t performCalibration();
-    void scheduleAutoAttachRetry(int64_t delayUs = 0);
-
-    void handleIMUConfigUpdate(const CONFIG_ImuConfigUpdate& event);
-    void handleBehaviorConfigUpdate(const CONFIG_BehaviorConfigUpdate& event);
-    void handleCalibrationRequest(const IMU_CalibrationRequest& event);
-    void handleAttachRequested(const IMU_AttachRequested& event);
-    void handleSystemPolicyChanged(const IMU_SystemPolicyChanged& event);
-
-    void safeConfigUpdate(const std::function<void()>& updateFunc);
+    int64_t m_nextAttemptUs = 0, m_validationDeadlineUs = 0, m_lastProgressUs = 0;
+    unsigned m_validationSamples = 0;
+    bool m_resyncUsed = false, m_incident = false, m_fullAttachValidating = false;
+    void transition(IMUState, esp_err_t = ESP_OK, IMUFaultReason = IMUFaultReason::NONE);
+    void invalidate(IMUFaultReason);
+    void unavailable(esp_err_t, IMUFaultReason);
+    esp_err_t attach(const MPU6050Config&, IMUTask&);
+    esp_err_t startStream(IMUTask&);
+    void calibrate(IMUTask&);
 };

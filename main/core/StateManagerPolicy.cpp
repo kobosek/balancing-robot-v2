@@ -67,9 +67,7 @@ bool isMotorActiveState(SystemState state) {
 }
 
 bool shouldReturnToIdleOnImuError(SystemState state) {
-    return state == SystemState::BALANCING ||
-           state == SystemState::FALLEN ||
-           state == SystemState::PID_TUNING;
+    return isMotorActiveState(state) || state == SystemState::FALLEN;
 }
 
 bool batteryBlocksMotion(bool criticalBatteryMotorShutdownEnabled, bool batteryCritical) {
@@ -131,7 +129,7 @@ bool isImuAutoAttachAllowed(SystemState state) {
 }
 
 bool isImuHardwareConfigApplyAllowed(SystemState state) {
-    return state != SystemState::BALANCING;
+    return state == SystemState::IDLE || state == SystemState::FALLEN;
 }
 
 bool isOtaUpdateAllowed(SystemState state) {

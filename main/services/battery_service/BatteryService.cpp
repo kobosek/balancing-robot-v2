@@ -445,7 +445,7 @@ void BatteryService::updateBatteryStatus() {
     // Publish event if status changed
     if (status_changed) {
         const char* battery_state = is_critical ? "CRITICAL" : (is_low ? "LOW" : "OK");
-        ESP_LOGI(TAG, "Battery status updated: batt=%.2fV adc=%.2fV, %d%%, %s",
+        ESP_LOGD(TAG, "Battery status updated: batt=%.2fV adc=%.2fV, %d%%, %s",
                 voltage, adc_pin_voltage, rounded_percentage, battery_state);
 
         BATTERY_StatusUpdate event(new_status);

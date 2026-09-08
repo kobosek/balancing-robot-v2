@@ -5,6 +5,7 @@
 #include "EventBus.hpp"
 #include "CONFIG_BehaviorConfigUpdate.hpp"
 #include "IMU_OrientationData.hpp"
+#include "IMU_AvailabilityChanged.hpp"
 #include "BaseEvent.hpp"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -31,22 +32,46 @@ BalanceMonitor::BalanceMonitor(EventBus& bus, const SystemBehaviorConfig& config
 void BalanceMonitor::handleEvent(const BaseEvent& event) {
     bool publish_fall_detected = false;
     bool publish_auto_balance_ready = false;
+    uint32_t generation = 0;
+    int64_t sampleTime = 0;
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
 
         if (event.is<IMU_OrientationData>()) {
             const auto& orientationEvent = event.as<IMU_OrientationData>();
+            const auto& sample = orientationEvent.estimate;
+            if (sample.sample_timestamp_us <= m_enableAfterUs || !m_ready || sample.generation != m_generation || !sample.fresh(esp_timer_get_time(), m_maxAgeUs)) {
+                m_within_auto_balance_angle = false; m_auto_balance_angle_start_time_us = 0;
+                m_lastSampleUs = 0; return;
+            }
+            if (sample.sample_sequence <= m_lastSequence) return;
+            if (m_lastSampleUs && sample.sample_timestamp_us - m_lastSampleUs > m_maxAgeUs) {
+                m_within_auto_balance_angle = false; m_auto_balance_angle_start_time_us = 0;
+            }
+            m_lastSequence = sample.sample_sequence;
+            m_lastSampleUs = sample.sample_timestamp_us;
+            generation = sample.generation;
+            sampleTime = sample.sample_timestamp_us;
             if (m_fallDetectionActive) {
                 publish_fall_detected = checkFall(orientationEvent.pitch_rad);
             }
 
             if (m_autoBalancingActive) {
-                publish_auto_balance_ready = checkAutoBalancing(orientationEvent.pitch_rad);
+                publish_auto_balance_ready = checkAutoBalancing(orientationEvent.pitch_rad, sampleTime);
             } else if (m_within_auto_balance_angle) {
                 m_within_auto_balance_angle = false;
                 m_auto_balance_angle_start_time_us = 0;
             }
+        } else if (event.is<IMU_AvailabilityChanged>()) {
+            const auto& availability = event.as<IMU_AvailabilityChanged>();
+            if (availability.revision < m_revision) return;
+            m_revision = availability.revision;
+            m_ready = availability.available;
+            m_generation = availability.generation;
+            m_within_auto_balance_angle = false;
+            m_auto_balance_angle_start_time_us = 0;
+            m_lastSampleUs = 0;
         } else if (event.is<BALANCE_MonitorModeChanged>()) {
             handleMonitorModeChanged(event.as<BALANCE_MonitorModeChanged>());
         } else if (event.is<CONFIG_BehaviorConfigUpdate>()) {
@@ -59,12 +84,13 @@ void BalanceMonitor::handleEvent(const BaseEvent& event) {
         m_eventBus.publish(fall_event);
     }
     if (publish_auto_balance_ready) {
-        BALANCE_AutoBalanceReady auto_balance_event;
+        BALANCE_AutoBalanceReady auto_balance_event(generation, sampleTime);
         m_eventBus.publish(auto_balance_event);
     }
 }
 
 void BalanceMonitor::applyConfig(const SystemBehaviorConfig& config) {
+    m_maxAgeUs = config.imu_max_sample_age_ms * 1000LL;
     m_pitch_threshold_rad = config.fall_pitch_threshold_deg * DEG_TO_RAD;
     m_threshold_duration_us = config.fall_threshold_duration_ms * 1000ULL;
     m_auto_balance_angle_threshold_rad = config.auto_balance_pitch_threshold_deg * DEG_TO_RAD;
@@ -88,25 +114,13 @@ void BalanceMonitor::reset() {
     ESP_LOGD(TAG, "State reset.");
 }
 
-void BalanceMonitor::handleOrientationData(const IMU_OrientationData& event) {
-    if (m_fallDetectionActive) {
-        (void)checkFall(event.pitch_rad);
-    }
-
-    if (m_autoBalancingActive) {
-        (void)checkAutoBalancing(event.pitch_rad);
-    } else if (m_within_auto_balance_angle) {
-        m_within_auto_balance_angle = false;
-        m_auto_balance_angle_start_time_us = 0;
-    }
-}
-
 void BalanceMonitor::handleMonitorModeChanged(const BALANCE_MonitorModeChanged& event) {
     const bool fallDetectionWasActive = m_fallDetectionActive;
     const bool autoBalancingWasActive = m_autoBalancingActive;
 
     m_fallDetectionActive = event.fallDetectionActive;
     m_autoBalancingActive = event.autoBalancingActive;
+    if (!autoBalancingWasActive && m_autoBalancingActive) m_enableAfterUs = esp_timer_get_time();
 
     if (fallDetectionWasActive != m_fallDetectionActive && !m_fallDetectionActive) {
         m_potentially_fallen = false;
@@ -147,9 +161,9 @@ bool BalanceMonitor::checkFall(float pitch_rad) {
     return false;
 }
 
-bool BalanceMonitor::checkAutoBalancing(float pitch_rad) {
+bool BalanceMonitor::checkAutoBalancing(float pitch_rad, int64_t sampleTime) {
     bool is_upright = (std::abs(pitch_rad) < m_auto_balance_angle_threshold_rad);
-    int64_t now = esp_timer_get_time();
+    int64_t now = sampleTime;
 
     if (is_upright) {
         if (!m_within_auto_balance_angle) {

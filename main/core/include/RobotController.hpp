@@ -1,6 +1,8 @@
 #pragma once
 
 #include <atomic>
+#include <mutex>
+#include "config/SystemBehaviorConfig.hpp"
 #include "esp_err.h"
 #include "EventHandler.hpp"
 #include "CONTROL_RunModeChanged.hpp"
@@ -27,7 +29,8 @@ public:
         MotorService& motorService,
         BatteryService& batteryService,
         ControlModeExecutor& controlModeExecutor,
-        ControlEventDispatcher& controlEventDispatcher
+        ControlEventDispatcher& controlEventDispatcher,
+        const SystemBehaviorConfig& behavior
     );
 
     void runControlStep(float dt);
@@ -47,6 +50,12 @@ private:
     ControlModeExecutor& m_controlModeExecutor;
     ControlEventDispatcher& m_controlEventDispatcher;
 
+    std::mutex m_modeMutex;
+    uint64_t m_armId = 0, m_lastFaultArm = 0, m_lastExecutedArm = 0;
+    uint32_t m_generation = 0;
+    uint64_t m_lastImuSequence = 0;
+    uint32_t m_lastImuGeneration = 0;
+    std::atomic<int64_t> m_maxSampleAgeUs{20000};
     // Updated by event handlers and read by the control task.
     std::atomic<float> m_latestTargetPitchOffset_deg{0.0f};
     std::atomic<float> m_latestTargetAngVel_dps{0.0f};

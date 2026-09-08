@@ -1,7 +1,7 @@
 {
-  "config_version": 1,
+  "config_version": 2,
   "wifi": {
-    "ssid": "Karol",
+    "ssid": "StajniaAugiasza",
     "password": "Lubieplacki4321"
   },
   "mainLoop": {
@@ -133,10 +133,9 @@
     "auto_balance_pitch_threshold_deg": 5.0,
     "auto_balance_hold_duration_ms": 2000,
     "battery_oversampling_count": 64,
-    "battery_read_interval_ms": 1000,
-    "imu_health_i2c_fail_threshold": 5,
-    "imu_health_no_data_threshold": 5,
-    "imu_health_data_timeout_ms": 500
+    "imu_max_sample_age_ms": 20,
+    "imu_reconnect_interval_ms": 1000,
+    "battery_read_interval_ms": 1000
   },
   "dimensions": {
     "wheelbase_m": 0.15

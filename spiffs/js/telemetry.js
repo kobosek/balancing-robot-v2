@@ -1,3 +1,4 @@
+import { decodeTelemetryPoint, IMU_GRAPH_KEYS } from './imuStatus.js';
 import { appState, updateTelemetryJsonCache, updateTelemetryArrays, updateBatteryState } from './state.js';
 import { fetchDataApi } from './api.js';
 import { drawAllGraphs } from './graph.js';
@@ -23,26 +24,22 @@ export async function updateTelemetryData() {
     const batchValuesByKey = Object.fromEntries(telemetryKeys.map(key => [key, []]));
 
     batchData.forEach((point) => {
-        if (Array.isArray(point) && point.length >= 12) {
-            // Map received array elements to named properties based on NEW order
-            const currentDataMap = {
-                pitchDeg:           point[0], // Index 0
-                speedLDPS:          point[1], // Index 1 (Actual L)
-                speedRDPS:          point[2], // Index 2 (Actual R)
-                batteryVoltage:     point[3], // Index 3
-                systemState:        point[4], // Index 4
-                speedSetpointLDPS:  point[5], // Index 5 (Setpoint L)
-                speedSetpointRDPS:  point[6], // Index 6 (Setpoint R)
-                desiredAngleDeg:    point[7], // Index 7 (Desired Angle)
-                yawAngleDeg:        point[8], // Index 8 (Actual Yaw Angle)
-                targetYawAngleDeg:  point[9], // Index 9 (Target Yaw Angle)
-                yawRateDPS:         point[10], // Index 10 (Yaw Rate)
-                targetYawRateDPS:   point[11], // Index 11 (Target Yaw Rate)
-                // Add joystick data separately
-                joystickX:          appState.joystick.currentData.x,
-                joystickY:          appState.joystick.currentData.y,
-            };
-
+        const currentDataMap = decodeTelemetryPoint(point, rawResponse.format_version);
+        if (currentDataMap) {
+            const generation = currentDataMap.imuGeneration;
+            if (generation !== null && generation !== appState.telemetryImuGeneration) {
+                if (appState.telemetryImuGeneration !== null) {
+                    // Break the connecting segment, retaining all earlier history
+                    // and the common sample positions of the other graph series.
+                    IMU_GRAPH_KEYS.forEach(key => {
+                        const values = batchValuesByKey[key]?.length ? batchValuesByKey[key] : appState.telemetryData[key];
+                        if (values?.length) values[values.length - 1] = null;
+                    });
+                }
+                appState.telemetryImuGeneration = generation;
+            }
+            currentDataMap.joystickX = appState.joystick.currentData.x;
+            currentDataMap.joystickY = appState.joystick.currentData.y;
             telemetryKeys.forEach(key => {
                 if (currentDataMap.hasOwnProperty(key)) {
                      batchValuesByKey[key].push(currentDataMap[key]);
@@ -57,7 +54,7 @@ export async function updateTelemetryData() {
     });
 
     if (dataUpdated) {
-        updateTelemetryArrays(batchValuesByKey);
+        updateTelemetryArrays(batchValuesByKey, true);
     }
 
     // Update Legend and Battery Status using the LATEST point's mapped data

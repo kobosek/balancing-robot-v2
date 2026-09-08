@@ -10,7 +10,6 @@ constexpr const char* TAG = "I2CDevice";
 
 I2CDevice::I2CDevice() :
     m_mutex(),
-    m_healthTracker(),
     m_config(),
     m_busHandle(nullptr),
     m_deviceHandle(nullptr) {}
@@ -25,7 +24,8 @@ esp_err_t I2CDevice::open(i2c_port_t i2cPort,
                           uint16_t deviceAddress,
                           uint32_t i2cFrequencyHz) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    closeUnlocked();
+    const auto closeResult = closeUnlocked();
+    if (closeResult != ESP_OK) return closeResult;
 
     i2c_master_bus_config_t busConfig{};
     busConfig.i2c_port = i2cPort;
@@ -48,7 +48,7 @@ esp_err_t I2CDevice::open(i2c_port_t i2cPort,
     deviceConfig.dev_addr_length = I2C_ADDR_BIT_LEN_7;
     deviceConfig.device_address = deviceAddress;
     deviceConfig.scl_speed_hz = i2cFrequencyHz;
-    deviceConfig.scl_wait_us = 20000;
+    deviceConfig.scl_wait_us = 1000;
     deviceConfig.flags.disable_ack_check = false;
 
     ret = i2c_master_bus_add_device(m_busHandle, &deviceConfig, &m_deviceHandle);
@@ -61,9 +61,9 @@ esp_err_t I2CDevice::open(i2c_port_t i2cPort,
     return ESP_OK;
 }
 
-void I2CDevice::close() {
+esp_err_t I2CDevice::close() {
     std::lock_guard<std::mutex> lock(m_mutex);
-    closeUnlocked();
+    return closeUnlocked();
 }
 
 bool I2CDevice::isOpen() const {
@@ -72,87 +72,14 @@ bool I2CDevice::isOpen() const {
 }
 
 esp_err_t I2CDevice::writeRegister(uint8_t reg, uint8_t data) {
-    esp_err_t lastError = ESP_FAIL;
-    uint8_t attempts = 0;
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (m_deviceHandle == nullptr) {
-            m_healthTracker.recordFailure(ESP_ERR_INVALID_STATE);
-            return ESP_ERR_INVALID_STATE;
-        }
-        attempts = static_cast<uint8_t>(m_config.max_retries + 1);
-    }
-
-    for (uint8_t attempt = 0; attempt < attempts; ++attempt) {
-        uint32_t retryDelayMs = 0;
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            if (m_deviceHandle == nullptr) {
-                m_healthTracker.recordFailure(ESP_ERR_INVALID_STATE);
-                return ESP_ERR_INVALID_STATE;
-            }
-
-            retryDelayMs = m_config.retry_delay_ms;
-            lastError = writeRegisterOnce(reg, data);
-            if (lastError == ESP_OK) {
-                m_healthTracker.recordSuccess();
-                return ESP_OK;
-            }
-
-            m_healthTracker.recordFailure(lastError);
-        }
-
-        if (attempt + 1 < attempts) {
-            vTaskDelay(pdMS_TO_TICKS(retryDelayMs));
-        }
-    }
-
-    return lastError;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_deviceHandle ? writeRegisterOnce(reg, data) : ESP_ERR_INVALID_STATE;
 }
-
-esp_err_t I2CDevice::readRegisters(uint8_t reg, uint8_t* data, size_t len) const {
-    if (data == nullptr || len == 0) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    esp_err_t lastError = ESP_FAIL;
-    uint8_t attempts = 0;
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (m_deviceHandle == nullptr) {
-            m_healthTracker.recordFailure(ESP_ERR_INVALID_STATE);
-            return ESP_ERR_INVALID_STATE;
-        }
-        attempts = static_cast<uint8_t>(m_config.max_retries + 1);
-    }
-
-    for (uint8_t attempt = 0; attempt < attempts; ++attempt) {
-        uint32_t retryDelayMs = 0;
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            if (m_deviceHandle == nullptr) {
-                m_healthTracker.recordFailure(ESP_ERR_INVALID_STATE);
-                return ESP_ERR_INVALID_STATE;
-            }
-
-            retryDelayMs = m_config.retry_delay_ms;
-            lastError = readRegistersOnce(reg, data, len);
-            if (lastError == ESP_OK) {
-                m_healthTracker.recordSuccess();
-                return ESP_OK;
-            }
-
-            m_healthTracker.recordFailure(lastError);
-        }
-
-        if (attempt + 1 < attempts) {
-            vTaskDelay(pdMS_TO_TICKS(retryDelayMs));
-        }
-    }
-
-    return lastError;
+esp_err_t I2CDevice::readRegisters(uint8_t reg, uint8_t* data, size_t len, uint32_t timeoutMs) const {
+    if (!data || !len) return ESP_ERR_INVALID_ARG;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_deviceHandle ? readRegistersOnce(reg, data, len, timeoutMs) : ESP_ERR_INVALID_STATE;
 }
-
 void I2CDevice::setConfig(const I2CConfig& config) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_config = config;
@@ -161,16 +88,6 @@ void I2CDevice::setConfig(const I2CConfig& config) {
 I2CConfig I2CDevice::getConfig() const {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_config;
-}
-
-I2CStats I2CDevice::getStats() const {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    return m_healthTracker.getStats();
-}
-
-void I2CDevice::resetStats() {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_healthTracker.reset();
 }
 
 esp_err_t I2CDevice::writeRegisterOnce(uint8_t reg, uint8_t data) const {
@@ -182,23 +99,26 @@ esp_err_t I2CDevice::writeRegisterOnce(uint8_t reg, uint8_t data) const {
         static_cast<int>(m_config.timeout_ms));
 }
 
-esp_err_t I2CDevice::readRegistersOnce(uint8_t reg, uint8_t* data, size_t len) const {
+esp_err_t I2CDevice::readRegistersOnce(uint8_t reg, uint8_t* data, size_t len, uint32_t timeoutMs) const {
     return i2c_master_transmit_receive(
         m_deviceHandle,
         &reg,
         1,
         data,
         len,
-        static_cast<int>(m_config.timeout_ms));
+        static_cast<int>(timeoutMs ? timeoutMs : m_config.timeout_ms));
 }
 
-void I2CDevice::closeUnlocked() {
+esp_err_t I2CDevice::closeUnlocked() {
     if (m_deviceHandle != nullptr) {
-        i2c_master_bus_rm_device(m_deviceHandle);
+        const auto ret = i2c_master_bus_rm_device(m_deviceHandle);
+        if (ret != ESP_OK) return ret;
         m_deviceHandle = nullptr;
     }
     if (m_busHandle != nullptr) {
-        i2c_del_master_bus(m_busHandle);
+        const auto ret = i2c_del_master_bus(m_busHandle);
+        if (ret != ESP_OK) return ret;
         m_busHandle = nullptr;
     }
+    return ESP_OK;
 }

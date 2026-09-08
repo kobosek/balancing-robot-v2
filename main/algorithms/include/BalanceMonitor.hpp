@@ -40,14 +40,18 @@ private:
     bool m_within_auto_balance_angle = false;
     int64_t m_auto_balance_angle_start_time_us = 0;
 
+    uint32_t m_generation = 0;
+    uint64_t m_revision = 0, m_lastSequence = 0;
+    int64_t m_enableAfterUs = 0;
+    int64_t m_lastSampleUs = 0, m_maxAgeUs = 20000;
+    bool m_ready = false;
     bool m_autoBalancingActive = false;
     bool m_fallDetectionActive = false;
 
     void applyConfig(const SystemBehaviorConfig& config);
     void handleConfigUpdate(const CONFIG_BehaviorConfigUpdate& event);
-    void handleOrientationData(const IMU_OrientationData& event);
     void handleMonitorModeChanged(const BALANCE_MonitorModeChanged& event);
 
     bool checkFall(float pitch_rad);
-    bool checkAutoBalancing(float pitch_rad);
+    bool checkAutoBalancing(float pitch_rad, int64_t sampleTime);
 };

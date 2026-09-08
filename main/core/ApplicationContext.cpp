@@ -162,7 +162,7 @@ esp_err_t ApplicationContext::initializeSupportServices()
     m_orientationEstimator = std::make_shared<OrientationEstimator>();
     ESP_RETURN_ON_FALSE(m_orientationEstimator != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate orientation estimator");
 
-    m_encoderService = std::make_unique<EncoderService>(encoderConf);
+    m_encoderService = std::make_unique<EncoderService>(encoderConf, m_configService->getMainLoopConfig().interval_ms * 1000LL);
     ESP_RETURN_ON_FALSE(m_encoderService != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate encoder service");
 
     ret = m_encoderService->init();
@@ -185,6 +185,7 @@ esp_err_t ApplicationContext::initializeSupportServices()
 
     ret = m_imuService->init();
     ESP_RETURN_ON_ERROR(ret, TAG, "IMUService init failed");
+    m_stateManager->bindImu(*m_imuService);
     ESP_LOGI(TAG, "IMU subsystem initialized");
 
     return ESP_OK;
@@ -254,7 +255,8 @@ esp_err_t ApplicationContext::initializeControlSubsystem()
         *m_motorService,
         *m_batteryService,
         *m_controlModeExecutor,
-        *m_controlEventDispatcher
+        *m_controlEventDispatcher,
+        behaviorConf
     );
     ESP_RETURN_ON_FALSE(m_robotController != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate robot controller");
     ESP_LOGI(TAG, "RobotController initialized");
@@ -269,6 +271,7 @@ esp_err_t ApplicationContext::initializeConnectivitySubsystem()
     m_otaService = std::make_shared<OTAService>();
     ESP_RETURN_ON_FALSE(m_otaService != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate OTA service");
 
+    m_otaService->bindImu(*m_imuService);
     esp_err_t ret = m_otaService->init();
     ESP_RETURN_ON_ERROR(ret, TAG, "OTAService init failed");
 
@@ -282,7 +285,8 @@ esp_err_t ApplicationContext::initializeConnectivitySubsystem()
         *m_pidTuningService,
         *m_guidedCalibrationService,
         *m_configService,
-        *m_otaService
+        *m_otaService,
+        *m_imuService
     );
     auto otaApiHandler = std::make_unique<OTAApiHandler>(*m_otaService);
     auto logsApiHandler = std::make_unique<LogsApiHandler>(*m_logBufferService);

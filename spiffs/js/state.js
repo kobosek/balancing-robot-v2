@@ -1,3 +1,4 @@
+import { normalizeImuStatus } from './imuStatus.js';
 import { MAX_DATA_POINTS } from './constants.js';
 
 // Helper to create initial data arrays
@@ -37,7 +38,9 @@ export const appState = {
     ],
 
     // Current snapshot states
+    telemetryImuGeneration: null,
     currentSystemState: {
+        imu: normalizeImuStatus(null),
         id: -1,
         state_id: null,
         name: 'UNKNOWN',
@@ -122,7 +125,7 @@ export function invalidateConfigCache() { appState.configDataCache = null; conso
 export function updateTelemetryJsonCache(data) { appState.telemetryJsonCache = data; }
 export function updateCurrentSystemState(newStateData) {
     const previousState = { ...appState.currentSystemState };
-    appState.currentSystemState = { ...previousState, ...newStateData };
+    appState.currentSystemState = { ...previousState, ...newStateData, imu: normalizeImuStatus(newStateData.imu) };
     if (previousState.state_id !== appState.currentSystemState.state_id ||
         previousState.state_name !== appState.currentSystemState.state_name ||
         previousState.auto_balancing_enabled !== appState.currentSystemState.auto_balancing_enabled ||
@@ -155,13 +158,13 @@ export function updateTelemetryArray(key, value) {
     const overflow = targetArray.length - MAX_DATA_POINTS;
     if (overflow > 0) { targetArray.splice(0, overflow); }
 }
-export function updateTelemetryArrays(batchValuesByKey) {
+export function updateTelemetryArrays(batchValuesByKey, preserveGaps = false) {
     Object.entries(batchValuesByKey).forEach(([key, values]) => {
         if (!appState.telemetryData.hasOwnProperty(key)) { console.warn(`Skipping non-existent telemetry key: ${key}`); return; }
         const targetArray = appState.telemetryData[key];
         let lastVal = targetArray.length > 0 ? targetArray[targetArray.length - 1] : null;
         values.forEach((value) => {
-            lastVal = normalizeTelemetryValue(value, lastVal);
+            lastVal = preserveGaps && value === null ? null : normalizeTelemetryValue(value, lastVal);
             targetArray.push(lastVal);
         });
         const overflow = targetArray.length - MAX_DATA_POINTS;

@@ -4,6 +4,7 @@
 #include "mpu6050.hpp"
 #include "config/MPU6050Config.hpp"
 #include <cstdint>
+#include <algorithm>
 
 struct MPU6050Profile {
     static constexpr float ACCEL_LSB_PER_G_2G = 16384.0f;
@@ -24,7 +25,8 @@ struct MPU6050Profile {
     MPU6050SampleRateDiv sampleRateDivReg = MPU6050SampleRateDiv::RATE_1KHZ;
     MPU6050InterruptPinConfig interruptPinConfig = MPU6050InterruptPinConfig::ACTIVE_HIGH;
     bool interruptEnabled = true;
-    bool sampleRateLimitedByTransport = false;
+    uint32_t samplePeriodUs = 4000;
+    unsigned maxReadPackets = 4;
     float accelLsbPerG = DEFAULT_ACCEL_LSB_PER_G;
     float gyroLsbPerDps = DEFAULT_GYRO_LSB_PER_DPS;
     float samplePeriodS = DEFAULT_SAMPLE_PERIOD_S;
@@ -79,11 +81,6 @@ struct MPU6050Profile {
         profile.dlpfReg = static_cast<MPU6050DLPFConfig>(dlpfValue);
 
         uint8_t sampleRateValue = static_cast<uint8_t>(config.sample_rate_divisor & 0xFF);
-        const uint8_t minimumSafeDivider = minimumSampleRateDividerForBus(config.i2c_freq_hz);
-        if (sampleRateValue < minimumSafeDivider) {
-            sampleRateValue = minimumSafeDivider;
-            profile.sampleRateLimitedByTransport = true;
-        }
         profile.sampleRateDivReg = static_cast<MPU6050SampleRateDiv>(sampleRateValue);
 
         profile.interruptPinConfig = config.interrupt_active_high ?
@@ -95,17 +92,21 @@ struct MPU6050Profile {
         const float gyroOutputRateHz = dlpfEnabled ? 1000.0f : 8000.0f;
         profile.samplePeriodS = 1.0f / (gyroOutputRateHz / (1.0f + static_cast<float>(sampleRateValue)));
 
+        profile.samplePeriodUs = (1000000U * (sampleRateValue + 1)) / static_cast<unsigned>(gyroOutputRateHz);
+        // Reserve 1 ms of the 5 ms acquisition transaction budget for overhead.
+        const uint32_t bytes = config.i2c_freq_hz * 4ULL / 9000;
+        profile.maxReadPackets = std::min<unsigned>(4, bytes > 5 ? (bytes - 5) / 12 : 0);
         return profile;
     }
 
-private:
-    static uint8_t minimumSampleRateDividerForBus(uint32_t i2cFrequencyHz) {
-        if (i2cFrequencyHz <= 100000) {
-            return static_cast<uint8_t>(MPU6050SampleRateDiv::RATE_250HZ);
-        }
-        if (i2cFrequencyHz <= 200000) {
-            return static_cast<uint8_t>(MPU6050SampleRateDiv::RATE_500HZ);
-        }
-        return static_cast<uint8_t>(MPU6050SampleRateDiv::RATE_1KHZ);
+    static bool timingValid(const MPU6050Config& config, int ageMs, int controlMs) {
+        const auto p = fromConfig(config);
+        const unsigned threshold = (config.fifo_read_threshold + 11) / 12;
+        if (!p.maxReadPackets || !p.samplePeriodUs || threshold > p.maxReadPackets) return false;
+        const int64_t transferUs = ((threshold * 12 + 6) * 9LL * 1000000 + config.i2c_freq_hz - 1) / config.i2c_freq_hz;
+        // Count/status/setup, sample phase, scheduler and a complete control period.
+        return (threshold + 1LL) * p.samplePeriodUs + transferUs + controlMs * 1000LL < ageMs * 1000LL &&
+            (12 * 9LL * 1000000 / config.i2c_freq_hz) * 2 < p.samplePeriodUs &&
+            5LL * p.samplePeriodUs < 250000;
     }
 };

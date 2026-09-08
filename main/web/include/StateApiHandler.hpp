@@ -6,6 +6,7 @@
 #include "EventHandler.hpp"
 
 // Forward declare dependencies
+class IMUService;
 class StateManager;
 class BatteryService;
 class PidTuningService;
@@ -20,7 +21,7 @@ public:
                     PidTuningService& pidTuningService,
                     GuidedCalibrationService& guidedCalibrationService,
                     ConfigurationService& configService,
-                    OTAService& otaService);
+                    OTAService& otaService, IMUService& imuService);
     esp_err_t handleRequest(httpd_req_t *req);
 
     // EventHandler interface implementation
@@ -29,6 +30,7 @@ public:
 
 private:
     static constexpr const char* TAG = "StateApiHandler";
+    IMUService& m_imuService;
     StateManager& m_stateManager;
     BatteryService& m_batteryService;
     PidTuningService& m_pidTuningService;

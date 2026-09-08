@@ -4,6 +4,10 @@
 
 // Define TelemetryDataPoint structure
 struct TelemetryDataPoint {
+    bool imuValid = false;
+    bool encoderLeftValid = false, encoderRightValid = false, imuSampleRepeated = false;
+    float imuAgeMs = -1.0f;
+    uint32_t imuGeneration = 0;
     int64_t timestamp_us = 0;         // Common
     float pitch_deg = 0.0f;           // Index 0
     float speedLeft_dps = 0.0f;       // Index 1

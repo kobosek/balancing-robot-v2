@@ -67,7 +67,7 @@ void IMUCalibration::setOffsets(float x_offset_dps, float y_offset_dps, float z_
 
 esp_err_t IMUCalibration::calibrate(const MPU6050Profile& profile,
                                     int calibrationSamples,
-                                    std::function<void(int, int)> progressCallback) {
+                                    std::function<void(int, int)> progressCallback, std::function<bool()> canceled) {
     if (profile.gyroLsbPerDps <= 0.0f || calibrationSamples <= 0) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -83,8 +83,12 @@ esp_err_t IMUCalibration::calibrate(const MPU6050Profile& profile,
         std::max<int64_t>(1, static_cast<int64_t>(std::llround(static_cast<double>(profile.samplePeriodS) * 1000000.0))) :
         0;
     int64_t nextSampleDeadlineUs = 0;
+    const int64_t deadline = esp_timer_get_time() + calibrationSamples * std::max<int64_t>(samplePeriodUs, 1000) * 2 + 1000000;
+    unsigned failures = 0;
 
     while (successfulSamples < calibrationSamples && attempts < maxAttempts) {
+        if (canceled && canceled()) return ESP_ERR_INVALID_STATE;
+        if (esp_timer_get_time() >= deadline) return ESP_ERR_TIMEOUT;
         attempts++;
         int16_t rawGx = 0;
         int16_t rawGy = 0;
@@ -93,6 +97,8 @@ esp_err_t IMUCalibration::calibrate(const MPU6050Profile& profile,
         esp_err_t readRet = m_driver.readRawGyroXYZ(rawGx, rawGy, rawGz);
         if (readRet != ESP_OK) {
             lastReadError = readRet;
+            if (++failures >= 3) return readRet;
+            paceCalibrationSampling(samplePeriodUs, nextSampleDeadlineUs);
             continue;
         }
 
@@ -115,7 +121,8 @@ esp_err_t IMUCalibration::calibrate(const MPU6050Profile& profile,
         paceCalibrationSampling(samplePeriodUs, nextSampleDeadlineUs);
     }
 
-    const int minSuccessfulSamples = std::max(1, (calibrationSamples + 1) / 2);
+    if (canceled && canceled()) return ESP_ERR_INVALID_STATE;
+    const int minSuccessfulSamples = calibrationSamples;
     if (successfulSamples < minSuccessfulSamples) {
         return lastReadError != ESP_OK ? lastReadError : ESP_FAIL;
     }

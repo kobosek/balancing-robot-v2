@@ -83,25 +83,25 @@ esp_err_t MX1616H_HWDriver::init() {
 
 esp_err_t MX1616H_HWDriver::setRawDuty(uint32_t duty1, uint32_t duty2) {
     if (!m_is_initialized) {
-        ESP_LOGE(TAG, "Driver not initialized!");
+
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret;
-    ESP_LOGV(TAG, "Setting Raw Duty CH%d=%lu, CH%d=%lu", m_channel1, duty1, m_channel2, duty2);
+
 
     // Use the speed mode associated with the timer for API calls
     ledc_mode_t current_speed_mode = m_speed_mode;
 
     ret = ledc_set_duty(current_speed_mode, m_channel1, duty1);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed set duty chan %d", m_channel1);
+    if (ret != ESP_OK) return ret;
     ret = ledc_update_duty(current_speed_mode, m_channel1);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed update duty chan %d", m_channel1);
+    if (ret != ESP_OK) return ret;
 
     ret = ledc_set_duty(current_speed_mode, m_channel2, duty2);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed set duty chan %d", m_channel2);
+    if (ret != ESP_OK) return ret;
     ret = ledc_update_duty(current_speed_mode, m_channel2);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed update duty chan %d", m_channel2);
+    if (ret != ESP_OK) return ret;
 
     return ESP_OK;
 }

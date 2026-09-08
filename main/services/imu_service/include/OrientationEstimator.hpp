@@ -1,9 +1,10 @@
 #pragma once
 
 #include "IIMUDataSink.hpp"
+#include "IMUDataTypes.hpp"
+#include "freertos/FreeRTOS.h"
 #include "MPU6050Profile.hpp"
 #include <stdint.h>
-#include <atomic>
 #include <cmath>
 #include <utility>
 #include "esp_log.h"
@@ -13,12 +14,6 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-struct OrientationEstimate {
-    float pitch_deg = 0.0f;
-    float pitch_rate_dps = 0.0f;
-    float yaw_deg = 0.0f;
-    float yaw_rate_dps = 0.0f;
-};
 
 class OrientationEstimator : public IIMUDataSink {
 public:
@@ -30,14 +25,12 @@ public:
               float gyro_offset_y_dps = 0.0f,
               float gyro_offset_z_dps = 0.0f);
 
-    // Method to update gyro offsets at runtime
-    void updateGyroOffsets(float gyro_offset_x_dps,
-                           float gyro_offset_y_dps,
-                           float gyro_offset_z_dps);
-
     // Process sample now takes raw (but scaled) gyro data
-    void processSample(float accel_g_x, float accel_g_y, float accel_g_z,
-                       float raw_gyro_dps_x, float raw_gyro_dps_y, float raw_gyro_dps_z) override;
+    bool processSample(float accel_g_x, float accel_g_y, float accel_g_z,
+                       float raw_gyro_dps_x, float raw_gyro_dps_y, float raw_gyro_dps_z,
+                       int64_t sampleTimestampUs, uint32_t generation,
+                       const IMUSampleMetadata& metadata = {}) override;
+    void recordFifoLoss(uint64_t knownDiscarded, bool uncertain) override;
 
     // Getters (thread-safe)
     float getPitchDeg() const;
@@ -51,33 +44,36 @@ public:
     // Compatibility helper for existing consumers that only need pitch/yaw.
     std::pair<float, float> getPitchAndYawRate() const;
 
+    void setValidated();
     void reset(); // Reset filter state
 
     static constexpr float RAD_TO_DEG = 180.0f / M_PI;
     static constexpr float DEG_TO_RAD = M_PI / 180.0f;
 
 private:
+    mutable portMUX_TYPE m_snapshotMux = portMUX_INITIALIZER_UNLOCKED;
+    OrientationEstimate m_snapshot;
     static constexpr const char* TAG = "OrientationEst";
 
-    std::atomic<float> m_alpha; // Legacy accel trust knob from the old complementary filter config.
-    std::atomic<float> m_sample_period_s; // Sample period
+    float m_alpha; // Legacy accel trust knob from the old complementary filter config.
+    float m_sample_period_s; // Sample period
 
-    // State variables updated from the IMU task and read by the control task.
-    std::atomic<float> m_pitch_deg;
-    std::atomic<float> m_pitch_rate_dps;
-    std::atomic<float> m_yaw_deg;
-    std::atomic<float> m_yaw_rate_dps;
-    std::atomic<float> m_pitch_bias_dps;
-    std::atomic<float> m_p00;
-    std::atomic<float> m_p01;
-    std::atomic<float> m_p10;
-    std::atomic<float> m_p11;
-    std::atomic<bool> m_has_estimate;
+    // Private filter state: exclusively owned by IMUTask. Readers only copy m_snapshot.
+    float m_pitch_deg;
+    float m_pitch_rate_dps;
+    float m_yaw_deg;
+    float m_yaw_rate_dps;
+    float m_pitch_bias_dps;
+    float m_p00;
+    float m_p01;
+    float m_p10;
+    float m_p11;
+    bool m_has_estimate;
 
     // Gyro offsets are configuration values updated infrequently at runtime.
-    std::atomic<float> m_gyro_offset_x_dps;
-    std::atomic<float> m_gyro_offset_y_dps;
-    std::atomic<float> m_gyro_offset_z_dps;
+    float m_gyro_offset_x_dps;
+    float m_gyro_offset_y_dps;
+    float m_gyro_offset_z_dps;
 
     static constexpr float KALMAN_PROCESS_NOISE_ANGLE = 0.005f;
     static constexpr float KALMAN_PROCESS_NOISE_BIAS = 0.003f;

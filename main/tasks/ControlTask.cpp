@@ -1,4 +1,5 @@
 #include "ControlTask.hpp"
+#include "ControlLoopTiming.hpp"
 #include "RobotController.hpp"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -19,22 +20,15 @@ void ControlTask::run() {
         return; 
     }
 
-    TickType_t xLastWakeTime = xTaskGetTickCount();
-    int64_t lastWakeTimeMicros = esp_timer_get_time();
-
+    ControlLoopTiming timing(xTaskGetTickCount(), esp_timer_get_time());
     while (true) {
-        int64_t startTimeMicros = esp_timer_get_time();
-        float dt = (startTimeMicros - lastWakeTimeMicros) / 1000000.0f;
-        lastWakeTimeMicros = startTimeMicros;
-
-        const float nominal_dt = (float)m_intervalMs / 1000.0f;
-        if (dt <= 0 || dt > (nominal_dt * 5.0f)) {
-             ESP_LOGW(TASK_TAG, "Invalid dt (%.4f), using nominal dt (%.4f)", dt, nominal_dt);
-             dt = nominal_dt;
-        }
-
-        m_robotController.runControlStep(dt); // Runs the main control logic
-
-        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+        auto wakeTick = timing.wakeTick();
+        // Wait before the first step too. Reanchor after every actual wake so a
+        // delayed task does not run PID repeatedly to catch up with old deadlines.
+        if (xTaskDelayUntil(&wakeTick, xFrequency) == pdFALSE) vTaskDelay(1);
+        const float dt = timing.beginStep(xTaskGetTickCount(), esp_timer_get_time());
+        // Never replace a long measured interval with a fictitious nominal one.
+        // RobotController retains input freshness and final motor-commit checks.
+        m_robotController.runControlStep(dt);
     }
 }

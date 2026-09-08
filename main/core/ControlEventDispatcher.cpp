@@ -4,6 +4,7 @@
 #include "IMU_OrientationData.hpp"
 #include "TELEMETRY_Snapshot.hpp"
 #include "esp_log.h"
+#include <algorithm>
 
 ControlEventDispatcher::ControlEventDispatcher(EventBus& eventBus, UBaseType_t queueDepth)
     : Task(TAG),
@@ -33,11 +34,10 @@ esp_err_t ControlEventDispatcher::init() {
     return ESP_OK;
 }
 
-bool ControlEventDispatcher::enqueueOrientation(float pitch_rad, float pitch_rate_rad) {
+bool ControlEventDispatcher::enqueueOrientation(const OrientationEstimate& estimate) {
     DispatchItem item = {};
     item.type = ItemType::Orientation;
-    item.pitch_rad = pitch_rad;
-    item.pitch_rate_rad = pitch_rate_rad;
+    item.orientation = estimate;
     return enqueueItem(item);
 }
 
@@ -54,6 +54,7 @@ bool ControlEventDispatcher::enqueueItem(const DispatchItem& item) {
         return false;
     }
 
+    if (const auto worker = m_worker.load()) xTaskNotifyGive(worker);
     if (xQueueSendToBack(m_queue, &item, 0) == pdTRUE) {
         return true;
     }
@@ -67,25 +68,35 @@ bool ControlEventDispatcher::enqueueItem(const DispatchItem& item) {
 void ControlEventDispatcher::run() {
     ESP_LOGI(TAG, "Control event dispatcher started on Core %d", xPortGetCoreID());
 
+    m_worker = xTaskGetCurrentTaskHandle();
     DispatchItem item = {};
     while (true) {
-        if (xQueueReceive(m_queue, &item, pdMS_TO_TICKS(20)) != pdTRUE) {
+        ImuControlFault fault;
+        portENTER_CRITICAL(&m_faultMux);
+        const bool pending = m_faultPending;
+        if (pending) { fault = m_fault; m_faultPending = false; }
+        portEXIT_CRITICAL(&m_faultMux);
+        if (pending) {
+            m_eventBus.publish(CONTROL_ImuDataInvalid(fault));
+            ESP_LOGW(TAG, "Control inhibited: %s arm=%llu generation=%lu age=%lldus latest_age=%lldus error=%s",
+                fault.cause, static_cast<unsigned long long>(fault.armId), static_cast<unsigned long>(fault.generation),
+                fault.sampleTimestampUs > 0 ? fault.observedUs - fault.sampleTimestampUs : -1LL,
+                fault.latestTimestampUs > 0 ? fault.observedUs - fault.latestTimestampUs : -1LL,
+                esp_err_to_name(fault.error));
             continue;
         }
-
-        switch (item.type) {
-            case ItemType::Orientation: {
-                IMU_OrientationData event(item.pitch_rad, item.pitch_rate_rad);
-                m_eventBus.publish(event);
-                break;
-            }
-            case ItemType::Telemetry: {
-                TELEMETRY_Snapshot event(item.telemetry);
-                m_eventBus.publish(event);
-                break;
-            }
-            default:
-                break;
+        if (xQueueReceive(m_queue, &item, 0) != pdTRUE) {
+            ulTaskNotifyTake(pdTRUE, std::max<TickType_t>(1, pdMS_TO_TICKS(5)));
+            continue;
         }
+        if (item.type == ItemType::Orientation) m_eventBus.publish(IMU_OrientationData(item.orientation));
+        else m_eventBus.publish(TELEMETRY_Snapshot(item.telemetry));
     }
+}
+void ControlEventDispatcher::latchImuFault(const ImuControlFault& fault) {
+    portENTER_CRITICAL(&m_faultMux);
+    if (!m_faultPending || fault.armId >= m_fault.armId) m_fault = fault;
+    m_faultPending = true;
+    portEXIT_CRITICAL(&m_faultMux);
+    if (const auto worker = m_worker.load()) xTaskNotifyGive(worker);
 }

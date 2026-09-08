@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>IMU status tests</title>
+<body><h1>IMU status tests</h1><pre id="results">Running…</pre>
+<script type="module">
+import { runTests } from './imu-status.test.js';
+try { const count = await runTests(); document.querySelector('#results').textContent = 'PASS: ' + count + ' checks'; }
+catch (error) { document.querySelector('#results').textContent = 'FAIL: ' + error.stack; }
+</script></body></html>

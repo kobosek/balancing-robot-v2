@@ -14,7 +14,7 @@
 #include "config/PidTuningConfig.hpp"
 
 struct ConfigData {
-    int config_version = 1;
+    int config_version = 2;
     WiFiConfig wifi;
     MainLoopConfig mainLoop;
     ControlConfig control;

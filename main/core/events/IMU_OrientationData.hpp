@@ -1,17 +1,12 @@
-// main/events/IMU_OrientationData.hpp
 #pragma once
 #include "BaseEvent.hpp"
-
+#include "IMUDataTypes.hpp"
 class IMU_OrientationData : public BaseEvent {
 public:
     DECLARE_EVENT_IDENTITY(IMU_OrientationData)
-    const float pitch_rad;
-    const float pitch_rate_radps;
-
-    IMU_OrientationData(float p_rad, float pr_rps) :
-        BaseEvent(), // Use the specific type
-        pitch_rad(p_rad),
-        pitch_rate_radps(pr_rps)
-    {}
+    const OrientationEstimate estimate;
+    const float pitch_rad, pitch_rate_radps;
+    explicit IMU_OrientationData(const OrientationEstimate& value)
+        : estimate(value), pitch_rad(value.pitch_deg * 0.01745329252f),
+          pitch_rate_radps(value.pitch_rate_dps * 0.01745329252f) {}
 };
-

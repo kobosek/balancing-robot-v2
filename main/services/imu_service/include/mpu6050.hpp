@@ -106,13 +106,11 @@ public:
     esp_err_t readFifoCount(uint16_t& count) const;
     esp_err_t readFifoBuffer(uint8_t* buffer, size_t len) const;
     esp_err_t getInterruptStatus(uint8_t& status) const;
-    esp_err_t isFIFOOverflow(bool& isOverflow) const;
     esp_err_t getDeviceID(uint8_t& id) const;
 
     esp_err_t disableFIFO();
     esp_err_t resetFIFO();
     esp_err_t resetSignalPath();
-    esp_err_t performFullFIFOReset();
 
 private:
     esp_err_t readRegisters(MPU6050Register reg, uint8_t* data, size_t len) const;

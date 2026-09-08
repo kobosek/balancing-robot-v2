@@ -13,7 +13,7 @@ public:
 
     esp_err_t connectAndConfigure(const MPU6050Config& config, MPU6050Profile& profile);
     esp_err_t applyConfiguration(const MPU6050Config& config, const MPU6050Profile& profile);
-    void disconnect();
+    esp_err_t disconnect();
 
 private:
     esp_err_t probeSensor() const;

@@ -1,6 +1,7 @@
 #include "RobotController.hpp"
 
 #include "OrientationEstimator.hpp"
+#include "CONFIG_BehaviorConfigUpdate.hpp"
 #include "EncoderService.hpp"
 #include "MotorService.hpp"
 #include "BatteryService.hpp"
@@ -13,6 +14,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <cmath>
+#include <algorithm>
 
 RobotController::RobotController(
     std::shared_ptr<OrientationEstimator> estimator,
@@ -20,7 +22,8 @@ RobotController::RobotController(
     MotorService& motorService,
     BatteryService& batteryService,
     ControlModeExecutor& controlModeExecutor,
-    ControlEventDispatcher& controlEventDispatcher
+    ControlEventDispatcher& controlEventDispatcher,
+    const SystemBehaviorConfig& behavior
 ) :
     m_estimator(estimator),
     m_encoderService(encoderService),
@@ -34,12 +37,15 @@ RobotController::RobotController(
     m_telemetryStateCode(0),
     m_telemetryEnabled(false)
 {
+    m_maxSampleAgeUs = behavior.imu_max_sample_age_ms * 1000LL;
     ESP_LOGI(TAG, "RobotController constructed.");
 }
 
 // EventHandler implementation
 void RobotController::handleEvent(const BaseEvent& event) {
-    if (event.is<MOTION_TargetMovement>()) {
+    if (event.is<CONFIG_BehaviorConfigUpdate>()) {
+        m_maxSampleAgeUs = event.as<CONFIG_BehaviorConfigUpdate>().config.imu_max_sample_age_ms * 1000LL;
+    } else if (event.is<MOTION_TargetMovement>()) {
         handleTargetMovementCommand(event.as<MOTION_TargetMovement>());
     } else if (event.is<CONTROL_RunModeChanged>()) {
         handleControlRunModeChanged(event.as<CONTROL_RunModeChanged>());
@@ -57,19 +63,36 @@ void RobotController::handleTargetMovementCommand(const MOTION_TargetMovement& e
 }
 
 void RobotController::handleControlRunModeChanged(const CONTROL_RunModeChanged& event) {
+    std::lock_guard<std::mutex> lock(m_modeMutex);
+    if (event.armId < m_armId) return;
+    m_armId = event.armId;
+    m_generation = event.generation;
     m_telemetryStateCode.store(event.telemetryStateCode, std::memory_order_relaxed);
     m_telemetryEnabled.store(event.telemetryEnabled, std::memory_order_relaxed);
     m_controlMode.store(event.mode, std::memory_order_relaxed);
-    ESP_LOGI(TAG, "Control run mode changed to %d", static_cast<int>(event.mode));
+    // This mutex is shared with the control task. Never log while holding it.
 }
 
 void RobotController::runControlStep(float dt) {
     const int64_t startTimeMicros = esp_timer_get_time();
 
-    const bool telemetryEnabled = m_telemetryEnabled.load(std::memory_order_relaxed);
-    const int telemetryStateCode = m_telemetryStateCode.load(std::memory_order_relaxed);
-    const ControlRunMode currentMode = m_controlMode.load(std::memory_order_relaxed);
+    bool telemetryEnabled;
+    int telemetryStateCode;
+    ControlRunMode currentMode;
+    uint64_t arm;
+    uint32_t generation;
+    {
+        std::lock_guard<std::mutex> lock(m_modeMutex);
+        telemetryEnabled = m_telemetryEnabled;
+        telemetryStateCode = m_telemetryStateCode;
+        currentMode = m_controlMode;
+        arm = m_armId;
+        generation = m_generation;
+    }
 
+    // Keep PCNT maintenance running even when telemetry/control is disabled;
+    // an accumulated counter must not be left unchecked indefinitely.
+    m_encoderService.update();
     if (!telemetryEnabled) {
         stopControlLoop();
         ESP_LOGV(TAG, "Skipping control step because telemetry is disabled");
@@ -82,13 +105,15 @@ void RobotController::runControlStep(float dt) {
     const float yaw_deg = orientation.yaw_deg;
     const float yaw_rate_dps = orientation.yaw_rate_dps;
 
-    m_controlEventDispatcher.enqueueOrientation(
-        pitch_deg * OrientationEstimator::DEG_TO_RAD,
-        pitch_rate_dps * OrientationEstimator::DEG_TO_RAD);
+    m_controlEventDispatcher.enqueueOrientation(orientation);
 
-    m_encoderService.update(dt);
-    const float speedL_dps = m_encoderService.getLeftSpeedDegPerSec();
-    const float speedR_dps = m_encoderService.getRightSpeedDegPerSec();
+    const auto encoders = m_encoderService.getFrame();
+    const float speedL_dps = encoders.left.speedDps;
+    const float speedR_dps = encoders.right.speedDps;
+    const bool reusedImuSample = orientation.sample_sequence == m_lastImuSequence &&
+        orientation.generation == m_lastImuGeneration;
+    m_lastImuSequence = orientation.sample_sequence;
+    m_lastImuGeneration = orientation.generation;
 
     const float currentTargetPitchOffset_deg = m_latestTargetPitchOffset_deg.load(std::memory_order_relaxed);
     const float currentTargetAngVel_dps = m_latestTargetAngVel_dps.load(std::memory_order_relaxed);
@@ -105,11 +130,47 @@ void RobotController::runControlStep(float dt) {
     modeInput.targetPitchOffset_deg = currentTargetPitchOffset_deg;
     modeInput.targetAngularVelocity_dps = currentTargetAngVel_dps;
 
-    const ControlModeResult modeResult = m_controlModeExecutor.execute(modeInput);
+    const auto fault = [&](const char* cause, esp_err_t error = ESP_OK) {
+        const auto observed = esp_timer_get_time();
+        const auto latest = m_estimator->getOrientation();
+        m_motorService.inhibitImu(arm);
+        m_controlModeExecutor.reset();
+        if (m_lastFaultArm != arm) {
+            m_lastFaultArm = arm;
+            m_controlEventDispatcher.latchImuFault({arm, generation, observed, IMUFaultReason::STALE,
+                orientation.sample_timestamp_us, latest.sample_timestamp_us, cause, error});
+        }
+    };
+    const bool active = currentMode != ControlRunMode::DISABLED;
+    const auto inputsValid = [&] {
+        return orientation.fresh(esp_timer_get_time(), m_maxSampleAgeUs.load()) &&
+            orientation.generation == generation && encoders.left.valid && encoders.right.valid &&
+            esp_timer_get_time() - encoders.left.sampleTimestampUs <= m_maxSampleAgeUs.load() &&
+            esp_timer_get_time() - encoders.right.sampleTimestampUs <= m_maxSampleAgeUs.load() && std::isfinite(dt) && dt > 0 &&
+            std::isfinite(speedL_dps) && std::isfinite(speedR_dps) &&
+            std::isfinite(currentTargetPitchOffset_deg) && std::isfinite(currentTargetAngVel_dps);
+    };
+    ControlModeResult modeResult{};
+    if (active && (!inputsValid() || !m_motorService.isArmAllowed(arm, generation))) {
+        fault(!encoders.left.valid || !encoders.right.valid ? "invalid-encoder" : inputsValid() ? "revoked-arm" : "invalid-input");
+    } else {
+        if (arm != m_lastExecutedArm) { m_controlModeExecutor.reset(); m_lastExecutedArm = arm; }
+        modeResult = m_controlModeExecutor.execute(modeInput);
+        const auto latest = m_estimator->getOrientation();
+        if (active && (!inputsValid() || !latest.valid || latest.generation != generation ||
+            !std::isfinite(modeResult.effort.left) || !std::isfinite(modeResult.effort.right))) {
+            fault("changed-during-step");
+            modeResult = {};
+        } else {
+            const auto result = m_motorService.setMotorEffort(modeResult.effort.left, modeResult.effort.right, arm, generation,
+                active ? std::min(orientation.sample_timestamp_us,
+                    std::min(encoders.left.sampleTimestampUs, encoders.right.sampleTimestampUs)) : 0,
+                active ? m_maxSampleAgeUs.load() : 0);
+            if (active && result != ESP_OK) { fault("motor-commit", result); modeResult = {}; }
+        }
+    }
 
-    m_motorService.setMotorEffort(modeResult.effort.left, modeResult.effort.right);
-
-    const TelemetryDataPoint snapshot = buildTelemetrySnapshot(startTimeMicros,
+    TelemetryDataPoint snapshot = buildTelemetrySnapshot(startTimeMicros,
                                                                telemetryStateCode,
                                                                pitch_deg,
                                                                yaw_deg,
@@ -117,6 +178,13 @@ void RobotController::runControlStep(float dt) {
                                                                speedL_dps,
                                                                speedR_dps,
                                                                modeResult);
+    snapshot.imuValid = orientation.fresh(esp_timer_get_time(), m_maxSampleAgeUs.load());
+    snapshot.imuAgeMs = orientation.sample_timestamp_us > 0 ?
+        (esp_timer_get_time() - orientation.sample_timestamp_us) / 1000.0f : -1.0f;
+    snapshot.imuGeneration = orientation.generation;
+    snapshot.encoderLeftValid = encoders.left.valid;
+    snapshot.encoderRightValid = encoders.right.valid;
+    snapshot.imuSampleRepeated = reusedImuSample;
     m_controlEventDispatcher.enqueueTelemetry(snapshot);
 
     ESP_LOGV(TAG, "Ctrl Step: dt=%.4f, P=%.1f Yaw=%.1f YawR=%.1f | TgtPO=%.1f, CmdYawR=%.1f, TgtYaw=%.1f, DesYawR=%.1f | SSetL=%.1f, SSetR=%.1f | SActL=%.1f, SActR=%.1f | EffL=%.2f, EffR=%.2f",
