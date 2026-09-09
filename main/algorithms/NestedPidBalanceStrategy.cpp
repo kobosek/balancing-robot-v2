@@ -9,8 +9,8 @@ constexpr float YAW_COMMAND_DEADBAND_DPS = 1e-3f;
 
 NestedPidBalanceStrategy::NestedPidBalanceStrategy() :
     m_anglePid("angle"),
-    m_speedPidLeft("speed_left"),
-    m_speedPidRight("speed_right"),
+    m_speedPidLeft(),
+    m_speedPidRight(),
     m_yawAnglePid("yaw_angle"),
     m_yawRatePid("yaw_rate") {}
 
@@ -121,8 +121,24 @@ void NestedPidBalanceStrategy::applyConfig(const ConfigData& config)
     std::lock_guard<std::mutex> lock(m_mutex);
     ESP_LOGD(TAG, "Applying nested PID balance config.");
     m_anglePid.updateParams(config.pid_angle);
-    m_speedPidLeft.updateParams(config.pid_speed_left);
-    m_speedPidRight.updateParams(config.pid_speed_right);
+    m_speedPidLeft.setParameters({
+        config.pid_speed_left.pid_kp,
+        config.pid_speed_left.pid_ki,
+        config.pid_speed_left.pid_kd,
+        config.pid_speed_left.pid_output_min,
+        config.pid_speed_left.pid_output_max,
+        config.pid_speed_left.pid_iterm_min,
+        config.pid_speed_left.pid_iterm_max
+    });
+    m_speedPidRight.setParameters({
+        config.pid_speed_right.pid_kp,
+        config.pid_speed_right.pid_ki,
+        config.pid_speed_right.pid_kd,
+        config.pid_speed_right.pid_output_min,
+        config.pid_speed_right.pid_output_max,
+        config.pid_speed_right.pid_iterm_min,
+        config.pid_speed_right.pid_iterm_max
+    });
     m_yawAnglePid.updateParams(config.pid_yaw_angle);
     m_yawRatePid.updateParams(config.pid_yaw_rate);
 
@@ -149,9 +165,17 @@ void NestedPidBalanceStrategy::updatePidConfig(const std::string& pidName, const
         m_angle_pid_output_min = config.getOutputMin();
         m_angle_pid_output_max = config.getOutputMax();
     } else if (pidName == "speed_left") {
-        m_speedPidLeft.updateParams(config);
+        m_speedPidLeft.setParameters({
+            config.pid_kp, config.pid_ki, config.pid_kd,
+            config.pid_output_min, config.pid_output_max,
+            config.pid_iterm_min, config.pid_iterm_max
+        });
     } else if (pidName == "speed_right") {
-        m_speedPidRight.updateParams(config);
+        m_speedPidRight.setParameters({
+            config.pid_kp, config.pid_ki, config.pid_kd,
+            config.pid_output_min, config.pid_output_max,
+            config.pid_iterm_min, config.pid_iterm_max
+        });
     } else if (pidName == "yaw_angle") {
         m_yawAnglePid.updateParams(config);
     } else if (pidName == "yaw_rate") {

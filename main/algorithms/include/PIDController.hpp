@@ -1,5 +1,6 @@
 #pragma once
 
+#include "control_math/PidCore.hpp"
 #include "config/PIDConfig.hpp"
 #include <string>
 #include "esp_err.h"
@@ -18,9 +19,9 @@ public:
 private:
     static constexpr const char* TAG = "PIDController";
 
-    // Declaration Order (Matching Initializer List in .cpp)
-    std::string m_config_key; // 1st
-    float m_integral;         // 2nd
-    float m_lastError;        // 3rd
-    PIDConfig m_params;       // 4th
+    // The application-facing adapter retains the existing API and config
+    // type; all PID state and arithmetic live in the portable core.
+    std::string m_config_key;
+    PIDConfig m_params;
+    control_math::PidCore m_core;
 };

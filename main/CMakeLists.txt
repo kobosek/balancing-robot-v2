@@ -52,6 +52,8 @@ idf_component_register(SRCS # --- Tasks ---
                             "web/OTAApiHandler.cpp"
                             "web/LogsApiHandler.cpp"
                             # --- Algorithms ---
+                            "control_math/src/PidCore.cpp"
+                            "control_math/src/WheelVelocityController.cpp"
                             "algorithms/PIDController.cpp"
                             "algorithms/NestedPidBalanceStrategy.cpp"
                             "algorithms/BalancingAlgorithm.cpp"
@@ -71,6 +73,7 @@ idf_component_register(SRCS # --- Tasks ---
                                     "web/include"
                                     "tasks/include"
                                     "drivers/include"
+                                    "control_math/include"
                                     "algorithms/include"
                        REQUIRES esp_wifi esp_event esp_netif esp_http_server nvs_flash app_update
                                 esp_timer spiffs driver json pthread esp_adc 

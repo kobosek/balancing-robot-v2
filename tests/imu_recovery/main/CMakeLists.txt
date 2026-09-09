@@ -1,7 +1,10 @@
 set(PRODUCTION "${CMAKE_CURRENT_LIST_DIR}/../../../main")
 idf_component_register(
     SRCS "test_main.cpp" "test_motion_safety.cpp" "fakes.cpp" "sensor_fakes.cpp"
-         "test_control_timing.cpp" "${PRODUCTION}/algorithms/PIDController.cpp"
+         "test_control_timing.cpp" "test_control_math.cpp"
+         "${PRODUCTION}/control_math/src/PidCore.cpp"
+         "${PRODUCTION}/control_math/src/WheelVelocityController.cpp"
+         "${PRODUCTION}/algorithms/PIDController.cpp"
          "test_encoder.cpp" "pcnt_fakes.cpp" "test_sensor_frame.cpp"
          "${PRODUCTION}/services/EncoderService.cpp"
          "test_fifo_stream.cpp" "test_imu_recovery.cpp" "test_config_migration.cpp" "test_orientation_quality.cpp"
@@ -26,6 +29,7 @@ idf_component_register(
                  "${PRODUCTION}/services/configuration_service/include"
                  "${PRODUCTION}/services/imu_service/include" "${PRODUCTION}/web/include"
                  "${PRODUCTION}/algorithms/include" "${PRODUCTION}/tasks/include"
+                 "${PRODUCTION}/control_math/include"
     REQUIRES unity driver esp_timer pthread json esp_adc
     WHOLE_ARCHIVE)
 target_compile_options(${COMPONENT_LIB} PRIVATE -std=gnu++2b)

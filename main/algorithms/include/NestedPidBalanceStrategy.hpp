@@ -2,6 +2,7 @@
 
 #include "IBalanceControlStrategy.hpp"
 #include "PIDController.hpp"
+#include "control_math/WheelVelocityController.hpp"
 #include "esp_log.h"
 #include <mutex>
 
@@ -26,8 +27,8 @@ private:
 
     mutable std::mutex m_mutex;
     PIDController m_anglePid;
-    PIDController m_speedPidLeft;
-    PIDController m_speedPidRight;
+    control_math::WheelVelocityController m_speedPidLeft;
+    control_math::WheelVelocityController m_speedPidRight;
     PIDController m_yawAnglePid;
     PIDController m_yawRatePid;
 
