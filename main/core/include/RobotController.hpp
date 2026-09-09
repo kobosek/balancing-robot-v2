@@ -4,6 +4,7 @@
 #include <mutex>
 #include "config/SystemBehaviorConfig.hpp"
 #include "config/EncoderConfig.hpp"
+#include "BalanceControlTypes.hpp"
 #include "LongitudinalOdometry.hpp"
 #include "esp_err.h"
 #include "EventHandler.hpp"
@@ -19,6 +20,7 @@ class ControlEventDispatcher;
 class ControlModeExecutor;
 class BaseEvent;
 class MOTION_TargetMovement;
+class MOTION_TargetLinearVelocity;
 struct MotorEffort;
 struct TelemetryDataPoint;
 struct ControlModeResult;
@@ -54,6 +56,7 @@ private:
     ControlEventDispatcher& m_controlEventDispatcher;
 
     std::mutex m_modeMutex;
+    std::mutex m_commandMutex;
     uint64_t m_armId = 0, m_lastFaultArm = 0, m_lastExecutedArm = 0;
     uint32_t m_generation = 0;
     uint64_t m_lastImuSequence = 0;
@@ -61,9 +64,12 @@ private:
     uint64_t m_lastOdometryArm = 0;
     bool m_hasOdometryArm = false;
     std::atomic<int64_t> m_maxSampleAgeUs{20000};
+    std::atomic<int64_t> m_motionCommandTimeoutUs{500000};
     // Updated by event handlers and read by the control task.
     std::atomic<float> m_latestTargetPitchOffset_deg{0.0f};
     std::atomic<float> m_latestTargetAngVel_dps{0.0f};
+    LongitudinalMotionCommand m_latestMotionCommand = {};
+    std::atomic<uint64_t> m_motionCommandFloor{0};
     std::atomic<ControlRunMode> m_controlMode{ControlRunMode::DISABLED};
     std::atomic<int> m_telemetryStateCode{0};
     std::atomic<bool> m_telemetryEnabled{false};
@@ -79,5 +85,6 @@ private:
                                               float speedR_dps,
                                               const ControlModeResult& modeResult) const;
     void handleTargetMovementCommand(const MOTION_TargetMovement& event);
+    void handleTargetLinearVelocityCommand(const MOTION_TargetLinearVelocity& event);
     void handleControlRunModeChanged(const CONTROL_RunModeChanged& event);
 };

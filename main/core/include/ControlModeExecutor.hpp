@@ -18,6 +18,9 @@ struct ControlModeInput {
     float speedRight_dps = 0.0f;
     float targetPitchOffset_deg = 0.0f;
     float targetAngularVelocity_dps = 0.0f;
+    int64_t nowUs = 0;
+    int64_t motionTimeoutUs = 0;
+    LongitudinalMotionCommand motion = {};
     LongitudinalOdometryResult odometry = {};
 };
 

@@ -34,7 +34,10 @@ public:
                       float currentYawRate_dps,
                       float currentSpeedLeft_dps, float currentSpeedRight_dps,
                       float targetPitchOffset_deg, float targetAngVel_dps,
-                      const LongitudinalOdometryResult& odometry);
+                      const LongitudinalOdometryResult& odometry,
+                      int64_t nowUs = 0,
+                      int64_t motionTimeoutUs = 0,
+                      const LongitudinalMotionCommand& motion = {});
     void resetState();
 
     // EventHandler interface implementation

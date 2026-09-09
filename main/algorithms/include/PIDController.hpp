@@ -14,6 +14,22 @@ public:
     esp_err_t updateParams(const PIDConfig& config);
     float compute(float setpoint, float currentValue, float dt);
     float computeWithMeasurementRate(float setpoint, float currentValue, float currentRate, float dt);
+    control_math::PidStepResult computeDetailed(float setpoint,
+                                                float currentValue,
+                                                float dt,
+                                                bool integrate = true);
+    control_math::PidStepResult computeWithMeasurementRateDetailed(float setpoint,
+                                                                  float currentValue,
+                                                                  float currentRate,
+                                                                  float dt,
+                                                                  bool integrate = true);
+    control_math::PidStepResult preview(float setpoint,
+                                        float currentValue,
+                                        float dt) const;
+    control_math::PidStepResult previewWithMeasurementRate(float setpoint,
+                                                           float currentValue,
+                                                           float currentRate,
+                                                           float dt) const;
     void reset();
 
 private:

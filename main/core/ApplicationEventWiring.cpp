@@ -34,6 +34,7 @@
 #include "IMU_SystemPolicyChanged.hpp"
 #include "IMUService.hpp"
 #include "MOTION_TargetMovement.hpp"
+#include "MOTION_TargetLinearVelocity.hpp"
 #include "MOTOR_OutputEnabledChanged.hpp"
 #include "MotorService.hpp"
 #include "OTAService.hpp"
@@ -120,7 +121,8 @@ esp_err_t ApplicationEventWiring::wire(const ApplicationContext& context) const
                        IMU_CalibrationRequest,
                        IMU_AttachRequested,
                        IMU_SystemPolicyChanged, UI_Stop>(asHandler(context.imuServiceHandle()));
-    eventBus.subscribe<MOTION_TargetMovement, CONFIG_BehaviorConfigUpdate,
+    eventBus.subscribe<MOTION_TargetMovement, MOTION_TargetLinearVelocity,
+                       CONFIG_BehaviorConfigUpdate,
                        CONTROL_RunModeChanged>(asHandler(context.robotControllerHandle()));
     eventBus.subscribe<OTA_UpdatePolicyChanged>(asHandler(context.otaServiceHandle()));
     eventBus.subscribe<CONFIG_FullConfigUpdate, TELEMETRY_Snapshot>(asHandler(context.webServerHandle()));

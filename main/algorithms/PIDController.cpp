@@ -42,24 +42,43 @@ esp_err_t PIDController::updateParams(const PIDConfig& config) {
 
 
 float PIDController::compute(float setpoint, float currentValue, float dt) {
-    const auto result = m_core.compute(setpoint, currentValue, dt);
+    const auto result = computeDetailed(setpoint, currentValue, dt);
+    return result.output;
+}
+
+control_math::PidStepResult PIDController::computeDetailed(float setpoint,
+                                                           float currentValue,
+                                                           float dt,
+                                                           bool integrate) {
+    const auto result = m_core.compute(setpoint, currentValue, dt, integrate);
     if (!result.valid) {
         ESP_LOGW(TAG, "Invalid PID input (dt %.4f) for key %s, returning 0 output.", dt, m_config_key.c_str());
-        return 0.0f;
+        return {};
     }
 
     ESP_LOGV(TAG, "PID (%s) | SP:%.3f PV:%.3f E:%.3f | P:%.3f I:%.3f D:%.3f | Out:%.3f",
                     m_config_key.c_str(), setpoint, currentValue, setpoint - currentValue,
                     result.pTerm, result.integralTerm, result.derivativeTerm, result.output);
 
-    return result.output;
+    return result;
 }
 
 float PIDController::computeWithMeasurementRate(float setpoint, float currentValue, float currentRate, float dt) {
-    const auto result = m_core.computeWithMeasurementRate(setpoint, currentValue, currentRate, dt);
+    const auto result = computeWithMeasurementRateDetailed(setpoint, currentValue, currentRate, dt);
+    return result.output;
+}
+
+control_math::PidStepResult PIDController::computeWithMeasurementRateDetailed(
+    float setpoint,
+    float currentValue,
+    float currentRate,
+    float dt,
+    bool integrate) {
+    const auto result = m_core.computeWithMeasurementRate(
+        setpoint, currentValue, currentRate, dt, integrate);
     if (!result.valid) {
         ESP_LOGW(TAG, "Invalid PID input (dt %.4f) for key %s, returning 0 output.", dt, m_config_key.c_str());
-        return 0.0f;
+        return {};
     }
 
     ESP_LOGV(TAG, "PID (%s) | SP:%.3f PV:%.3f Rate:%.3f E:%.3f | P:%.3f I:%.3f D:%.3f | Out:%.3f",
@@ -67,7 +86,24 @@ float PIDController::computeWithMeasurementRate(float setpoint, float currentVal
                     setpoint - currentValue, result.pTerm,
                     result.integralTerm, result.derivativeTerm, result.output);
 
-    return result.output;
+    return result;
+}
+
+control_math::PidStepResult PIDController::preview(float setpoint,
+                                                    float currentValue,
+                                                    float dt) const
+{
+    return m_core.preview(setpoint, currentValue, dt);
+}
+
+control_math::PidStepResult PIDController::previewWithMeasurementRate(
+    float setpoint,
+    float currentValue,
+    float currentRate,
+    float dt) const
+{
+    return m_core.previewWithMeasurementRate(
+        setpoint, currentValue, currentRate, dt);
 }
 
 void PIDController::reset() {

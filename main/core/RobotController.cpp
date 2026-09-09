@@ -9,6 +9,7 @@
 #include "ControlEventDispatcher.hpp"
 #include "CONTROL_RunModeChanged.hpp"
 #include "MOTION_TargetMovement.hpp"
+#include "MOTION_TargetLinearVelocity.hpp"
 #include "TelemetryDataPoint.hpp"
 
 #include "esp_log.h"
@@ -40,15 +41,20 @@ RobotController::RobotController(
     m_longitudinalOdometry(encoderConfig, behavior.imu_max_sample_age_ms * 1000LL)
 {
     m_maxSampleAgeUs = behavior.imu_max_sample_age_ms * 1000LL;
+    m_motionCommandTimeoutUs = behavior.joystick_timeout_ms * 1000LL;
     ESP_LOGI(TAG, "RobotController constructed.");
 }
 
 // EventHandler implementation
 void RobotController::handleEvent(const BaseEvent& event) {
     if (event.is<CONFIG_BehaviorConfigUpdate>()) {
-        m_maxSampleAgeUs = event.as<CONFIG_BehaviorConfigUpdate>().config.imu_max_sample_age_ms * 1000LL;
+        const auto& config = event.as<CONFIG_BehaviorConfigUpdate>().config;
+        m_maxSampleAgeUs = config.imu_max_sample_age_ms * 1000LL;
+        m_motionCommandTimeoutUs = config.joystick_timeout_ms * 1000LL;
     } else if (event.is<MOTION_TargetMovement>()) {
         handleTargetMovementCommand(event.as<MOTION_TargetMovement>());
+    } else if (event.is<MOTION_TargetLinearVelocity>()) {
+        handleTargetLinearVelocityCommand(event.as<MOTION_TargetLinearVelocity>());
     } else if (event.is<CONTROL_RunModeChanged>()) {
         handleControlRunModeChanged(event.as<CONTROL_RunModeChanged>());
     } else {
@@ -64,9 +70,51 @@ void RobotController::handleTargetMovementCommand(const MOTION_TargetMovement& e
     ESP_LOGV(TAG, "RC Handler: Updated targets: PitchOffset=%.2f, AngVel=%.2f", event.targetPitchOffset_deg, event.targetAngularVelocity_dps);
 }
 
+void RobotController::handleTargetLinearVelocityCommand(
+    const MOTION_TargetLinearVelocity& event)
+{
+    const uint64_t floor = m_motionCommandFloor.load(std::memory_order_acquire);
+    if (event.sequence != 0 && event.sequence <= floor) {
+        ESP_LOGW(TAG, "Ignoring stale linear command sequence=%llu floor=%llu",
+                 static_cast<unsigned long long>(event.sequence),
+                 static_cast<unsigned long long>(floor));
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(m_commandMutex);
+    if (event.sequence != 0 && event.sequence <=
+        m_motionCommandFloor.load(std::memory_order_relaxed)) {
+        return;
+    }
+    if (event.sequence != 0 && m_latestMotionCommand.valid &&
+        event.sequence <= m_latestMotionCommand.sequence) {
+        ESP_LOGW(TAG, "Ignoring out-of-order linear command sequence=%llu latest=%llu",
+                 static_cast<unsigned long long>(event.sequence),
+                 static_cast<unsigned long long>(m_latestMotionCommand.sequence));
+        return;
+    }
+    m_latestMotionCommand.valid = true;
+    m_latestMotionCommand.fresh = true;
+    m_latestMotionCommand.stop = event.stop;
+    m_latestMotionCommand.targetVelocityMps = event.targetVelocityMps;
+    m_latestMotionCommand.sequence = event.sequence;
+    m_latestMotionCommand.receivedTimestampUs = event.receivedTimestampUs;
+    ESP_LOGV(TAG, "RC Handler: Updated linear target: %.3f m/s stop=%d seq=%llu",
+             event.targetVelocityMps, event.stop ? 1 : 0,
+             static_cast<unsigned long long>(event.sequence));
+}
+
 void RobotController::handleControlRunModeChanged(const CONTROL_RunModeChanged& event) {
-    std::lock_guard<std::mutex> lock(m_modeMutex);
+    std::lock_guard<std::mutex> modeLock(m_modeMutex);
     if (event.armId < m_armId) return;
+    {
+        std::lock_guard<std::mutex> commandLock(m_commandMutex);
+        const uint64_t latestSequence = m_latestMotionCommand.sequence;
+        const uint64_t previousFloor = m_motionCommandFloor.load(std::memory_order_relaxed);
+        m_motionCommandFloor.store(std::max(previousFloor, latestSequence),
+                                   std::memory_order_release);
+        m_latestMotionCommand = {};
+    }
     m_armId = event.armId;
     m_generation = event.generation;
     m_telemetryStateCode.store(event.telemetryStateCode, std::memory_order_relaxed);
@@ -126,6 +174,18 @@ void RobotController::runControlStep(float dt) {
 
     const float currentTargetPitchOffset_deg = m_latestTargetPitchOffset_deg.load(std::memory_order_relaxed);
     const float currentTargetAngVel_dps = m_latestTargetAngVel_dps.load(std::memory_order_relaxed);
+    LongitudinalMotionCommand motionCommand;
+    {
+        std::lock_guard<std::mutex> lock(m_commandMutex);
+        motionCommand = m_latestMotionCommand;
+    }
+    const int64_t nowUs = esp_timer_get_time();
+    if (motionCommand.valid) {
+        const int64_t timeoutUs = m_motionCommandTimeoutUs.load(std::memory_order_relaxed);
+        const int64_t ageUs = nowUs - motionCommand.receivedTimestampUs;
+        motionCommand.fresh = motionCommand.receivedTimestampUs > 0 &&
+            ageUs >= 0 && (timeoutUs <= 0 || ageUs <= timeoutUs);
+    }
 
     ControlModeInput modeInput = {};
     modeInput.mode = currentMode;
@@ -138,6 +198,9 @@ void RobotController::runControlStep(float dt) {
     modeInput.speedRight_dps = speedR_dps;
     modeInput.targetPitchOffset_deg = currentTargetPitchOffset_deg;
     modeInput.targetAngularVelocity_dps = currentTargetAngVel_dps;
+    modeInput.nowUs = nowUs;
+    modeInput.motionTimeoutUs = m_motionCommandTimeoutUs.load(std::memory_order_relaxed);
+    modeInput.motion = motionCommand;
     modeInput.odometry = odometry;
 
     const auto fault = [&](const char* cause, esp_err_t error = ESP_OK) {
@@ -158,7 +221,8 @@ void RobotController::runControlStep(float dt) {
             esp_timer_get_time() - encoders.left.sampleTimestampUs <= m_maxSampleAgeUs.load() &&
             esp_timer_get_time() - encoders.right.sampleTimestampUs <= m_maxSampleAgeUs.load() && std::isfinite(dt) && dt > 0 &&
             std::isfinite(speedL_dps) && std::isfinite(speedR_dps) &&
-            std::isfinite(currentTargetPitchOffset_deg) && std::isfinite(currentTargetAngVel_dps);
+            std::isfinite(currentTargetPitchOffset_deg) && std::isfinite(currentTargetAngVel_dps) &&
+            (!motionCommand.valid || std::isfinite(motionCommand.targetVelocityMps));
     };
     ControlModeResult modeResult{};
     if (active && (!inputsValid() || !m_motorService.isArmAllowed(arm, generation))) {
@@ -167,9 +231,12 @@ void RobotController::runControlStep(float dt) {
         if (arm != m_lastExecutedArm) { m_controlModeExecutor.reset(); m_lastExecutedArm = arm; }
         modeResult = m_controlModeExecutor.execute(modeInput);
         const auto latest = m_estimator->getOrientation();
-        if (active && (!inputsValid() || !latest.valid || latest.generation != generation ||
+        const bool longitudinalOdometryInvalid = active &&
+            modeResult.diagnostics.strategyId == BalanceStrategyId::LONGITUDINAL_CASCADE &&
+            (!odometry.odometryValid || !modeResult.diagnostics.valid);
+        if (active && (longitudinalOdometryInvalid || !inputsValid() || !latest.valid || latest.generation != generation ||
             !std::isfinite(modeResult.effort.left) || !std::isfinite(modeResult.effort.right))) {
-            fault("changed-during-step");
+            fault(longitudinalOdometryInvalid ? "invalid-odometry" : "changed-during-step");
             modeResult = {};
         } else {
             const auto result = m_motorService.setMotorEffort(modeResult.effort.left, modeResult.effort.right, arm, generation,

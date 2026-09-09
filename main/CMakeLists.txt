@@ -56,6 +56,7 @@ idf_component_register(SRCS # --- Tasks ---
                             "control_math/src/WheelVelocityController.cpp"
                             "algorithms/PIDController.cpp"
                             "algorithms/LongitudinalOdometry.cpp"
+                            "algorithms/LongitudinalMotionProfile.cpp"
                             "algorithms/LongitudinalCascadeBalanceStrategy.cpp"
                             "algorithms/NestedPidBalanceStrategy.cpp"
                             "algorithms/BalancingAlgorithm.cpp"

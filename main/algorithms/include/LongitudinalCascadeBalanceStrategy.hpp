@@ -1,13 +1,11 @@
 #pragma once
 
 #include "IBalanceControlStrategy.hpp"
+#include "LongitudinalMotionProfile.hpp"
 #include "PIDController.hpp"
 #include "config/BalanceStrategyConfig.hpp"
 #include <mutex>
 
-// First implementation of the longitudinal strategy. It deliberately keeps
-// the position and velocity loops dormant until the motion semantics and
-// anti-windup rules are introduced in later stages.
 struct LongitudinalMixerResult {
     float balanceEffort = 0.0f;
     float syncEffort = 0.0f;
@@ -36,6 +34,8 @@ public:
 
     // Exposed for deterministic tests and future telemetry.
     float getLastTargetPitchDeg() const;
+    float getLastTargetVelocityMps() const;
+    double getLastHoldPositionM() const;
 
     // Keep common and differential effort within the actuator range without
     // changing the requested mean effort.
@@ -50,6 +50,7 @@ private:
     mutable std::mutex m_mutex;
     PIDController m_pitchPid;
     PIDController m_velocityPid;
+    LongitudinalMotionProfile m_motionProfile;
     LongitudinalCascadeStrategyConfig m_config;
 
     float m_targetPitch_deg = 0.0f;
@@ -60,7 +61,16 @@ private:
     float m_last_desired_yaw_rate_dps = 0.0f;
     BalanceControlDiagnostics m_last_diagnostics = {};
     bool m_target_pitch_initialized = false;
+    bool m_motion_session_initialized = false;
+    bool m_velocity_anti_windup = false;
+    BalanceControlPhase m_motion_phase = BalanceControlPhase::INACTIVE;
+    double m_hold_position_m = 0.0;
+    float m_last_target_velocity_mps = 0.0f;
+    float m_last_command_velocity_mps = 0.0f;
 
     float clampTargetPitch(float targetPitch_deg) const;
     float slewTargetPitch(float targetPitch_deg, float dtSeconds);
+    MotorEffort updatePitchBaseline(const BalanceControlInput& input);
+    MotorEffort updateMotion(const BalanceControlInput& input);
+    void resetMotionState();
 };

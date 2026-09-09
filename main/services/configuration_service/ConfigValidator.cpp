@@ -247,6 +247,38 @@ bool ConfigValidator::validate(const ConfigData& config, std::string& error) con
         error = "longitudinal_cascade strategy requires configured pitch baseline";
         return false;
     }
+    if (config.control.strategies.active == BalanceStrategyId::LONGITUDINAL_CASCADE) {
+        if (longitudinal.max_velocity_mps <= 0.0f ||
+            longitudinal.max_velocity_mps > 5.0f ||
+            longitudinal.max_acceleration_mps2 <= 0.0f ||
+            longitudinal.max_acceleration_mps2 > 20.0f ||
+            longitudinal.max_deceleration_mps2 <= 0.0f ||
+            longitudinal.max_deceleration_mps2 > 20.0f ||
+            longitudinal.max_hold_velocity_mps < 0.0f ||
+            longitudinal.max_hold_velocity_mps > longitudinal.max_velocity_mps) {
+            error = "active longitudinal_cascade requires usable velocity and acceleration limits";
+            return false;
+        }
+        if (longitudinal.hold_position_deadband_m < 0.0f ||
+            longitudinal.hold_velocity_deadband_mps < 0.0f) {
+            error = "active longitudinal_cascade HOLD deadbands must be non-negative";
+            return false;
+        }
+        if (longitudinal.velocity.pid_output_min >= 0.0f ||
+            longitudinal.velocity.pid_output_max <= 0.0f ||
+            longitudinal.velocity.pid_ki <= 0.0f ||
+            longitudinal.velocity.pid_kd != 0.0f ||
+            (longitudinal.velocity.pid_kp == 0.0f &&
+             longitudinal.velocity.pid_ki == 0.0f)) {
+            error = "active longitudinal_cascade.velocity must be a signed PI controller";
+            return false;
+        }
+        if (longitudinal.velocity.pid_output_min < -longitudinal.max_pitch_offset_deg ||
+            longitudinal.velocity.pid_output_max > longitudinal.max_pitch_offset_deg) {
+            error = "active longitudinal_cascade.velocity output must fit max_pitch_offset_deg";
+            return false;
+        }
+    }
 
     if (config.pid_tuning.step_effort <= 0.0f || config.pid_tuning.step_effort > 1.0f) {
         error = "pid_tuning.step_effort out of range (0,1]";

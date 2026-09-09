@@ -4,6 +4,7 @@
 #pragma once
 #include "EventBus.hpp"
 #include "EventHandler.hpp"
+#include "config/BalanceStrategyConfig.hpp"
 #include "config/ControlConfig.hpp"
 #include "config/SystemBehaviorConfig.hpp"
 #include <mutex>                    // For thread safety
@@ -14,6 +15,7 @@ class BaseEvent;
 class COMMAND_InputModeChanged;
 class CONFIG_FullConfigUpdate;
 class MOTION_TargetMovement;
+class MOTION_TargetLinearVelocity;
 class UI_JoystickInput;
 
 class CommandProcessor : public EventHandler {
@@ -52,6 +54,9 @@ private:
     uint64_t m_input_timeout_us;                // Declaration Order: 13 (From SystemBehaviorConfig)
     uint64_t m_timeout_check_interval_us;       // Declaration Order: 14 (From SystemBehaviorConfig)
     float m_max_angular_velocity_dps;           // Declaration Order: 15 (From SystemBehaviorConfig)
+    BalanceStrategyId m_active_strategy = BalanceStrategyId::NESTED_PID;
+    float m_max_linear_velocity_mps = 0.0f;
+    uint64_t m_linear_command_sequence = 0;
 
     // --- Event Handlers ---
     void handleInputModeChange(const COMMAND_InputModeChanged& event);
@@ -61,6 +66,7 @@ private:
     // --- Internal Helpers ---
     void periodicTimeoutCheck();
     void publishTargetCommand(float pitchOffsetDeg, float angVelDps);
+    void publishLinearVelocityCommand(float velocityMps, bool stop);
     void applyConfig(const ControlConfig& controlConf, const SystemBehaviorConfig& behaviorConf);
     esp_err_t startTimeoutTimer();
     esp_err_t stopTimeoutTimer();

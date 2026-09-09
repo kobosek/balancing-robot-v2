@@ -4,6 +4,7 @@
 #include "CommandProcessor.hpp"
 #include "COMMAND_InputModeChanged.hpp"
 #include "MOTION_TargetMovement.hpp"
+#include "MOTION_TargetLinearVelocity.hpp"
 #include "EventBus.hpp"
 #include "BaseEvent.hpp"
 #include "UI_JoystickInput.hpp"
@@ -14,8 +15,6 @@
 #include <algorithm>
 #include <cmath>
 #include "esp_timer.h"
-
-static const char* TAG = "CommandProc";
 
 // --- Constructor: Takes initial config structs ---
 CommandProcessor::CommandProcessor(EventBus& bus, const ControlConfig& initialControl, const SystemBehaviorConfig& initialBehavior) :
@@ -96,20 +95,32 @@ void CommandProcessor::handleEvent(const BaseEvent& event) {
 // Helper to apply config values
 void CommandProcessor::applyConfig(const ControlConfig& controlConf, const SystemBehaviorConfig& behaviorConf) {
     bool restart_timer = false;
+    bool strategy_changed = false;
     float joystick_exponent = controlConf.joystick_exponent;
     float max_target_pitch_offset_deg = controlConf.max_target_pitch_offset_deg;
     float joystick_deadzone = behaviorConf.joystick_deadzone;
     uint64_t input_timeout_us = behaviorConf.joystick_timeout_ms * 1000ULL;
     uint64_t timeout_check_interval_us = behaviorConf.joystick_check_interval_ms * 1000ULL;
     float max_angular_velocity_dps = behaviorConf.max_target_angular_velocity_dps;
+    const BalanceStrategyId active_strategy = controlConf.strategies.active;
+    const float max_linear_velocity_mps =
+        controlConf.strategies.longitudinal_cascade.max_velocity_mps;
     {
         std::lock_guard<std::mutex> lock(m_target_mutex);
+        strategy_changed = m_active_strategy != active_strategy;
         m_joystick_exponent = joystick_exponent;
         m_max_target_pitch_offset_deg = max_target_pitch_offset_deg;
         m_joystick_deadzone = joystick_deadzone;
         m_input_timeout_us = input_timeout_us;
         m_timeout_check_interval_us = timeout_check_interval_us;
         m_max_angular_velocity_dps = max_angular_velocity_dps;
+        m_active_strategy = active_strategy;
+        m_max_linear_velocity_mps = max_linear_velocity_mps;
+        if (strategy_changed) {
+            m_target_pitch_offset_deg = 0.0f;
+            m_target_angular_velocity_dps = 0.0f;
+            m_input_timed_out = true;
+        }
         restart_timer = m_timeout_timer && esp_timer_is_active(m_timeout_timer);
     }
 
@@ -126,6 +137,14 @@ void CommandProcessor::applyConfig(const ControlConfig& controlConf, const Syste
         } else {
             ESP_LOGE(TAG, "Failed to stop timer to update interval, timer may have old interval!");
         }
+    }
+
+    // A strategy change is only accepted while the control mode is inactive,
+    // but clear any command that could otherwise be interpreted by the next
+    // session.  Do not emit a motion command while input is disabled.
+    if (strategy_changed) {
+        ESP_LOGI(TAG, "Selected command semantics for strategy '%s'",
+                 balanceStrategyIdToString(active_strategy));
     }
 }
 
@@ -157,15 +176,26 @@ void CommandProcessor::handleInputModeChange(const COMMAND_InputModeChanged& eve
             m_last_input_time_us = esp_timer_get_time();
             m_input_timed_out = true;
         }
-        publishTargetCommand(0.0f, 0.0f);
+        BalanceStrategyId active_strategy;
+        {
+            std::lock_guard<std::mutex> lock(m_target_mutex);
+            active_strategy = m_active_strategy;
+        }
+        if (active_strategy == BalanceStrategyId::LONGITUDINAL_CASCADE) {
+            publishLinearVelocityCommand(0.0f, true);
+        } else {
+            publishTargetCommand(0.0f, 0.0f);
+        }
         startTimeoutTimer();
 
     } else if (!accepting_input && was_accepting_input) {
         ESP_LOGD(TAG, "CP: Disabling command input, stopping timeout timer, resetting targets.");
         stopTimeoutTimer();
         bool had_velocity = false;
+        BalanceStrategyId active_strategy;
         {
             std::lock_guard<std::mutex> lock(m_target_mutex);
+            active_strategy = m_active_strategy;
             if (std::fabs(m_target_pitch_offset_deg) > 1e-4f || std::fabs(m_target_angular_velocity_dps) > 1e-4f) {
                  m_target_pitch_offset_deg = 0.0f;
                  m_target_angular_velocity_dps = 0.0f;
@@ -173,7 +203,11 @@ void CommandProcessor::handleInputModeChange(const COMMAND_InputModeChanged& eve
             }
             m_input_timed_out = true;
         }
-        if (had_velocity) {
+        if (active_strategy == BalanceStrategyId::LONGITUDINAL_CASCADE) {
+            // Publish even when the numeric target is already zero: this is a
+            // validity transition and must invalidate an old drive command.
+            publishLinearVelocityCommand(0.0f, true);
+        } else if (had_velocity) {
             publishTargetCommand(0.0f, 0.0f);
         }
     }
@@ -187,6 +221,8 @@ void CommandProcessor::handleJoystickInput(const UI_JoystickInput& event) {
     float joystick_exponent = 1.0f;
     float max_target_pitch_offset_deg = 0.0f;
     float max_angular_velocity_dps = 0.0f;
+    BalanceStrategyId active_strategy = BalanceStrategyId::NESTED_PID;
+    float max_linear_velocity_mps = 0.0f;
 
     { // Lock scope for updating timestamp, timeout flag, and copying config
         std::lock_guard<std::mutex> lock(m_target_mutex);
@@ -198,6 +234,8 @@ void CommandProcessor::handleJoystickInput(const UI_JoystickInput& event) {
         joystick_exponent = m_joystick_exponent;
         max_target_pitch_offset_deg = m_max_target_pitch_offset_deg;
         max_angular_velocity_dps = m_max_angular_velocity_dps;
+        active_strategy = m_active_strategy;
+        max_linear_velocity_mps = m_max_linear_velocity_mps;
     }
 
     if (!accepting_input) {
@@ -214,6 +252,16 @@ void CommandProcessor::handleJoystickInput(const UI_JoystickInput& event) {
 
     float mapped_x = std::copysign(std::pow(std::fabs(effective_x), joystick_exponent), effective_x);
     float desiredAngVelDps = max_angular_velocity_dps * (-mapped_x);
+
+    if (active_strategy == BalanceStrategyId::LONGITUDINAL_CASCADE) {
+        const float desiredVelocityMps = max_linear_velocity_mps * (-mapped_y);
+        // Unlike the legacy pitch/yaw command, every packet is published so
+        // an unchanged joystick position refreshes command freshness.
+        publishLinearVelocityCommand(
+            desiredVelocityMps,
+            std::fabs(desiredVelocityMps) <= 1e-5f);
+        return;
+    }
 
     // --- Check if targets changed OR if input was previously timed out ---
     bool needs_publish = false;
@@ -236,6 +284,8 @@ void CommandProcessor::handleJoystickInput(const UI_JoystickInput& event) {
 
 void CommandProcessor::periodicTimeoutCheck() {
     bool publish_zero = false;
+    bool publish_linear_stop = false;
+    BalanceStrategyId active_strategy = BalanceStrategyId::NESTED_PID;
     {
         std::lock_guard<std::mutex> lock(m_target_mutex);
         if (!m_accepting_input) {
@@ -249,11 +299,16 @@ void CommandProcessor::periodicTimeoutCheck() {
                 m_target_angular_velocity_dps = 0.0f;
                 publish_zero = true;
             }
+            active_strategy = m_active_strategy;
+            publish_linear_stop = active_strategy == BalanceStrategyId::LONGITUDINAL_CASCADE;
             m_input_timed_out = true;
         }
     } // Mutex released
 
-    if (publish_zero) {
+    if (publish_linear_stop) {
+        // The stop event is required even if the last numeric target was zero.
+        publishLinearVelocityCommand(0.0f, true);
+    } else if (publish_zero) {
         publishTargetCommand(0.0f, 0.0f);
     }
 }
@@ -308,4 +363,21 @@ void CommandProcessor::publishTargetCommand(float pitchOffsetDeg, float angVelDp
     MOTION_TargetMovement cmd(pitchOffsetDeg, angVelDps);
     m_eventBus.publish(cmd);
     ESP_LOGD(TAG, "CP: Published Target CMD: PitchOffset=%.2f deg, AngVel=%.2f dps", pitchOffsetDeg, angVelDps);
+}
+
+void CommandProcessor::publishLinearVelocityCommand(float velocityMps, bool stop) {
+    uint64_t sequence = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_target_mutex);
+        sequence = ++m_linear_command_sequence;
+    }
+    MOTION_TargetLinearVelocity cmd(
+        velocityMps,
+        stop,
+        sequence,
+        esp_timer_get_time());
+    m_eventBus.publish(cmd);
+    ESP_LOGD(TAG, "CP: Published linear command: velocity=%.3f m/s stop=%d seq=%llu",
+             velocityMps, stop ? 1 : 0,
+             static_cast<unsigned long long>(sequence));
 }

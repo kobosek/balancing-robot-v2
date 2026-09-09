@@ -35,11 +35,26 @@ public:
     void setParameters(const PidParameters& parameters);
     const PidParameters& parameters() const { return m_parameters; }
 
-    PidStepResult compute(float setpoint, float measurement, float dt);
+    // `integrate` is true for the legacy behaviour.  A cascade owner can
+    // temporarily suppress the integral update when a downstream limit is
+    // blocking the requested correction, while the error/derivative state is
+    // still advanced for the next sample.
+    PidStepResult compute(float setpoint, float measurement, float dt,
+                          bool integrate = true);
     PidStepResult computeWithMeasurementRate(float setpoint,
                                              float measurement,
                                              float measurementRate,
-                                             float dt);
+                                             float dt,
+                                             bool integrate = true);
+    // Evaluate the next step without changing integral or derivative state.
+    // The returned integral/output include the candidate trapezoidal integral,
+    // which lets a cascade decide whether downstream limits require suppressing
+    // that update before committing it.
+    PidStepResult preview(float setpoint, float measurement, float dt) const;
+    PidStepResult previewWithMeasurementRate(float setpoint,
+                                             float measurement,
+                                             float measurementRate,
+                                             float dt) const;
     void reset();
 
 private:
@@ -47,7 +62,10 @@ private:
     float m_integral = 0.0f;
     float m_lastError = 0.0f;
 
-    PidStepResult finish(float pTerm, float dTerm, float error, float dt);
+    PidStepResult finish(float pTerm, float dTerm, float error, float dt,
+                         bool integrate);
+    PidStepResult previewFinish(float pTerm, float dTerm, float error,
+                                float dt) const;
 };
 
 } // namespace control_math

@@ -9,6 +9,7 @@ idf_component_register(
          "${PRODUCTION}/algorithms/BalancingAlgorithm.cpp"
          "${PRODUCTION}/algorithms/NestedPidBalanceStrategy.cpp"
          "${PRODUCTION}/algorithms/LongitudinalOdometry.cpp"
+         "${PRODUCTION}/algorithms/LongitudinalMotionProfile.cpp"
          "${PRODUCTION}/algorithms/LongitudinalCascadeBalanceStrategy.cpp"
          "test_encoder.cpp" "pcnt_fakes.cpp" "test_sensor_frame.cpp"
          "${PRODUCTION}/services/EncoderService.cpp"

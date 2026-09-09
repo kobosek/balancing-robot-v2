@@ -72,7 +72,10 @@ MotorEffort BalancingAlgorithm::update(float dt, float currentPitch_deg, float c
                                       float currentYawRate_dps,
                                       float currentSpeedLeft_dps, float currentSpeedRight_dps,
                                       float targetPitchOffset_deg, float targetAngVel_dps,
-                                      const LongitudinalOdometryResult& odometry)
+                                      const LongitudinalOdometryResult& odometry,
+                                      int64_t nowUs,
+                                      int64_t motionTimeoutUs,
+                                      const LongitudinalMotionCommand& motion)
 {
     std::lock_guard<std::mutex> lock(m_strategyMutex);
     if (!m_strategy) {
@@ -89,6 +92,9 @@ MotorEffort BalancingAlgorithm::update(float dt, float currentPitch_deg, float c
         currentSpeedRight_dps,
         targetPitchOffset_deg,
         targetAngVel_dps,
+        nowUs,
+        motionTimeoutUs,
+        motion,
         odometry
     };
     return m_strategy->update(input);

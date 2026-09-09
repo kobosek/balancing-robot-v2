@@ -44,7 +44,10 @@ ControlModeResult ControlModeExecutor::executeBalancing(const ControlModeInput& 
                                                 input.speedRight_dps,
                                                 input.targetPitchOffset_deg,
                                                 input.targetAngularVelocity_dps,
-                                                input.odometry);
+                                                input.odometry,
+                                                input.nowUs,
+                                                input.motionTimeoutUs,
+                                                input.motion);
     result.telemetryTargetPitchOffset_deg = input.targetPitchOffset_deg;
     result.telemetryTargetAngularVelocity_dps = input.targetAngularVelocity_dps;
     result.telemetryTargetYaw_deg = m_balancingAlgorithm.getLastTargetYawDeg();
