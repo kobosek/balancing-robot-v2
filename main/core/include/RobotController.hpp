@@ -3,6 +3,8 @@
 #include <atomic>
 #include <mutex>
 #include "config/SystemBehaviorConfig.hpp"
+#include "config/EncoderConfig.hpp"
+#include "LongitudinalOdometry.hpp"
 #include "esp_err.h"
 #include "EventHandler.hpp"
 #include "CONTROL_RunModeChanged.hpp"
@@ -30,7 +32,8 @@ public:
         BatteryService& batteryService,
         ControlModeExecutor& controlModeExecutor,
         ControlEventDispatcher& controlEventDispatcher,
-        const SystemBehaviorConfig& behavior
+        const SystemBehaviorConfig& behavior,
+        const EncoderConfig& encoderConfig
     );
 
     void runControlStep(float dt);
@@ -55,6 +58,8 @@ private:
     uint32_t m_generation = 0;
     uint64_t m_lastImuSequence = 0;
     uint32_t m_lastImuGeneration = 0;
+    uint64_t m_lastOdometryArm = 0;
+    bool m_hasOdometryArm = false;
     std::atomic<int64_t> m_maxSampleAgeUs{20000};
     // Updated by event handlers and read by the control task.
     std::atomic<float> m_latestTargetPitchOffset_deg{0.0f};
@@ -62,6 +67,7 @@ private:
     std::atomic<ControlRunMode> m_controlMode{ControlRunMode::DISABLED};
     std::atomic<int> m_telemetryStateCode{0};
     std::atomic<bool> m_telemetryEnabled{false};
+    LongitudinalOdometry m_longitudinalOdometry;
 
     void stopControlLoop();
     TelemetryDataPoint buildTelemetrySnapshot(int64_t timestamp_us,

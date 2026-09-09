@@ -1,5 +1,6 @@
 // main/web/StateApiHandler.cpp
 #include "StateApiHandler.hpp"
+#include "BalancingAlgorithm.hpp"
 #include "IMUService.hpp"
 #include "esp_timer.h"
 #include "StateManager.hpp"
@@ -17,12 +18,14 @@
 #include "esp_http_server.h"
 
 StateApiHandler::StateApiHandler(StateManager& stateManager,
+                                 BalancingAlgorithm& balancingAlgorithm,
                                  BatteryService& batteryService,
                                  PidTuningService& pidTuningService,
                                  GuidedCalibrationService& guidedCalibrationService,
                                  ConfigurationService& configService,
                                  OTAService& otaService, IMUService& imuService)
     : m_imuService(imuService), m_stateManager(stateManager),
+      m_balancingAlgorithm(balancingAlgorithm),
       m_batteryService(batteryService),
       m_pidTuningService(pidTuningService),
       m_guidedCalibrationService(guidedCalibrationService),
@@ -149,13 +152,14 @@ esp_err_t StateApiHandler::handleRequest(httpd_req_t *req) {
     cJSON_AddBoolToObject(root, "fall_detection_enabled", systemStatus.fallDetectionEnabled);
     cJSON_AddBoolToObject(root, "critical_battery_motor_shutdown_enabled", systemStatus.criticalBatteryMotorShutdownEnabled);
     cJSON_AddStringToObject(root, "active_balance_strategy",
-                            balanceStrategyIdToString(configData.control.strategies.active));
+                            balanceStrategyIdToString(m_balancingAlgorithm.getActiveStrategyId()));
     cJSON_AddStringToObject(root, "configured_balance_strategy",
                             balanceStrategyIdToString(configData.control.strategies.active));
     cJSON_AddNumberToObject(root, "balance_strategy_config_revision",
                             configData.control.strategies.revision);
     cJSON_AddBoolToObject(root, "strategy_change_in_progress", false);
-    cJSON_AddBoolToObject(root, "longitudinal_cascade_available", false);
+    cJSON_AddBoolToObject(root, "longitudinal_cascade_available",
+                          configData.control.strategies.longitudinal_cascade.configured);
     cJSON_AddBoolToObject(root, "yaw_control_enabled",
                           configData.control.strategies.nested_pid.yaw_control_enabled);
     cJSON_AddNumberToObject(root, "battery_voltage", batteryStatus.voltage);

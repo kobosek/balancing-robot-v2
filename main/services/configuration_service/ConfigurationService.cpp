@@ -92,7 +92,7 @@ esp_err_t ConfigurationService::updateConfigFromJson(const std::string& json, st
         ESP_LOGE(TAG, "Validation failed for config update: %s", validationError.c_str());
         return ESP_FAIL; // Return specific validation failure (maybe a different error code?)
     }
-    
+
     // Store old config to detect changes
     ConfigData oldConfig;
     ConfigData newConfig;
@@ -103,6 +103,12 @@ esp_err_t ConfigurationService::updateConfigFromJson(const std::string& json, st
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         oldConfig = m_configData;  // Store old config for comparison
+        if (m_controlActive &&
+            tempConfig.control.strategies.active != oldConfig.control.strategies.active) {
+            if (error) *error = "Strategy changes require an inactive control mode";
+            ESP_LOGW(TAG, "Rejected strategy change while control mode is active");
+            return ESP_ERR_INVALID_STATE;
+        }
         if (tempConfig.control.strategies.revision != oldConfig.control.strategies.revision) {
             if (error) *error = "Configuration revision conflict; reload before saving";
             ESP_LOGW(TAG, "Rejected config update with stale strategy revision (%" PRIu32 ", current %" PRIu32 ")",
@@ -242,10 +248,21 @@ void ConfigurationService::handleEvent(const BaseEvent& event) {
     if (event.is<IMU_GyroOffsetsUpdated>()) {
         const IMU_GyroOffsetsUpdated& offsetEvent = event.as<IMU_GyroOffsetsUpdated>();
         updateImuGyroOffsets(offsetEvent.x_dps, offsetEvent.y_dps, offsetEvent.z_dps);
+    } else if (event.is<CONTROL_RunModeChanged>()) {
+        handleRunModeChanged(event.as<CONTROL_RunModeChanged>());
     } else {
         ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
                  getHandlerName().c_str(), event.eventName());
     }
+}
+
+void ConfigurationService::handleRunModeChanged(const CONTROL_RunModeChanged& event) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (event.armId < m_controlArmId) {
+        return;
+    }
+    m_controlArmId = event.armId;
+    m_controlActive = event.mode != ControlRunMode::DISABLED;
 }
 
 // Keep for backward compatibility

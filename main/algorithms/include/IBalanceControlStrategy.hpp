@@ -19,4 +19,5 @@ public:
     virtual float getLastTargetYawDeg() const = 0;
     virtual float getLastDesiredYawRateDPS() const = 0;
     virtual bool isYawControlEnabled() const = 0;
+    virtual BalanceControlDiagnostics getDiagnostics() const { return {}; }
 };

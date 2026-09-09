@@ -75,6 +75,9 @@ void EncoderService::reset() {
     m_left.seeded = m_right.seeded = false;
     m_left.logicalCount = m_right.logicalCount = 0;
     m_left.speedDps = m_right.speedDps = 0;
+    ++m_left.continuityEpoch;
+    ++m_right.continuityEpoch;
+    m_left.continuityLossActive = m_right.continuityLossActive = false;
     EncoderFrame frame;
     frame.left = readWheel(m_unit_left, m_left);
     frame.right = readWheel(m_unit_right, m_right);
@@ -180,13 +183,26 @@ EncoderWheelFrame EncoderService::readWheel(pcnt_unit_handle_t unit, WheelState&
     EncoderWheelFrame frame;
     frame.logicalCount = state.logicalCount;
     frame.continuityLost = state.continuityLost;
+    frame.continuityEpoch = state.continuityEpoch;
     if (!unit || m_degs_per_pulse <= 0) { frame.error = ESP_ERR_INVALID_STATE; return frame; }
+    const auto markContinuityLoss = [&]() {
+        if (!state.continuityLossActive) {
+            ++state.continuityEpoch;
+            state.continuityLossActive = true;
+        }
+        state.continuityLost = true;
+        frame.continuityLost = true;
+        frame.continuityEpoch = state.continuityEpoch;
+    };
     // Complete a stopped rebase before accepting another measurement. On any
     // error stay invalid and retry; never invent a valid zero-speed sample.
     if (state.stopped) {
         frame.error = pcnt_unit_clear_count(unit);
         if (frame.error == ESP_OK) frame.error = pcnt_unit_start(unit);
-        if (frame.error != ESP_OK) return frame;
+        if (frame.error != ESP_OK) {
+            markContinuityLoss();
+            return frame;
+        }
         state.stopped = false;
         state.seeded = false;
     }
@@ -205,7 +221,7 @@ EncoderWheelFrame EncoderService::readWheel(pcnt_unit_handle_t unit, WheelState&
     if (frame.error != ESP_OK) {
         state.seeded = false;
         state.speedDps = 0;
-        state.continuityLost = frame.continuityLost = true;
+        markContinuityLoss();
         return frame;
     }
     frame.rawCount = count;
@@ -214,7 +230,8 @@ EncoderWheelFrame EncoderService::readWheel(pcnt_unit_handle_t unit, WheelState&
     frame.measurementPeriodUs = state.seeded ? elapsed : 0;
     // No wrap correction: IDF adds the limit in its ISR. A half-limit jump
     // cannot be trusted (including an observation before that ISR runs).
-    if (state.seeded && elapsed > 0 && std::abs(delta) < jumpLimit) {
+    const bool trustedDelta = state.seeded && elapsed > 0 && std::abs(delta) < jumpLimit;
+    if (trustedDelta) {
         frame.deltaCount = delta;
         state.logicalCount += delta;
         const float speed = delta * m_degs_per_pulse * 1000000.0f / elapsed;
@@ -227,9 +244,10 @@ EncoderWheelFrame EncoderService::readWheel(pcnt_unit_handle_t unit, WheelState&
         state.speedDps = alpha * speed + (1.0f - alpha) * state.speedDps;
         frame.valid = std::isfinite(state.speedDps);
         frame.speedDps = frame.valid ? state.speedDps : 0;
+        if (frame.valid) state.continuityLossActive = false;
     } else {
         state.speedDps = 0;
-        if (state.seeded) state.continuityLost = true;
+        if (state.seeded) markContinuityLoss();
     }
     state.previousCount = count;
     state.previousTimestampUs = frame.sampleTimestampUs;
@@ -239,13 +257,14 @@ EncoderWheelFrame EncoderService::readWheel(pcnt_unit_handle_t unit, WheelState&
         frame.valid = false;
         frame.speedDps = 0;
         frame.rebased = true;
-        state.continuityLost = true;
+        markContinuityLoss();
         frame.error = pcnt_unit_stop(unit);
         if (frame.error == ESP_OK) state.stopped = true;
         // Stop failure must not leave an overflowing accumulator running
         // unnoticed: every subsequent frame remains invalid and retries stop.
     }
     frame.continuityLost = state.continuityLost;
+    frame.continuityEpoch = state.continuityEpoch;
     return frame;
 }
 

@@ -75,7 +75,8 @@ esp_err_t ApplicationEventWiring::wire(const ApplicationContext& context) const
     eventBus.subscribe<COMMAND_InputModeChanged,
                        UI_JoystickInput,
                        CONFIG_FullConfigUpdate>(asHandler(context.commandProcessorHandle()));
-    eventBus.subscribe<CONFIG_FullConfigUpdate, CONFIG_PidConfigUpdate>(asHandler(context.balancingAlgorithmHandle()));
+    eventBus.subscribe<CONFIG_FullConfigUpdate, CONFIG_PidConfigUpdate,
+                       CONTROL_RunModeChanged>(asHandler(context.balancingAlgorithmHandle()));
     eventBus.subscribe<IMU_OrientationData, IMU_AvailabilityChanged,
                        BALANCE_MonitorModeChanged,
                        CONFIG_BehaviorConfigUpdate>(asHandler(context.balanceMonitorHandle()));
@@ -113,6 +114,7 @@ esp_err_t ApplicationEventWiring::wire(const ApplicationContext& context) const
                        IMU_AvailabilityChanged,
                        CONFIG_FullConfigUpdate>(asHandler(context.stateManagerHandle()));
     eventBus.subscribe<IMU_GyroOffsetsUpdated>(asHandler(context.configServiceHandle()));
+    eventBus.subscribe<CONTROL_RunModeChanged>(asHandler(context.configServiceHandle()));
     eventBus.subscribe<CONFIG_ImuConfigUpdate,
                        CONFIG_BehaviorConfigUpdate,
                        IMU_CalibrationRequest,

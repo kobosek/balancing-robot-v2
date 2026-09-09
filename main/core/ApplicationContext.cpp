@@ -256,7 +256,8 @@ esp_err_t ApplicationContext::initializeControlSubsystem()
         *m_batteryService,
         *m_controlModeExecutor,
         *m_controlEventDispatcher,
-        behaviorConf
+        behaviorConf,
+        encoderConf
     );
     ESP_RETURN_ON_FALSE(m_robotController != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate robot controller");
     ESP_LOGI(TAG, "RobotController initialized");
@@ -281,6 +282,7 @@ esp_err_t ApplicationContext::initializeConnectivitySubsystem()
     auto commandApiHandler = std::make_unique<CommandApiHandler>(*m_eventBus);
     auto stateApiHandler = std::make_unique<StateApiHandler>(
         *m_stateManager,
+        *m_balancingAlgorithm,
         *m_batteryService,
         *m_pidTuningService,
         *m_guidedCalibrationService,

@@ -189,6 +189,38 @@ TEST_CASE("encoder filter uses the configured nominal loop period and alpha endp
     sensor_fake::clockUs = -1;
 }
 
+TEST_CASE("encoder continuity epoch changes on reset and each new loss", "[encoder][continuity]") {
+    pcnt_fake::reset(); sensor_fake::clockUs = 1000000;
+    EncoderConfig config; config.speed_filter_alpha = 1;
+    EncoderService encoders(config); TEST_ASSERT_EQUAL(ESP_OK, encoders.init());
+    const auto initial = encoders.getFrame();
+
+    sensor_fake::clockUs += 5000;
+    encoders.reset();
+    const auto resetFrame = encoders.getFrame();
+    TEST_ASSERT_TRUE(resetFrame.left.continuityEpoch > initial.left.continuityEpoch);
+    TEST_ASSERT_TRUE(resetFrame.right.continuityEpoch > initial.right.continuityEpoch);
+
+    pcnt_fake::advance(0, 7); sensor_fake::clockUs += 5000; encoders.update();
+    pcnt_fake::failNext = pcnt_fake::Operation::READ; pcnt_fake::failWheel = 0;
+    sensor_fake::clockUs += 5000; encoders.update();
+    const auto firstLoss = encoders.getFrame();
+    TEST_ASSERT_TRUE(firstLoss.left.continuityLost);
+    TEST_ASSERT_TRUE(firstLoss.left.continuityEpoch > resetFrame.left.continuityEpoch);
+
+    sensor_fake::clockUs += 5000; encoders.update();
+    pcnt_fake::advance(0, 7); sensor_fake::clockUs += 5000; encoders.update();
+    const auto recovered = encoders.getFrame();
+    TEST_ASSERT_TRUE(recovered.left.valid);
+    TEST_ASSERT_EQUAL_UINT(firstLoss.left.continuityEpoch, recovered.left.continuityEpoch);
+
+    pcnt_fake::failNext = pcnt_fake::Operation::READ; pcnt_fake::failWheel = 0;
+    sensor_fake::clockUs += 5000; encoders.update();
+    const auto secondLoss = encoders.getFrame();
+    TEST_ASSERT_TRUE(secondLoss.left.continuityEpoch > firstLoss.left.continuityEpoch);
+    sensor_fake::clockUs = -1;
+}
+
 TEST_CASE("PCNT reset observed before accumulator ISR gets one bounded re-read", "[encoder][timing]") {
     for (int sign : {-1, 1}) {
         pcnt_fake::reset(); sensor_fake::clockUs = 1000000;

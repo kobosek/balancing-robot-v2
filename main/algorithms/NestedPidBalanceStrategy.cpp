@@ -17,6 +17,9 @@ NestedPidBalanceStrategy::NestedPidBalanceStrategy() :
 MotorEffort NestedPidBalanceStrategy::update(const BalanceControlInput& input)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
+    m_last_diagnostics = {};
+    m_last_diagnostics.strategyId = BalanceStrategyId::NESTED_PID;
+    m_last_diagnostics.phase = BalanceControlPhase::INACTIVE;
     MotorEffort effort = {0.0f, 0.0f};
     if (input.dt <= 0.0f) {
         ESP_LOGW(TAG, "Invalid dt (%.4f)", input.dt);
@@ -88,6 +91,15 @@ MotorEffort NestedPidBalanceStrategy::update(const BalanceControlInput& input)
     effort.left = std::max(-m_max_control_effort, std::min(m_max_control_effort, effort.left));
     effort.right = std::max(-m_max_control_effort, std::min(m_max_control_effort, effort.right));
 
+    m_last_diagnostics = {};
+    m_last_diagnostics.strategyId = BalanceStrategyId::NESTED_PID;
+    m_last_diagnostics.phase = BalanceControlPhase::LEGACY;
+    m_last_diagnostics.valid = true;
+    m_last_diagnostics.targetPitchValid = true;
+    m_last_diagnostics.targetPitch_deg = input.targetPitchOffset_deg;
+    m_last_diagnostics.leftEffort = effort.left;
+    m_last_diagnostics.rightEffort = effort.right;
+
     ESP_LOGV(TAG, "P:%.1f|PR:%.1f|TgtP:%.1f|Yaw:%.1f|TgtYaw:%.1f|YawErr:%.1f|YawR:%.1f|CmdYawR:%.1f|DesYawR:%.1f|YawRE:%.1f|YawAC:%.1f|YawRC:%.1f|TurnFF:%.1f|LSet:%.1f RSet:%.1f|LCur:%.1f RCur:%.1f|LEff:%.2f REff:%.2f",
              input.currentPitch_deg, input.currentPitchRate_dps, input.targetPitchOffset_deg,
              input.currentYaw_deg, targetYaw_deg, yawAngleError_deg,
@@ -114,6 +126,9 @@ void NestedPidBalanceStrategy::reset()
     m_last_speed_setpoint_right_dps = 0.0f;
     m_last_target_yaw_deg = 0.0f;
     m_last_desired_yaw_rate_dps = 0.0f;
+    m_last_diagnostics = {};
+    m_last_diagnostics.strategyId = BalanceStrategyId::NESTED_PID;
+    m_last_diagnostics.phase = BalanceControlPhase::INACTIVE;
 }
 
 void NestedPidBalanceStrategy::applyConfig(const ConfigData& config)
@@ -153,6 +168,9 @@ void NestedPidBalanceStrategy::applyConfig(const ConfigData& config)
 
     m_angle_pid_output_min = nested.angle.getOutputMin();
     m_angle_pid_output_max = nested.angle.getOutputMax();
+    m_last_diagnostics = {};
+    m_last_diagnostics.strategyId = BalanceStrategyId::NESTED_PID;
+    m_last_diagnostics.phase = BalanceControlPhase::INACTIVE;
     updateDimensions(config.encoder, config.dimensions);
 }
 
@@ -214,6 +232,12 @@ bool NestedPidBalanceStrategy::isYawControlEnabled() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_yaw_control_enabled;
+}
+
+BalanceControlDiagnostics NestedPidBalanceStrategy::getDiagnostics() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_last_diagnostics;
 }
 
 void NestedPidBalanceStrategy::updateDimensions(const EncoderConfig& encoderConfig,

@@ -3,6 +3,7 @@
 #include "ConfigData.hpp"
 #include "ConfigChangePublisher.hpp"
 #include "ConfigValidator.hpp"
+#include "CONTROL_RunModeChanged.hpp"
 #include "EventBus.hpp"
 #include "EventHandler.hpp"
 #include <string>
@@ -66,6 +67,9 @@ private:
     ConfigChangePublisher m_configChangePublisher;
     ConfigData m_configData; // Holds the current configuration
     mutable std::mutex m_mutex; // Protects m_configData
+    bool m_controlActive = false;
+    uint64_t m_controlArmId = 0;
 
     esp_err_t saveInternal(); // Internal save helper (assumes mutex is held)
+    void handleRunModeChanged(const CONTROL_RunModeChanged& event);
 };

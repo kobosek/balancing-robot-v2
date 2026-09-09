@@ -21,6 +21,7 @@ public:
     float getLastTargetYawDeg() const override;
     float getLastDesiredYawRateDPS() const override;
     bool isYawControlEnabled() const override;
+    BalanceControlDiagnostics getDiagnostics() const override;
 
 private:
     static constexpr const char* TAG = "NestedPidBalance";
@@ -44,6 +45,7 @@ private:
     float m_last_speed_setpoint_right_dps = 0.0f;
     float m_last_target_yaw_deg = 0.0f;
     float m_last_desired_yaw_rate_dps = 0.0f;
+    BalanceControlDiagnostics m_last_diagnostics = {};
 
     void updateDimensions(const EncoderConfig& encoderConfig, const RobotDimensionsConfig& dimensionsConfig);
     float yawRateToWheelDiffDps(float yawRate_dps) const;

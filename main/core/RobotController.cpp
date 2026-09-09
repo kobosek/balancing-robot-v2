@@ -23,7 +23,8 @@ RobotController::RobotController(
     BatteryService& batteryService,
     ControlModeExecutor& controlModeExecutor,
     ControlEventDispatcher& controlEventDispatcher,
-    const SystemBehaviorConfig& behavior
+    const SystemBehaviorConfig& behavior,
+    const EncoderConfig& encoderConfig
 ) :
     m_estimator(estimator),
     m_encoderService(encoderService),
@@ -35,7 +36,8 @@ RobotController::RobotController(
     m_latestTargetAngVel_dps(0.0f),
     m_controlMode(ControlRunMode::DISABLED),
     m_telemetryStateCode(0),
-    m_telemetryEnabled(false)
+    m_telemetryEnabled(false),
+    m_longitudinalOdometry(encoderConfig, behavior.imu_max_sample_age_ms * 1000LL)
 {
     m_maxSampleAgeUs = behavior.imu_max_sample_age_ms * 1000LL;
     ESP_LOGI(TAG, "RobotController constructed.");
@@ -108,6 +110,13 @@ void RobotController::runControlStep(float dt) {
     m_controlEventDispatcher.enqueueOrientation(orientation);
 
     const auto encoders = m_encoderService.getFrame();
+    if (!m_hasOdometryArm || arm != m_lastOdometryArm) {
+        m_longitudinalOdometry.reset();
+        m_lastOdometryArm = arm;
+        m_hasOdometryArm = true;
+    }
+    m_longitudinalOdometry.setMaxSampleAgeUs(m_maxSampleAgeUs.load(std::memory_order_relaxed));
+    const auto odometry = m_longitudinalOdometry.update(encoders, esp_timer_get_time());
     const float speedL_dps = encoders.left.speedDps;
     const float speedR_dps = encoders.right.speedDps;
     const bool reusedImuSample = orientation.sample_sequence == m_lastImuSequence &&
@@ -129,6 +138,7 @@ void RobotController::runControlStep(float dt) {
     modeInput.speedRight_dps = speedR_dps;
     modeInput.targetPitchOffset_deg = currentTargetPitchOffset_deg;
     modeInput.targetAngularVelocity_dps = currentTargetAngVel_dps;
+    modeInput.odometry = odometry;
 
     const auto fault = [&](const char* cause, esp_err_t error = ESP_OK) {
         const auto observed = esp_timer_get_time();

@@ -2,6 +2,7 @@
 
 #include "BalancingAlgorithm.hpp"
 #include "CONTROL_RunModeChanged.hpp"
+#include "LongitudinalOdometry.hpp"
 
 class GuidedCalibrationService;
 class PidTuningService;
@@ -17,6 +18,7 @@ struct ControlModeInput {
     float speedRight_dps = 0.0f;
     float targetPitchOffset_deg = 0.0f;
     float targetAngularVelocity_dps = 0.0f;
+    LongitudinalOdometryResult odometry = {};
 };
 
 struct ControlModeResult {
@@ -27,6 +29,8 @@ struct ControlModeResult {
     float telemetryDesiredYawRate_dps = 0.0f;
     float speedSetpointLeft_dps = 0.0f;
     float speedSetpointRight_dps = 0.0f;
+    LongitudinalOdometryResult odometry = {};
+    BalanceControlDiagnostics diagnostics = {};
 };
 
 class ControlModeExecutor {

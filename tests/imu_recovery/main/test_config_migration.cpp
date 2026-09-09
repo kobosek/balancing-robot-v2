@@ -39,7 +39,7 @@ TEST_CASE("legacy migration preserves unrelated values and ignores old health ti
     TEST_ASSERT_EQUAL(ESP_OK, parser.serialize(migrated, json));
     TEST_ASSERT_EQUAL(std::string::npos, json.find("imu_health"));
 }
-TEST_CASE("version three keeps strategy sets separate and rejects unavailable activation", "[config][strategy]") {
+TEST_CASE("version three keeps strategy sets separate and rejects incomplete activation", "[config][strategy]") {
     JsonConfigParser parser;
     ConfigData source;
     source.wifi.ssid = "test-network";
@@ -66,9 +66,31 @@ TEST_CASE("version three keeps strategy sets separate and rejects unavailable ac
     ConfigValidator validator;
     std::string validationError;
     TEST_ASSERT_FALSE(validator.validate(output, validationError));
-    TEST_ASSERT_NOT_EQUAL(std::string::npos, validationError.find("not available"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, validationError.find("requires configured"));
     cJSON_free(unavailable);
     cJSON_Delete(root);
+}
+TEST_CASE("configured longitudinal pitch baseline requires usable limits and gains", "[config][strategy]") {
+    ConfigData config;
+    config.wifi.ssid = "test-network";
+    auto& longitudinal = config.control.strategies.longitudinal_cascade;
+    longitudinal.configured = true;
+    longitudinal.pitch = {0.2f, 0.0f, 0.01f, -1.0f, 1.0f, -1.0f, 1.0f};
+    longitudinal.max_pitch_offset_deg = 5.0f;
+    longitudinal.max_pitch_rate_dps = 90.0f;
+    longitudinal.max_effort = 0.8f;
+
+    ConfigValidator validator;
+    std::string error;
+    TEST_ASSERT_TRUE(validator.validate(config, error));
+
+    longitudinal.max_effort = 0.0f;
+    TEST_ASSERT_FALSE(validator.validate(config, error));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, error.find("requires pitch"));
+
+    longitudinal.max_effort = 0.8f;
+    config.control.strategies.active = BalanceStrategyId::LONGITUDINAL_CASCADE;
+    TEST_ASSERT_TRUE(validator.validate(config, error));
 }
 TEST_CASE("future version and malformed new field are rejected without replacing output", "[imu][config]") {
     JsonConfigParser parser; ConfigData output; output.imu.gyro_offset_y = 9;

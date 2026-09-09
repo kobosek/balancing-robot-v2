@@ -219,8 +219,32 @@ bool ConfigValidator::validate(const ConfigData& config, std::string& error) con
         error = "control.strategies.longitudinal_cascade effort limits out of range [0,1]";
         return false;
     }
-    if (config.control.strategies.active == BalanceStrategyId::LONGITUDINAL_CASCADE) {
-        error = "longitudinal_cascade strategy is not available yet";
+    if (longitudinal.configured) {
+        if (longitudinal.max_effort <= 0.0f ||
+            longitudinal.max_pitch_offset_deg <= 0.0f ||
+            longitudinal.max_pitch_offset_deg > 45.0f ||
+            longitudinal.max_pitch_rate_dps <= 0.0f ||
+            longitudinal.max_pitch_rate_dps > 720.0f) {
+            error = "configured longitudinal_cascade requires pitch and effort limits in the supported range";
+            return false;
+        }
+        if (longitudinal.pitch.pid_output_min >= 0.0f ||
+            longitudinal.pitch.pid_output_max <= 0.0f ||
+            longitudinal.pitch.pid_ki != 0.0f ||
+            (longitudinal.pitch.pid_kp == 0.0f &&
+             longitudinal.pitch.pid_ki == 0.0f &&
+             longitudinal.pitch.pid_kd == 0.0f)) {
+            error = "configured longitudinal_cascade.pitch must be a signed PD controller with non-zero gain";
+            return false;
+        }
+        if (std::fabs(longitudinal.pitch_trim_deg) > 45.0f) {
+            error = "configured longitudinal_cascade.pitch_trim_deg out of range [-45,45]";
+            return false;
+        }
+    }
+    if (config.control.strategies.active == BalanceStrategyId::LONGITUDINAL_CASCADE &&
+        !longitudinal.configured) {
+        error = "longitudinal_cascade strategy requires configured pitch baseline";
         return false;
     }
 

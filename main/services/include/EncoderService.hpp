@@ -16,6 +16,7 @@ struct EncoderWheelFrame {
     bool valid = false;
     bool rebased = false;
     bool continuityLost = false; // Sticky: edges during a stopped rebase are unknown.
+    uint32_t continuityEpoch = 0; // Changes on each logical reset or new loss.
     esp_err_t error = ESP_OK;
 };
 
@@ -50,7 +51,9 @@ private:
         int32_t previousCount = 0;
         int64_t previousTimestampUs = 0, logicalCount = 0;
         float speedDps = 0;
+        uint32_t continuityEpoch = 0;
         bool seeded = false, stopped = false, continuityLost = false;
+        bool continuityLossActive = false;
     };
     WheelState m_left, m_right;
     float m_degs_per_pulse = 0;
