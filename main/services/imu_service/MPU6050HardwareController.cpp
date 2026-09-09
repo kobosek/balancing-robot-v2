@@ -82,10 +82,11 @@ esp_err_t MPU6050HardwareController::applyConfiguration(const MPU6050Config& con
     }
 
     if (ret == ESP_OK) {
-        const uint8_t registers[] = {0x19, 0x1a, 0x1b, 0x1c, 0x6b};
+        const uint8_t registers[] = {0x19, 0x1a, 0x1b, 0x1c, 0x6b, 0x37, 0x38};
         const uint8_t expected[] = {static_cast<uint8_t>(profile.sampleRateDivReg),
             static_cast<uint8_t>(profile.dlpfReg), static_cast<uint8_t>(profile.gyroRangeReg),
-            static_cast<uint8_t>(profile.accelRangeReg), 0x01};
+            static_cast<uint8_t>(profile.accelRangeReg), 0x01,
+            static_cast<uint8_t>(profile.interruptPinConfig), static_cast<uint8_t>(interruptBits)};
         for (unsigned i = 0; i < sizeof(registers); ++i) {
             uint8_t value = 0;
             ret = m_i2cDevice.readRegisters(registers[i], &value, 1);
@@ -107,7 +108,7 @@ esp_err_t MPU6050HardwareController::probeSensor() const {
         return ret;
     }
 
-    if (deviceId != 0x68 && deviceId != 0x69) {
+    if (deviceId != 0x68) {
         return ESP_ERR_INVALID_RESPONSE;
     }
 

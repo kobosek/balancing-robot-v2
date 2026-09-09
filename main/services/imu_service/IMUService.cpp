@@ -55,16 +55,23 @@ IMUStatusSnapshot IMUService::getStatusSnapshot() const {
     auto status = m_status;
     const auto sample = m_estimator->getOrientation();
     status.sampleTimestampUs = sample.sample_timestamp_us;
+    status.sampleSequence = sample.sample_sequence;
+    status.fifoRemainingPackets = sample.fifoRemainingPackets;
     status.ready = status.ready && sample.fresh(esp_timer_get_time(), m_behavior.imu_max_sample_age_ms * 1000LL);
     status.configurationPending = m_configPending;
     return status;
 }
 bool IMUService::isAvailable() const { return getStatusSnapshot().ready; }
-bool IMUService::reserveMotion(uint32_t& generation) {
+bool IMUService::reserveMotion(uint32_t& generation, const char** rejectionReason) {
     std::lock_guard<std::mutex> lock(m_mutex);
     const auto sample = m_estimator->getOrientation();
-    if (m_otaReserved || !m_status.ready || m_status.busy || m_calibrationPending || m_configPending ||
-        !sample.fresh(esp_timer_get_time(), m_behavior.imu_max_sample_age_ms * 1000LL)) return false;
+    const char* reason = m_otaReserved ? "ota-reserved" :
+        m_calibrationPending ? "calibration-pending" : m_configPending ? "configuration-pending" :
+        !m_status.ready ? "imu-not-operational" : m_status.busy ? "imu-busy" :
+        !sample.valid ? "estimate-invalid" :
+        !sample.fresh(esp_timer_get_time(), m_behavior.imu_max_sample_age_ms * 1000LL) ? "estimate-stale-or-nonfinite" : nullptr;
+    if (rejectionReason) *rejectionReason = reason;
+    if (reason) return false;
     m_motionReserved = true;
     generation = sample.generation;
     return true;
@@ -88,7 +95,7 @@ void IMUService::handleEvent(const BaseEvent& event) {
             m_attachAllowed = policy.autoAttachAllowed;
             m_calibrationAllowed = policy.calibrationAllowed;
         } else if (event.is<IMU_AttachRequested>()) {
-            m_attachPending = true;
+            // Wake the worker; state/policy and reconnect deadline decide eligibility.
         } else if (event.is<IMU_CalibrationRequest>()) {
             reject = m_otaReserved || !m_calibrationAllowed || m_calibrationPending || m_status.busy || m_motionReserved;
             if (!reject) { m_cancelCalibration = false; m_calibrationPending = true; m_status.busy = true; }
@@ -201,6 +208,25 @@ void IMUService::calibrate(IMUTask& task) {
     }
     m_bus.publish(IMU_CalibrationCompleted(result));
 }
+void IMUService::applySoftwareConfiguration(const MPU6050Config& config) {
+    const bool estimatorChanged = config.comp_filter_alpha != m_applied.comp_filter_alpha ||
+        config.gyro_offset_x != m_applied.gyro_offset_x || config.gyro_offset_y != m_applied.gyro_offset_y ||
+        config.gyro_offset_z != m_applied.gyro_offset_z;
+    m_applied = config;
+    m_fifo->configure(m_profile, config.fifo_read_threshold);
+    m_calibration->setOffsets(config.gyro_offset_x, config.gyro_offset_y, config.gyro_offset_z);
+    if (estimatorChanged) {
+        m_estimator->init(config.comp_filter_alpha, m_profile.samplePeriodS,
+            config.gyro_offset_x, config.gyro_offset_y, config.gyro_offset_z);
+        m_validationSamples = 0;
+        m_validationDeadlineUs = esp_timer_get_time() + 250000;
+        m_fullAttachValidating = false;
+        transition(IMUState::VALIDATING);
+    }
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_configPending = m_desired != config;
+    m_status.busy = m_state != IMUState::OPERATIONAL;
+}
 void IMUService::runWorker(IMUTask& task) {
     bool initial = true;
     while (!task.stopping()) {
@@ -217,14 +243,19 @@ void IMUService::runWorker(IMUTask& task) {
                 (!unavailableState && m_configPending && m_applyAllowed && !m_calibrationPending) ||
                 (unavailableState && m_attachAllowed && esp_timer_get_time() >= m_nextAttemptUs));
             // Explicit attach coalesces; it never bypasses the reconnect interval.
-            if (doAttach) { config = m_desired; m_attachPending = false; m_status.busy = true; }
+            if (doAttach) { config = m_desired; m_status.busy = true; }
             doCalibration = !doAttach && m_calibrationPending && !m_motionReserved;
             if (doCalibration) m_calibrationPending = false;
         }
         initial = false;
         if (doAttach) {
-            const auto ret = attach(config, task);
-            if (ret != ESP_OK) unavailable(ret, IMUFaultReason::TRANSPORT);
+            if (m_device->isOpen() && getCurrentState() != IMUState::UNAVAILABLE &&
+                !m_applied.requiresHardwareInit(config)) {
+                applySoftwareConfiguration(config);
+            } else {
+                const auto ret = attach(config, task);
+                if (ret != ESP_OK) unavailable(ret, IMUFaultReason::TRANSPORT);
+            }
         } else if (doCalibration) {
             if (!m_calibrationAllowed || !m_device->isOpen()) {
                 transition(m_device->isOpen() ? IMUState::VALIDATING : IMUState::UNAVAILABLE);
@@ -241,11 +272,14 @@ void IMUService::runWorker(IMUTask& task) {
             if (state == IMUState::VALIDATING && now >= m_validationDeadlineUs) {
                 unavailable(ESP_ERR_TIMEOUT, IMUFaultReason::VALIDATION);
             } else {
-                m_fifo->configure(m_profile, m_applied.fifo_read_threshold);
                 const auto result = m_fifo->processFIFO(sample.generation,
                     sample.sample_timestamp_us ? sample.sample_timestamp_us + maxAge : now + 5000);
                 moreData = result.moreData;
-                if (result.accepted) m_lastProgressUs = esp_timer_get_time();
+                if (result.accepted) {
+                    m_lastProgressUs = esp_timer_get_time();
+                    // Acquisition is healthy even while acceleration prevents initialization.
+                    m_validationDeadlineUs = m_lastProgressUs + 250000;
+                }
                 if (result.retried || (result.error != ESP_OK && result.reason == IMUFaultReason::TRANSPORT)) {
                     std::lock_guard<std::mutex> lock(m_mutex);
                     ++m_status.transportErrors;
@@ -267,11 +301,19 @@ void IMUService::runWorker(IMUTask& task) {
                     // The 20 ms deadline inhibits motion, not the bus. Only a
                     // sustained absence of acquisition progress needs reconnect.
                     unavailable(ESP_ERR_TIMEOUT, IMUFaultReason::STALE);
+                } else if (result.outcome == FIFOOutcome::ACCEPTED && m_estimator->getOrientation().gyroContinuityLost) {
+                    { std::lock_guard<std::mutex> lock(m_mutex); ++m_status.gyroClippingResets; }
+                    // Clipping loses angular history, not FIFO framing. Revoke the old
+                    // generation before revalidating, without touching MPU/FIFO/IRQ.
+                    m_estimator->reset();
+                    m_validationSamples = 0;
+                    m_fullAttachValidating = false;
+                    transition(IMUState::VALIDATING, ESP_ERR_INVALID_RESPONSE, IMUFaultReason::VALIDATION);
                 } else if (result.outcome == FIFOOutcome::ACCEPTED && state == IMUState::VALIDATING) {
                     m_validationSamples += result.accepted;
                     const auto latest = m_estimator->getOrientation();
-                    if (m_validationSamples >= 5 && esp_timer_get_time() - latest.sample_timestamp_us <= maxAge) {
-                        m_estimator->setValidated();
+                    if (m_validationSamples >= 5 && esp_timer_get_time() - latest.sample_timestamp_us <= maxAge &&
+                        m_estimator->setValidated()) {
                         if (m_fullAttachValidating) {
                             std::lock_guard<std::mutex> lock(m_mutex); ++m_status.reconnectSuccesses;
                         }
@@ -286,7 +328,8 @@ void IMUService::runWorker(IMUTask& task) {
         }
         const int64_t remainingUs = 5000 - (esp_timer_get_time() - iterationStartUs);
         const bool woke = task.wait(moreData ? 1 : remainingUs > 0 ? (remainingUs + 999) / 1000 : 1);
-        if (!woke && (getCurrentState() == IMUState::OPERATIONAL || getCurrentState() == IMUState::VALIDATING)) {
+        if (!woke && !moreData && m_profile.interruptEnabled &&
+            (getCurrentState() == IMUState::OPERATIONAL || getCurrentState() == IMUState::VALIDATING)) {
             std::lock_guard<std::mutex> lock(m_mutex); ++m_status.irqFallbacks;
         }
     }

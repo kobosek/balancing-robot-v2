@@ -63,7 +63,8 @@ TEST_CASE("estimator boot reset finite checks and coherent metadata", "[imu][est
     TEST_ASSERT_FALSE(estimator.getOrientation().valid);
     estimator.init();
     const auto generation = estimator.getOrientation().generation;
-    TEST_ASSERT_TRUE(estimator.processSample(0, 0, 1, 0, 0, 0, 100000, generation));
+    for (int i = 0; i < 5; ++i)
+        TEST_ASSERT_TRUE(estimator.processSample(0, 0, 1, 0, 0, 0, 84000 + i * 4000, generation));
     TEST_ASSERT_FALSE(estimator.getOrientation().valid);
     estimator.setValidated();
     const auto first = estimator.getOrientation();
@@ -104,7 +105,7 @@ TEST_CASE("FIFO threshold yields to approaching sample freshness deadline", "[im
     TEST_ASSERT_EQUAL_UINT(1, result.accepted);
     TEST_ASSERT_TRUE(sample.sample_timestamp_us == 996000);
 }
-TEST_CASE("bounded FIFO catchup accepts a fresh newest sample despite old oldest packet", "[imu][regression]") {
+TEST_CASE("bounded FIFO catchup preserves three packet bursts at 100 kHz", "[imu][regression]") {
     sensor_fake::reset(); sensor_fake::clockUs = 1000000; sensor_fake::fixedCount = 72;
     I2CDevice device; device.open(I2C_NUM_0, GPIO_NUM_7, GPIO_NUM_8, 0x68, 100000);
     MPU6050Driver driver(device); OrientationEstimator estimator; estimator.init();
@@ -115,6 +116,7 @@ TEST_CASE("bounded FIFO catchup accepts a fresh newest sample despite old oldest
     sensor_fake::clockUs = -1;
     TEST_ASSERT_EQUAL(static_cast<int>(FIFOOutcome::ACCEPTED), static_cast<int>(result.outcome));
     TEST_ASSERT_EQUAL_UINT(3, result.accepted);
+    TEST_ASSERT_TRUE(result.moreData);
     TEST_ASSERT_TRUE(sample.sample_timestamp_us == 984000);
 }
 
@@ -125,7 +127,8 @@ TEST_CASE("corrupt zero or ones FIFO packets cannot refresh a valid estimate", "
         I2CDevice device; device.open(I2C_NUM_0, GPIO_NUM_7, GPIO_NUM_8, 0x68, 100000);
         MPU6050Driver driver(device); OrientationEstimator estimator; estimator.init();
         const auto generation = estimator.getOrientation().generation;
-        estimator.processSample(0, 0, 1, 0, 0, 0, 980000, generation); estimator.setValidated();
+        for (int i = 0; i < 5; ++i) estimator.processSample(0, 0, 1, 0, 0, 0, 964000 + i * 4000, generation);
+        estimator.setValidated();
         const auto before = estimator.getOrientation();
         FIFOProcessor fifo(driver, estimator);
         fifo.configure(MPU6050Profile::fromConfig(MPU6050Config{}), 24);
@@ -143,7 +146,8 @@ TEST_CASE("ordered stale FIFO batch is drained without requesting repair", "[imu
     I2CDevice device; device.open(I2C_NUM_0, GPIO_NUM_7, GPIO_NUM_8, 0x68, 100000);
     MPU6050Driver driver(device); OrientationEstimator estimator; estimator.init();
     const auto generation = estimator.getOrientation().generation;
-    estimator.processSample(0, 0, 1, 0, 0, 0, 950000, generation); estimator.setValidated();
+    for (int i = 0; i < 5; ++i) estimator.processSample(0, 0, 1, 0, 0, 0, 934000 + i * 4000, generation);
+    estimator.setValidated();
     FIFOProcessor fifo(driver, estimator);
     fifo.configure(MPU6050Profile::fromConfig(MPU6050Config{}), 24);
     const auto result = fifo.processFIFO(generation, 999000);

@@ -38,7 +38,7 @@ private:
     float m_angle_pid_output_max = 0.0f;
     bool m_yaw_control_enabled = false;
     bool m_has_target_yaw = false;
-    float m_target_yaw_deg = 0.0f;
+    double m_target_yaw_deg = 0.0;
     float m_last_speed_setpoint_left_dps = 0.0f;
     float m_last_speed_setpoint_right_dps = 0.0f;
     float m_last_target_yaw_deg = 0.0f;

@@ -85,10 +85,15 @@ void StateManager::markFatalError() {
 void StateManager::setState(SystemState newState) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (policy::isMotorActiveState(newState) && newState != m_currentState) {
-        if (m_calibrationBusy || !m_imu || !m_imu_available ||
-            policy::batteryBlocksMotion(m_criticalBatteryMotorShutdownEnabled, m_battery_critical) ||
-            !m_imu->reserveMotion(m_generation)) {
-            ESP_LOGW(TAG, "Start rejected: IMU not ready, busy, stale or policy inhibited");
+        const char* reason = m_calibrationBusy ? "calibration-busy" : !m_imu ? "imu-unbound" :
+            !m_imu_available ? "imu-availability-revoked" :
+            policy::batteryBlocksMotion(m_criticalBatteryMotorShutdownEnabled, m_battery_critical) ? "critical-battery" : nullptr;
+        if (reason || !m_imu->reserveMotion(m_generation, &reason)) {
+            const auto status = m_imu ? m_imu->getStatusSnapshot() : IMUStatusSnapshot{};
+            ESP_LOGW(TAG, "Start rejected: %s; IMU=%s ready=%d busy=%d configPending=%d ageUs=%lld generation=%lu fault=%u",
+                reason, status.state, status.ready, status.busy, status.configurationPending,
+                static_cast<long long>(status.sampleTimestampUs > 0 ? esp_timer_get_time() - status.sampleTimestampUs : -1),
+                static_cast<unsigned long>(status.generation), static_cast<unsigned>(status.lastReason));
             return;
         }
     }

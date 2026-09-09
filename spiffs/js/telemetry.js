@@ -4,8 +4,19 @@ import { fetchDataApi } from './api.js';
 import { drawAllGraphs } from './graph.js';
 import { updateLegendUI, updateBatteryUI } from './ui.js';
 
+let telemetryFetchInFlight = false;
+
 export async function updateTelemetryData() {
-    const rawResponse = await fetchDataApi();
+    // setInterval can fire again while a slow WiFi request is still pending.
+    // Overlapping requests reorder batches and make fast motion look stepped.
+    if (telemetryFetchInFlight) return;
+    telemetryFetchInFlight = true;
+    let rawResponse;
+    try {
+        rawResponse = await fetchDataApi();
+    } finally {
+        telemetryFetchInFlight = false;
+    }
     if (!rawResponse) return;
 
     updateTelemetryJsonCache(rawResponse);

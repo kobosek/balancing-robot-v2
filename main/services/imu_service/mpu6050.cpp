@@ -77,6 +77,17 @@ esp_err_t MPU6050Driver::readFifoCount(uint16_t& count) const {
     return ESP_OK;
 }
 
+esp_err_t MPU6050Driver::readRawMotion(int16_t (&axes)[6]) const {
+    uint8_t data[14];
+    const auto ret = readRegisters(MPU6050Register::ACCEL_XOUT_H, data, sizeof(data));
+    if (ret != ESP_OK) return ret;
+    for (unsigned axis = 0; axis < 6; ++axis) {
+        const unsigned offset = axis * 2 + (axis >= 3 ? 2 : 0); // Skip temperature.
+        axes[axis] = static_cast<int16_t>((data[offset] << 8) | data[offset + 1]);
+    }
+    return ESP_OK;
+}
+
 esp_err_t MPU6050Driver::readFifoBuffer(uint8_t* buffer, size_t len) const {
     if (len == 0) {
         return ESP_OK;

@@ -237,3 +237,120 @@ TEST_CASE("sustained absence of acquisition progress still reconnects", "[imu][r
     service.stopTasks();
     TEST_ASSERT_TRUE(ready && unavailable);
 }
+
+TEST_CASE("gravity quality gates startup without reconnecting a healthy transport", "[imu][quality]") {
+    sensor_fake::reset(); sensor_fake::fifoPose = 3;
+    auto estimator = std::make_shared<OrientationEstimator>();
+    MPU6050Config config; config.int_pin = -1;
+    IMUService service(estimator, config, SystemBehaviorConfig{}, EventBus::getInstance());
+    service.init(); service.handleEvent(IMU_SystemPolicyChanged(true, true, true)); service.startTasks();
+    const bool receiving = waitFor([&] { return estimator->getOrientation().sample_sequence >= 5; });
+    vTaskDelay(pdMS_TO_TICKS(350));
+    const auto before = service.getStatusSnapshot();
+    uint32_t generation = 0;
+    const bool armed = service.reserveMotion(generation);
+    sensor_fake::fifoPose = 0;
+    const bool recovered = waitFor([&] { return service.isAvailable(); });
+    const auto after = service.getStatusSnapshot();
+    service.stopTasks();
+    TEST_ASSERT_TRUE(receiving && recovered);
+    TEST_ASSERT_FALSE(before.ready || armed);
+    TEST_ASSERT_EQUAL_UINT32(1, after.reconnectAttempts);
+    TEST_ASSERT_EQUAL_UINT32(before.generation, after.generation);
+    TEST_ASSERT_EQUAL_UINT32(0, after.fifoResyncs);
+}
+
+TEST_CASE("legacy startup accepts unknown mounting and ordinary gravity scale error", "[imu][quality]") {
+    for (const int pose : {1, 2, 4}) {
+        sensor_fake::reset(); sensor_fake::fifoPose = pose;
+        auto estimator = std::make_shared<OrientationEstimator>();
+        MPU6050Config config; config.int_pin = -1;
+        IMUService service(estimator, config, SystemBehaviorConfig{}, EventBus::getInstance());
+        service.init(); service.handleEvent(IMU_SystemPolicyChanged(true, true, true)); service.startTasks();
+        const bool ready = waitFor([&] { return service.isAvailable(); });
+        uint32_t generation = 0;
+        const bool armed = service.reserveMotion(generation);
+        service.stopTasks();
+        TEST_ASSERT_TRUE(ready);
+        TEST_ASSERT_TRUE(armed);
+    }
+}
+
+TEST_CASE("gyro clipping revokes generation without resetting FIFO hardware", "[imu][quality]") {
+    sensor_fake::reset();
+    auto estimator = std::make_shared<OrientationEstimator>();
+    MPU6050Config config; config.int_pin = -1;
+    IMUService service(estimator, config, SystemBehaviorConfig{}, EventBus::getInstance());
+    service.init(); service.handleEvent(IMU_SystemPolicyChanged(true, true, true)); service.startTasks();
+    const bool ready = waitFor([&] { return service.isAvailable(); });
+    uint32_t generation = 0;
+    const bool armed = service.reserveMotion(generation);
+    sensor_fake::fifoSaturateAxes = 0x20;
+    const bool revoked = waitFor([&] { return estimator->getOrientation().generation != generation; });
+    sensor_fake::fifoSaturateAxes = 0;
+    const bool recovered = waitFor([&] { return service.isAvailable(); });
+    const auto status = service.getStatusSnapshot();
+    service.releaseMotion(); service.stopTasks();
+    TEST_ASSERT_TRUE(ready && armed && revoked && recovered);
+    TEST_ASSERT_EQUAL_UINT32(1, status.reconnectAttempts);
+    TEST_ASSERT_EQUAL_UINT32(0, status.fifoResyncs);
+}
+
+TEST_CASE("calibration rejects rotation and vibration and preserves saved offsets", "[imu][calibration]") {
+    for (unsigned scenario = 0; scenario < 4; ++scenario) {
+        sensor_fake::reset();
+        I2CDevice device; device.open(I2C_NUM_0, GPIO_NUM_1, GPIO_NUM_2, 0x68, 100000);
+        MPU6050Driver driver(device); IMUCalibration calibration(driver);
+        calibration.setOffsets(0.1f, -0.1f, 0.2f);
+        const auto profile = MPU6050Profile::fromConfig(MPU6050Config{});
+        if (scenario == 0) sensor_fake::calibrationGyroZ = static_cast<int>(10 * profile.gyroLsbPerDps);
+        if (scenario == 1) {
+            sensor_fake::calibrationGyroZ = static_cast<int>(profile.gyroLsbPerDps);
+            sensor_fake::calibrationAlternating = true;
+        }
+        if (scenario == 2) sensor_fake::calibrationAccelX = static_cast<int>(profile.accelLsbPerG);
+        if (scenario == 3) sensor_fake::calibrationGyroZ = INT16_MAX;
+        const auto result = calibration.calibrate(profile, 20, nullptr, {});
+        TEST_ASSERT_NOT_EQUAL(ESP_OK, result);
+        TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.1f, calibration.getGyroOffsetXDPS());
+        TEST_ASSERT_FLOAT_WITHIN(0.0001f, -0.1f, calibration.getGyroOffsetYDPS());
+        TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.2f, calibration.getGyroOffsetZDPS());
+    }
+}
+
+TEST_CASE("stationary calibration accepts coherent motion samples", "[imu][calibration]") {
+    sensor_fake::reset();
+    I2CDevice device; device.open(I2C_NUM_0, GPIO_NUM_1, GPIO_NUM_2, 0x68, 100000);
+    MPU6050Driver driver(device); IMUCalibration calibration(driver);
+    const auto profile = MPU6050Profile::fromConfig(MPU6050Config{});
+    sensor_fake::calibrationGyroZ = static_cast<int>(profile.gyroLsbPerDps);
+    TEST_ASSERT_EQUAL(ESP_OK, calibration.calibrate(profile, 20, nullptr, {}));
+    TEST_ASSERT_FLOAT_WITHIN(0.02f, 1.0f, calibration.getGyroOffsetZDPS());
+}
+
+TEST_CASE("software configuration preserves hardware and only estimator changes revoke generation", "[imu][worker]") {
+    sensor_fake::reset();
+    auto estimator = std::make_shared<OrientationEstimator>();
+    MPU6050Config config; config.int_pin = -1;
+    IMUService service(estimator, config, SystemBehaviorConfig{}, EventBus::getInstance());
+    service.init(); service.handleEvent(IMU_SystemPolicyChanged(true, true, true)); service.startTasks();
+    const bool ready = waitFor([&] { return service.isAvailable(); });
+    const auto before = service.getStatusSnapshot();
+    config.calibration_samples += 1;
+    service.handleEvent(CONFIG_ImuConfigUpdate(config, true));
+    const bool applied = waitFor([&] { return !service.getStatusSnapshot().configurationPending; });
+    const auto unchanged = service.getStatusSnapshot();
+    config.comp_filter_alpha = 0.97f;
+    service.handleEvent(CONFIG_ImuConfigUpdate(config, true));
+    const bool revalidated = waitFor([&] {
+        const auto status = service.getStatusSnapshot();
+        return status.ready && !status.configurationPending && status.generation > before.generation;
+    });
+    const auto after = service.getStatusSnapshot();
+    service.stopTasks();
+    TEST_ASSERT_TRUE(ready && applied && revalidated);
+    TEST_ASSERT_EQUAL_UINT32(before.generation, unchanged.generation);
+    TEST_ASSERT_EQUAL_UINT32(before.reconnectAttempts, after.reconnectAttempts);
+    TEST_ASSERT_EQUAL_UINT32(0, after.fifoResyncs);
+    TEST_ASSERT_EQUAL_UINT32(0, after.irqFallbacks);
+}

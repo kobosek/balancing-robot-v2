@@ -1,5 +1,6 @@
 export const MAX_DATA_POINTS = 400;
-export const DATA_FETCH_INTERVAL_MS = 150;
+// Keep graph latency below one control period batch during fast motion.
+export const DATA_FETCH_INTERVAL_MS = 50;
 export const STATE_FETCH_INTERVAL_MS = 1000;
 export const JOYSTICK_SEND_INTERVAL_MS = 75;
 export const WS_RECONNECT_DELAY_MS = 3000;

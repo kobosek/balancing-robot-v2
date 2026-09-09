@@ -8,6 +8,11 @@
 #include <cmath>
 
 namespace {
+// Conservative acceptance limits, not permission to calibrate during uniform motion.
+constexpr float MAX_OFFSET_CHANGE_DPS = 5.0f;
+constexpr float MAX_GYRO_STDDEV_DPS = 0.35f;
+constexpr float MAX_ACCEL_STDDEV_G = 0.02f;
+constexpr float MAX_ACCEL_DEVIATION_G = 0.08f;
 struct RunningStats {
     int count = 0;
     double mean = 0.0;
@@ -68,13 +73,14 @@ void IMUCalibration::setOffsets(float x_offset_dps, float y_offset_dps, float z_
 esp_err_t IMUCalibration::calibrate(const MPU6050Profile& profile,
                                     int calibrationSamples,
                                     std::function<void(int, int)> progressCallback, std::function<bool()> canceled) {
-    if (profile.gyroLsbPerDps <= 0.0f || calibrationSamples <= 0) {
+    if (profile.gyroLsbPerDps <= 0.0f || profile.accelLsbPerG <= 0.0f || calibrationSamples <= 0) {
         return ESP_ERR_INVALID_ARG;
     }
 
     RunningStats gxStats;
     RunningStats gyStats;
     RunningStats gzStats;
+    RunningStats accelStats[3];
     int successfulSamples = 0;
     int attempts = 0;
     const int maxAttempts = calibrationSamples + 200;
@@ -90,11 +96,14 @@ esp_err_t IMUCalibration::calibrate(const MPU6050Profile& profile,
         if (canceled && canceled()) return ESP_ERR_INVALID_STATE;
         if (esp_timer_get_time() >= deadline) return ESP_ERR_TIMEOUT;
         attempts++;
-        int16_t rawGx = 0;
-        int16_t rawGy = 0;
-        int16_t rawGz = 0;
-
-        esp_err_t readRet = m_driver.readRawGyroXYZ(rawGx, rawGy, rawGz);
+        uint8_t status = 0;
+        esp_err_t readRet = m_driver.getInterruptStatus(status);
+        if (readRet == ESP_OK && !(status & static_cast<uint8_t>(MPU6050Interrupt::DATA_READY))) {
+            paceCalibrationSampling(samplePeriodUs, nextSampleDeadlineUs);
+            continue; // Skip polls without a new DATA_READY indication.
+        }
+        int16_t raw[6]{};
+        if (readRet == ESP_OK) readRet = m_driver.readRawMotion(raw);
         if (readRet != ESP_OK) {
             lastReadError = readRet;
             if (++failures >= 3) return readRet;
@@ -102,9 +111,23 @@ esp_err_t IMUCalibration::calibrate(const MPU6050Profile& profile,
             continue;
         }
 
-        const float gxDps = static_cast<float>(rawGx) / profile.gyroLsbPerDps;
-        const float gyDps = static_cast<float>(rawGy) / profile.gyroLsbPerDps;
-        const float gzDps = static_cast<float>(rawGz) / profile.gyroLsbPerDps;
+        float accelMagnitudeSquared = 0.0f;
+        for (unsigned axis = 0; axis < 6; ++axis) {
+            if (raw[axis] == INT16_MIN || raw[axis] == INT16_MAX) return ESP_ERR_INVALID_RESPONSE;
+            if (axis < 3) {
+                const float accel = raw[axis] / profile.accelLsbPerG;
+                accelMagnitudeSquared += accel * accel;
+                accelStats[axis].add(accel);
+            } else if (std::fabs(raw[axis] / profile.gyroLsbPerDps - m_gyro_offset_dps[axis - 3]) > MAX_OFFSET_CHANGE_DPS) {
+                return ESP_ERR_INVALID_STATE;
+            }
+        }
+        if (std::fabs(std::sqrt(accelMagnitudeSquared) - 1.0f) > MAX_ACCEL_DEVIATION_G)
+            return ESP_ERR_INVALID_STATE;
+
+        const float gxDps = static_cast<float>(raw[3]) / profile.gyroLsbPerDps;
+        const float gyDps = static_cast<float>(raw[4]) / profile.gyroLsbPerDps;
+        const float gzDps = static_cast<float>(raw[5]) / profile.gyroLsbPerDps;
 
         gxStats.add(gxDps);
         gyStats.add(gyDps);
@@ -130,6 +153,12 @@ esp_err_t IMUCalibration::calibrate(const MPU6050Profile& profile,
     const float offsetGxDps = static_cast<float>(gxStats.mean);
     const float offsetGyDps = static_cast<float>(gyStats.mean);
     const float offsetGzDps = static_cast<float>(gzStats.mean);
+
+    if (gxStats.stddev() > MAX_GYRO_STDDEV_DPS || gyStats.stddev() > MAX_GYRO_STDDEV_DPS ||
+        gzStats.stddev() > MAX_GYRO_STDDEV_DPS) return ESP_ERR_INVALID_STATE;
+    for (const auto& axis : accelStats) {
+        if (axis.stddev() > MAX_ACCEL_STDDEV_G) return ESP_ERR_INVALID_STATE;
+    }
 
     m_gyro_offset_dps[0] = offsetGxDps;
     m_gyro_offset_dps[1] = offsetGyDps;

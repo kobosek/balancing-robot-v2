@@ -180,7 +180,8 @@ TEST_CASE("auto balance needs a fresh complete hold and ignores duplicate frames
     BalanceMonitor monitor(EventBus::getInstance(), config);
     monitor.handleEvent(IMU_AvailabilityChanged(true, 3, 1));
     monitor.handleEvent(BALANCE_MonitorModeChanged(false, true));
-    OrientationEstimate sample; sample.valid = true; sample.generation = 3;
+    OrientationEstimate sample; sample.valid = true; sample.generation = 3; sample.tilt_deg = 0;
+    sample.gravityReferenceValid = true;
     sample.sample_timestamp_us = 1004000; sample.sample_sequence = 1;
     sensor_fake::clockUs = 1004000;
     monitor.handleEvent(IMU_OrientationData(sample));

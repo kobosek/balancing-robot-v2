@@ -4,7 +4,7 @@ idf_component_register(
          "test_control_timing.cpp" "${PRODUCTION}/algorithms/PIDController.cpp"
          "test_encoder.cpp" "pcnt_fakes.cpp" "test_sensor_frame.cpp"
          "${PRODUCTION}/services/EncoderService.cpp"
-         "test_fifo_stream.cpp" "test_imu_recovery.cpp" "test_config_migration.cpp"
+         "test_fifo_stream.cpp" "test_imu_recovery.cpp" "test_config_migration.cpp" "test_orientation_quality.cpp"
          "${PRODUCTION}/services/MotorService.cpp"
          "${PRODUCTION}/core/StateManagerPolicy.cpp"
          "${PRODUCTION}/core/StateManager.cpp"

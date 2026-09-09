@@ -18,6 +18,7 @@ enum class MPU6050Register : uint8_t {
     FIFO_COUNT_H = 0x72,
     FIFO_R_W = 0x74,
     GYRO_XOUT_H = 0x43,
+    ACCEL_XOUT_H = 0x3B,
     WHO_AM_I = 0x75
 };
 
@@ -103,6 +104,7 @@ public:
     esp_err_t configureFIFOReg(MPU6050UserControl userCtrlBits, MPU6050FIFOEnable fifoEnableBits);
 
     esp_err_t readRawGyroXYZ(int16_t& gx, int16_t& gy, int16_t& gz) const;
+    esp_err_t readRawMotion(int16_t (&axes)[6]) const;
     esp_err_t readFifoCount(uint16_t& count) const;
     esp_err_t readFifoBuffer(uint8_t* buffer, size_t len) const;
     esp_err_t getInterruptStatus(uint8_t& status) const;

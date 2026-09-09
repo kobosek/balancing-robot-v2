@@ -1,4 +1,4 @@
-import { decodeTelemetryPoint, imuStatusText } from '../../spiffs/js/imuStatus.js';
+import { decodeTelemetryPoint, imuStatusText, normalizeImuStatus } from '../../spiffs/js/imuStatus.js';
 import { appState, updateCurrentSystemState, updateTelemetryArrays } from '../../spiffs/js/state.js';
 import { updateTelemetryData } from '../../spiffs/js/telemetry.js';
 import { fetchStateApi } from '../../spiffs/js/api.js';
@@ -13,6 +13,10 @@ export async function runTests() {
     const oldError = console.error;
     const point = [10, 20, 30, 3.8, 1, 0, 0, 0, 12, 0, 1, 0];
     try {
+        const diagnostics = normalizeImuStatus({ ready: true, sample_sequence: 123,
+            fifo_remaining_packets: 4, gyro_clipping_resets: 2 });
+        check(diagnostics.sample_sequence === 123 && diagnostics.fifo_remaining_packets === 4 &&
+            diagnostics.gyro_clipping_resets === 2, 'acquisition diagnostics survive state normalization');
         check(decodeTelemetryPoint(point).imuValid === null, 'legacy validity must be unknown');
         check(decodeTelemetryPoint(point, 99) === null, 'future format rejected');
         check(decodeTelemetryPoint(point, 2) === null, 'short version 2 rejected');

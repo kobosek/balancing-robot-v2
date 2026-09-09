@@ -28,7 +28,7 @@ public:
     IMUState getCurrentState() const;
     bool isAvailable() const;
     IMUStatusSnapshot getStatusSnapshot() const;
-    bool reserveMotion(uint32_t& generation);
+    bool reserveMotion(uint32_t& generation, const char** rejectionReason = nullptr);
     void releaseMotion();
     bool reserveOta();
     void releaseOta();
@@ -52,7 +52,7 @@ private:
     IMUState m_state = IMUState::INITIALIZED;
     bool m_otaReserved = false;
     std::atomic<bool> m_cancelCalibration{false};
-    bool m_motionReserved = false, m_calibrationPending = false, m_attachPending = true;
+    bool m_motionReserved = false, m_calibrationPending = false;
     bool m_applyAllowed = false, m_attachAllowed = false;
     std::atomic<bool> m_calibrationAllowed{false};
     bool m_configPending = true, m_initialized = false;
@@ -65,6 +65,7 @@ private:
     void invalidate(IMUFaultReason);
     void unavailable(esp_err_t, IMUFaultReason);
     esp_err_t attach(const MPU6050Config&, IMUTask&);
+    void applySoftwareConfiguration(const MPU6050Config&);
     esp_err_t startStream(IMUTask&);
     void calibrate(IMUTask&);
 };

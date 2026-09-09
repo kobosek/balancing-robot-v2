@@ -173,6 +173,9 @@ esp_err_t StateApiHandler::handleRequest(httpd_req_t *req) {
         cJSON_AddNumberToObject(imuObj, "state_changed_us", imu.stateChangedUs);
         cJSON_AddNumberToObject(imuObj, "transport_errors", imu.transportErrors);
         cJSON_AddNumberToObject(imuObj, "fifo_resyncs", imu.fifoResyncs);
+        cJSON_AddNumberToObject(imuObj, "sample_sequence", static_cast<double>(imu.sampleSequence));
+        cJSON_AddNumberToObject(imuObj, "fifo_remaining_packets", imu.fifoRemainingPackets);
+        cJSON_AddNumberToObject(imuObj, "gyro_clipping_resets", imu.gyroClippingResets);
         cJSON_AddNumberToObject(imuObj, "reconnect_attempts", imu.reconnectAttempts);
         cJSON_AddNumberToObject(imuObj, "reconnect_successes", imu.reconnectSuccesses);
         cJSON_AddNumberToObject(imuObj, "irq_fallbacks", imu.irqFallbacks);

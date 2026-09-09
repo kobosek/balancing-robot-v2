@@ -19,8 +19,15 @@ struct SensorFrame {
     uint16_t fifoRemainingPackets = 0;
     uint64_t lostSamples = 0; // Cumulative known discarded complete packets.
     bool lossCountUncertain = false; // Sticky: actual loss may exceed this lower bound.
+    float tilt_deg = 180.0f; // Total inclination from +Z, not the pitch Euler angle.
+    bool gravityReferenceValid = false; // A usable accelerometer observation for a new arm/hold.
+    bool gyroContinuityLost = false; // Sticky until owner starts a new estimator generation.
+    bool withinTilt(float limitDeg) const {
+        return valid && std::isfinite(tilt_deg) && tilt_deg >= 0.0f && tilt_deg < limitDeg;
+    }
     bool fresh(int64_t now, int64_t maxAge) const {
-        return valid && sample_timestamp_us > 0 && now >= sample_timestamp_us &&
+        return valid && !gyroContinuityLost && !(saturationMask & 0x38) &&
+            sample_timestamp_us > 0 && now >= sample_timestamp_us &&
             now - sample_timestamp_us <= maxAge && std::isfinite(pitch_deg) &&
             std::isfinite(pitch_rate_dps) && std::isfinite(yaw_deg) && std::isfinite(yaw_rate_dps);
     }
@@ -47,4 +54,7 @@ struct IMUStatusSnapshot {
     IMUFaultReason lastReason = IMUFaultReason::NONE;
     uint32_t transportErrors = 0, fifoResyncs = 0, reconnectAttempts = 0, reconnectSuccesses = 0, irqFallbacks = 0;
     uint32_t busFrequencyHz = 0, samplePeriodUs = 0;
+    uint64_t sampleSequence = 0;
+    uint16_t fifoRemainingPackets = 0;
+    uint32_t gyroClippingResets = 0;
 };

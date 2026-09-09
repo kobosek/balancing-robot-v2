@@ -40,7 +40,7 @@ MotorEffort NestedPidBalanceStrategy::update(const BalanceControlInput& input)
     }
 
     if (m_yaw_control_enabled && std::fabs(input.targetAngularVelocity_dps) > YAW_COMMAND_DEADBAND_DPS) {
-        m_target_yaw_deg += input.targetAngularVelocity_dps * input.dt;
+        m_target_yaw_deg += static_cast<double>(input.targetAngularVelocity_dps) * input.dt;
     }
 
     const float targetYaw_deg = m_yaw_control_enabled ? m_target_yaw_deg : input.currentYaw_deg;

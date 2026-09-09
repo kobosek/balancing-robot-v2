@@ -44,7 +44,7 @@ public:
     // Compatibility helper for existing consumers that only need pitch/yaw.
     std::pair<float, float> getPitchAndYawRate() const;
 
-    void setValidated();
+    bool setValidated(); // Owner only; requires five consecutive usable initialization samples.
     void reset(); // Reset filter state
 
     static constexpr float RAD_TO_DEG = 180.0f / M_PI;
@@ -55,20 +55,20 @@ private:
     OrientationEstimate m_snapshot;
     static constexpr const char* TAG = "OrientationEst";
 
-    float m_alpha; // Legacy accel trust knob from the old complementary filter config.
     float m_sample_period_s; // Sample period
 
     // Private filter state: exclusively owned by IMUTask. Readers only copy m_snapshot.
     float m_pitch_deg;
-    float m_pitch_rate_dps;
-    float m_yaw_deg;
-    float m_yaw_rate_dps;
+    double m_yaw_deg;
     float m_pitch_bias_dps;
     float m_p00;
     float m_p01;
     float m_p10;
     float m_p11;
     bool m_has_estimate;
+    unsigned m_initializationSamples = 0;
+    bool m_gyroContinuityLost = false;
+    float m_accelNoise = 0.98f;
 
     // Gyro offsets are configuration values updated infrequently at runtime.
     float m_gyro_offset_x_dps;

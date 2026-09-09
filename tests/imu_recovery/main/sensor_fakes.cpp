@@ -13,6 +13,8 @@ std::atomic<int> failReadRegister{-1}, readFailures{0}, failWriteRegister{-1}, w
 std::atomic<int> fifoFailureConsume{-1}, fixedCount{-1}, fifoFillByte{-1};
 std::atomic<int64_t> clockUs{-1};
 std::atomic<unsigned> irqSetupDelayMs{0}, fifoSaturateAxes{0};
+std::atomic<int> fifoPose{0}, calibrationGyroZ{0}, calibrationAccelX{0};
+std::atomic<bool> calibrationAlternating{false};
 std::atomic<unsigned> fifoReads{0}, countReads{0}, resets{0}, opens{0}, closes{0}, wrongOwner{0};
 std::mutex mutex;
 std::array<uint8_t, 256> registers{};
@@ -27,6 +29,7 @@ void reset() {
     readFailures = writeFailures = 0;
     fifoReads = countReads = resets = opens = closes = wrongOwner = 0;
     irqSetupDelayMs = fifoSaturateAxes = 0; clockUs = -1; registers = {}; registers[0x75] = 0x68; registers[0x1c] = 0x08;
+    fifoPose = calibrationGyroZ = calibrationAccelX = 0; calibrationAlternating = false;
     enabledAt = 0; consumed = 0; enabled = false; owner = nullptr;
 }
 void recordOwner() {
@@ -89,7 +92,12 @@ esp_err_t I2CDevice::readRegisters(uint8_t reg, uint8_t* data, size_t len, uint3
         const int prefix = fifoFailureConsume.exchange(-1);
         if (prefix >= 0) { consumed += std::min<unsigned>(prefix, len); return ESP_ERR_TIMEOUT; }
         const uint16_t oneG = 16384U >> ((registers[0x1c] >> 3) & 3);
-        for (unsigned i = 0; i + 11 < len; i += 12) { data[i + 4] = oneG >> 8; data[i + 5] = oneG; }
+        for (unsigned i = 0; i + 11 < len; i += 12) {
+            const uint16_t gravity = fifoPose == 2 ? static_cast<uint16_t>(-oneG) :
+                fifoPose == 3 ? oneG / 2 : fifoPose == 4 ? oneG * 11 / 10 : oneG;
+            const unsigned offset = i + (fifoPose == 1 ? 2 : 4);
+            data[offset] = gravity >> 8; data[offset + 1] = gravity;
+        }
         for (unsigned i = 0; i + 11 < len; i += 12) {
             for (unsigned axis = 0; axis < 6; ++axis) if (fifoSaturateAxes & (1U << axis)) {
                 data[i + axis * 2] = axis % 2 ? 0x80 : 0x7f;
@@ -99,7 +107,16 @@ esp_err_t I2CDevice::readRegisters(uint8_t reg, uint8_t* data, size_t len, uint3
         if (fifoFillByte >= 0) std::fill(data, data + len, fifoFillByte.load());
         consumed += len;
     } else if (reg == 0x3a) {
-        data[0] = overflow.exchange(false) ? 0x10 : 0;
+        data[0] = (overflow.exchange(false) ? 0x10 : 0) | (noSamples ? 0 : 1);
+    } else if (reg == 0x3b && len == 14) {
+        const auto put = [&](unsigned offset, int value) {
+            data[offset] = static_cast<uint16_t>(value) >> 8; data[offset + 1] = value;
+        };
+        put(0, calibrationAccelX);
+        put(4, 16384U >> ((registers[0x1c] >> 3) & 3));
+        const int gyro = calibrationGyroZ;
+        put(12, gyro);
+        if (calibrationAlternating) calibrationGyroZ = -gyro;
     } else {
         for (unsigned i = 0; i < len; ++i) data[i] = registers[reg + i];
     }
