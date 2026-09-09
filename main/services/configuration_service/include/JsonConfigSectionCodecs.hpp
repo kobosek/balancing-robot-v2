@@ -13,6 +13,8 @@ bool deserializeMainLoop(cJSON* obj, MainLoopConfig& config);
 
 cJSON* serializeControl(const ControlConfig& config);
 bool deserializeControl(cJSON* obj, ControlConfig& config);
+cJSON* serializeBalanceStrategies(const BalanceStrategiesConfig& config);
+bool deserializeBalanceStrategies(cJSON* obj, BalanceStrategiesConfig& config);
 
 cJSON* serializeImu(const MPU6050Config& config);
 bool deserializeImu(cJSON* obj, MPU6050Config& config);

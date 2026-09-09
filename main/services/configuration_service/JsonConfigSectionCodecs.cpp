@@ -102,8 +102,19 @@ cJSON* serializeControl(const ControlConfig& config) {
         return nullptr;
     }
     cJSON_AddNumberToObject(obj, "joystick_exponent", config.joystick_exponent);
-    cJSON_AddNumberToObject(obj, "max_target_pitch_offset_deg", config.max_target_pitch_offset_deg);
-    cJSON_AddBoolToObject(obj, "yaw_control_enabled", config.yaw_control_enabled);
+    cJSON_AddNumberToObject(obj, "max_target_pitch_offset_deg",
+                            config.strategies.nested_pid.max_target_pitch_offset_deg);
+    cJSON_AddBoolToObject(obj, "yaw_control_enabled",
+                          config.strategies.nested_pid.yaw_control_enabled);
+    cJSON_AddStringToObject(obj, "balance_strategy",
+                            balanceStrategyIdToString(config.strategies.active));
+    cJSON_AddNumberToObject(obj, "strategies_revision", config.strategies.revision);
+    cJSON* strategies = serializeBalanceStrategies(config.strategies);
+    if (!strategies || !cJSON_AddItemToObject(obj, "strategies", strategies)) {
+        if (strategies) cJSON_Delete(strategies);
+        cJSON_Delete(obj);
+        return nullptr;
+    }
     return obj;
 }
 
@@ -117,19 +128,190 @@ bool deserializeControl(cJSON* obj, ControlConfig& config) {
         ESP_LOGW(TAG, "Missing/invalid 'joystick_exponent'");
     }
     item = cJSON_GetObjectItem(obj, "max_target_pitch_offset_deg");
-    if (item && cJSON_IsNumber(item)) {
-        config.max_target_pitch_offset_deg = item->valuedouble;
-    } else {
-        ok = false;
-        ESP_LOGW(TAG, "Missing/invalid 'max_target_pitch_offset_deg'");
-    }
+    const bool hasLegacyMaxPitch = item && cJSON_IsNumber(item);
+    if (hasLegacyMaxPitch) config.max_target_pitch_offset_deg = item->valuedouble;
     item = cJSON_GetObjectItem(obj, "yaw_control_enabled");
-    if (item && cJSON_IsBool(item)) {
-        config.yaw_control_enabled = cJSON_IsTrue(item);
+    const bool hasLegacyYaw = item && cJSON_IsBool(item);
+    if (hasLegacyYaw) config.yaw_control_enabled = cJSON_IsTrue(item);
+    cJSON* strategies = cJSON_GetObjectItem(obj, "strategies");
+    if (strategies) {
+        if (!deserializeBalanceStrategies(strategies, config.strategies)) ok = false;
+        // These fields are retained for old UI clients. When present, treat
+        // them as a compatibility patch and copy them into the canonical
+        // NestedPid record before validation.
+        if (hasLegacyMaxPitch) {
+            config.strategies.nested_pid.max_target_pitch_offset_deg = config.max_target_pitch_offset_deg;
+        }
+        if (hasLegacyYaw) {
+            config.strategies.nested_pid.yaw_control_enabled = config.yaw_control_enabled;
+        }
+        config.max_target_pitch_offset_deg = config.strategies.nested_pid.max_target_pitch_offset_deg;
+        config.yaw_control_enabled = config.strategies.nested_pid.yaw_control_enabled;
+    }
+    cJSON* strategyItem = cJSON_GetObjectItem(obj, "balance_strategy");
+    if (strategyItem && cJSON_IsString(strategyItem)) {
+        BalanceStrategyId requestedStrategy = config.strategies.active;
+        if (!balanceStrategyIdFromString(strategyItem->valuestring, requestedStrategy)) {
+            ok = false;
+            ESP_LOGW(TAG, "Unknown 'balance_strategy': %s", strategyItem->valuestring);
+        } else if (strategies && requestedStrategy != config.strategies.active) {
+            ok = false;
+            ESP_LOGW(TAG, "Conflicting active strategy identifiers");
+        } else {
+            config.strategies.active = requestedStrategy;
+        }
+    } else if (strategies) {
+        ok = false;
+        ESP_LOGW(TAG, "Missing/invalid 'balance_strategy'");
+    }
+    cJSON* revisionItem = cJSON_GetObjectItem(obj, "strategies_revision");
+    if (revisionItem && cJSON_IsNumber(revisionItem) && revisionItem->valueint >= 0) {
+        config.strategies.revision = static_cast<uint32_t>(revisionItem->valueint);
     }
     if (!ok) {
         ESP_LOGW(TAG, "Error(s) parsing Control config.");
     }
+    return ok;
+}
+
+cJSON* serializeBalanceStrategies(const BalanceStrategiesConfig& config) {
+    cJSON* obj = cJSON_CreateObject();
+    if (!obj) return nullptr;
+    cJSON_AddStringToObject(obj, "active", balanceStrategyIdToString(config.active));
+    cJSON_AddNumberToObject(obj, "revision", config.revision);
+
+    cJSON* nested = cJSON_CreateObject();
+    cJSON* longitudinal = cJSON_CreateObject();
+    if (!nested || !longitudinal) {
+        if (nested) cJSON_Delete(nested);
+        if (longitudinal) cJSON_Delete(longitudinal);
+        cJSON_Delete(obj);
+        return nullptr;
+    }
+
+    const auto addPid = [](cJSON* parent, const char* name, const PIDConfig& pid) {
+        cJSON* section = serializePid(pid);
+        return section && cJSON_AddItemToObject(parent, name, section);
+    };
+    if (!addPid(nested, "angle", config.nested_pid.angle) ||
+        !addPid(nested, "speed_left", config.nested_pid.speed_left) ||
+        !addPid(nested, "speed_right", config.nested_pid.speed_right) ||
+        !addPid(nested, "yaw_angle", config.nested_pid.yaw_angle) ||
+        !addPid(nested, "yaw_rate", config.nested_pid.yaw_rate)) {
+        cJSON_Delete(nested);
+        cJSON_Delete(longitudinal);
+        cJSON_Delete(obj);
+        return nullptr;
+    }
+    cJSON_AddNumberToObject(nested, "max_target_pitch_offset_deg",
+                            config.nested_pid.max_target_pitch_offset_deg);
+    cJSON_AddBoolToObject(nested, "yaw_control_enabled",
+                          config.nested_pid.yaw_control_enabled);
+    cJSON_AddNumberToObject(nested, "revision", config.nested_pid.revision);
+
+    const auto addNumber = [](cJSON* parent, const char* name, float value) {
+        return cJSON_AddNumberToObject(parent, name, value) != nullptr;
+    };
+    if (!addPid(longitudinal, "pitch", config.longitudinal_cascade.pitch) ||
+        !addPid(longitudinal, "velocity", config.longitudinal_cascade.velocity) ||
+        !addNumber(longitudinal, "position_kp", config.longitudinal_cascade.position_kp) ||
+        !addNumber(longitudinal, "pitch_trim_deg", config.longitudinal_cascade.pitch_trim_deg) ||
+        !addNumber(longitudinal, "max_pitch_offset_deg", config.longitudinal_cascade.max_pitch_offset_deg) ||
+        !addNumber(longitudinal, "max_pitch_rate_dps", config.longitudinal_cascade.max_pitch_rate_dps) ||
+        !addNumber(longitudinal, "max_velocity_mps", config.longitudinal_cascade.max_velocity_mps) ||
+        !addNumber(longitudinal, "max_hold_velocity_mps", config.longitudinal_cascade.max_hold_velocity_mps) ||
+        !addNumber(longitudinal, "max_acceleration_mps2", config.longitudinal_cascade.max_acceleration_mps2) ||
+        !addNumber(longitudinal, "max_deceleration_mps2", config.longitudinal_cascade.max_deceleration_mps2) ||
+        !addNumber(longitudinal, "hold_position_deadband_m", config.longitudinal_cascade.hold_position_deadband_m) ||
+        !addNumber(longitudinal, "hold_velocity_deadband_mps", config.longitudinal_cascade.hold_velocity_deadband_mps) ||
+        !addNumber(longitudinal, "sync_kp", config.longitudinal_cascade.sync_kp) ||
+        !addNumber(longitudinal, "sync_kd", config.longitudinal_cascade.sync_kd) ||
+        !addNumber(longitudinal, "sync_max_effort", config.longitudinal_cascade.sync_max_effort) ||
+        !addNumber(longitudinal, "max_effort", config.longitudinal_cascade.max_effort)) {
+        cJSON_Delete(nested);
+        cJSON_Delete(longitudinal);
+        cJSON_Delete(obj);
+        return nullptr;
+    }
+    cJSON_AddBoolToObject(longitudinal, "configured", config.longitudinal_cascade.configured);
+    cJSON_AddNumberToObject(longitudinal, "revision", config.longitudinal_cascade.revision);
+
+    if (!cJSON_AddItemToObject(obj, "nested_pid", nested) ||
+        !cJSON_AddItemToObject(obj, "longitudinal_cascade", longitudinal)) {
+        cJSON_Delete(obj);
+        return nullptr;
+    }
+    return obj;
+}
+
+bool deserializeBalanceStrategies(cJSON* obj, BalanceStrategiesConfig& config) {
+    if (!obj || !cJSON_IsObject(obj)) return false;
+    bool ok = true;
+    auto parseNumber = [&](cJSON* parent, const char* name, float& target, bool required) {
+        cJSON* item = cJSON_GetObjectItem(parent, name);
+        if (item && cJSON_IsNumber(item)) {
+            target = static_cast<float>(item->valuedouble);
+        } else if (required) {
+            ok = false;
+        }
+    };
+    auto parseRevision = [&](cJSON* parent, const char* name, uint32_t& target) {
+        cJSON* item = cJSON_GetObjectItem(parent, name);
+        if (item && cJSON_IsNumber(item) && item->valueint >= 0) {
+            target = static_cast<uint32_t>(item->valueint);
+        }
+    };
+    cJSON* nested = cJSON_GetObjectItem(obj, "nested_pid");
+    cJSON* longitudinal = cJSON_GetObjectItem(obj, "longitudinal_cascade");
+    if (!nested || !cJSON_IsObject(nested) || !longitudinal || !cJSON_IsObject(longitudinal)) {
+        ESP_LOGW(TAG, "Both strategy configuration sections are required");
+        return false;
+    }
+    if (!deserializePid(cJSON_GetObjectItem(nested, "angle"), config.nested_pid.angle) ||
+        !deserializePid(cJSON_GetObjectItem(nested, "speed_left"), config.nested_pid.speed_left) ||
+        !deserializePid(cJSON_GetObjectItem(nested, "speed_right"), config.nested_pid.speed_right) ||
+        !deserializePid(cJSON_GetObjectItem(nested, "yaw_angle"), config.nested_pid.yaw_angle) ||
+        !deserializePid(cJSON_GetObjectItem(nested, "yaw_rate"), config.nested_pid.yaw_rate)) {
+        ok = false;
+    }
+    parseNumber(nested, "max_target_pitch_offset_deg",
+                config.nested_pid.max_target_pitch_offset_deg, true);
+    cJSON* yaw = cJSON_GetObjectItem(nested, "yaw_control_enabled");
+    if (yaw && cJSON_IsBool(yaw)) config.nested_pid.yaw_control_enabled = cJSON_IsTrue(yaw);
+    else ok = false;
+    parseRevision(nested, "revision", config.nested_pid.revision);
+
+    if (!deserializePid(cJSON_GetObjectItem(longitudinal, "pitch"), config.longitudinal_cascade.pitch) ||
+        !deserializePid(cJSON_GetObjectItem(longitudinal, "velocity"), config.longitudinal_cascade.velocity)) {
+        ok = false;
+    }
+    parseNumber(longitudinal, "position_kp", config.longitudinal_cascade.position_kp, true);
+    parseNumber(longitudinal, "pitch_trim_deg", config.longitudinal_cascade.pitch_trim_deg, true);
+    parseNumber(longitudinal, "max_pitch_offset_deg", config.longitudinal_cascade.max_pitch_offset_deg, true);
+    parseNumber(longitudinal, "max_pitch_rate_dps", config.longitudinal_cascade.max_pitch_rate_dps, true);
+    parseNumber(longitudinal, "max_velocity_mps", config.longitudinal_cascade.max_velocity_mps, true);
+    parseNumber(longitudinal, "max_hold_velocity_mps", config.longitudinal_cascade.max_hold_velocity_mps, true);
+    parseNumber(longitudinal, "max_acceleration_mps2", config.longitudinal_cascade.max_acceleration_mps2, true);
+    parseNumber(longitudinal, "max_deceleration_mps2", config.longitudinal_cascade.max_deceleration_mps2, true);
+    parseNumber(longitudinal, "hold_position_deadband_m", config.longitudinal_cascade.hold_position_deadband_m, true);
+    parseNumber(longitudinal, "hold_velocity_deadband_mps", config.longitudinal_cascade.hold_velocity_deadband_mps, true);
+    parseNumber(longitudinal, "sync_kp", config.longitudinal_cascade.sync_kp, true);
+    parseNumber(longitudinal, "sync_kd", config.longitudinal_cascade.sync_kd, true);
+    parseNumber(longitudinal, "sync_max_effort", config.longitudinal_cascade.sync_max_effort, true);
+    parseNumber(longitudinal, "max_effort", config.longitudinal_cascade.max_effort, true);
+    cJSON* configured = cJSON_GetObjectItem(longitudinal, "configured");
+    if (configured && cJSON_IsBool(configured)) config.longitudinal_cascade.configured = cJSON_IsTrue(configured);
+    else ok = false;
+    parseRevision(longitudinal, "revision", config.longitudinal_cascade.revision);
+
+    cJSON* active = cJSON_GetObjectItem(obj, "active");
+    if (active && cJSON_IsString(active) &&
+        balanceStrategyIdFromString(active->valuestring, config.active)) {
+        // Parsed successfully.
+    } else {
+        ok = false;
+    }
+    parseRevision(obj, "revision", config.revision);
     return ok;
 }
 

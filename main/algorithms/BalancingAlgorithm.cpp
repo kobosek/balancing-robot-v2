@@ -24,12 +24,14 @@ BalancingAlgorithm::BalancingAlgorithm(EventBus& eventBus,
      ESP_LOGI(TAG, "Balancing Algorithm created.");
 
      ConfigData initial_config_data;
-     initial_config_data.pid_angle = initialAnglePid;
-     initial_config_data.pid_speed_left = initialSpeedLeftPid;
-     initial_config_data.pid_speed_right = initialSpeedRightPid;
-     initial_config_data.pid_yaw_angle = initialYawAnglePid;
-     initial_config_data.pid_yaw_rate = initialYawRatePid;
      initial_config_data.control = initialControl;
+     initial_config_data.control.strategies.nested_pid.angle = initialAnglePid;
+     initial_config_data.control.strategies.nested_pid.speed_left = initialSpeedLeftPid;
+     initial_config_data.control.strategies.nested_pid.speed_right = initialSpeedRightPid;
+     initial_config_data.control.strategies.nested_pid.yaw_angle = initialYawAnglePid;
+     initial_config_data.control.strategies.nested_pid.yaw_rate = initialYawRatePid;
+     initial_config_data.control.strategies.nested_pid.max_target_pitch_offset_deg = initialControl.max_target_pitch_offset_deg;
+     initial_config_data.control.strategies.nested_pid.yaw_control_enabled = initialControl.yaw_control_enabled;
      initial_config_data.encoder = initialEncoder;
      initial_config_data.dimensions = initialDimensions;
 

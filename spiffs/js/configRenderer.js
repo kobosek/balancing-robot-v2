@@ -26,6 +26,9 @@ function addFormField(parent, fieldConfig) {
     if (fieldConfig.key) {
         input.dataset.key = fieldConfig.key;
     }
+    if (fieldConfig.path) {
+        input.dataset.path = fieldConfig.path.join('.');
+    }
 
     if (!isCheckbox) {
         if (fieldConfig.step) {

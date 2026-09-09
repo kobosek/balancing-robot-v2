@@ -45,6 +45,11 @@ export const appState = {
         state_id: null,
         name: 'UNKNOWN',
         state_name: 'UNKNOWN',
+        active_balance_strategy: 'nested_pid',
+        configured_balance_strategy: 'nested_pid',
+        balance_strategy_config_revision: 0,
+        strategy_change_in_progress: false,
+        longitudinal_cascade_available: false,
         auto_balancing_enabled: true,
         fall_detection_enabled: false,
         yaw_control_enabled: false,
@@ -128,6 +133,9 @@ export function updateCurrentSystemState(newStateData) {
     appState.currentSystemState = { ...previousState, ...newStateData, imu: normalizeImuStatus(newStateData.imu) };
     if (previousState.state_id !== appState.currentSystemState.state_id ||
         previousState.state_name !== appState.currentSystemState.state_name ||
+        previousState.active_balance_strategy !== appState.currentSystemState.active_balance_strategy ||
+        previousState.configured_balance_strategy !== appState.currentSystemState.configured_balance_strategy ||
+        previousState.strategy_change_in_progress !== appState.currentSystemState.strategy_change_in_progress ||
         previousState.auto_balancing_enabled !== appState.currentSystemState.auto_balancing_enabled ||
         previousState.fall_detection_enabled !== appState.currentSystemState.fall_detection_enabled ||
         previousState.yaw_control_enabled !== appState.currentSystemState.yaw_control_enabled ||

@@ -1,5 +1,5 @@
 {
-  "config_version": 2,
+  "config_version": 3,
   "wifi": {
     "ssid": "StajniaAugiasza",
     "password": "Lubieplacki4321"
@@ -10,7 +10,99 @@
   "control": {
     "joystick_exponent": 1.5,
     "max_target_pitch_offset_deg": 5.0,
-    "yaw_control_enabled": false
+    "yaw_control_enabled": false,
+    "balance_strategy": "nested_pid",
+    "strategies_revision": 0,
+    "strategies": {
+      "active": "nested_pid",
+      "revision": 0,
+      "nested_pid": {
+        "angle": {
+          "kp": 15.0,
+          "ki": 0.0,
+          "kd": 0.0,
+          "output_min": -720.0,
+          "output_max": 720.0,
+          "iterm_min": -10.0,
+          "iterm_max": 10.0
+        },
+        "speed_left": {
+          "kp": 0.01,
+          "ki": 0.05,
+          "kd": 0.0001,
+          "output_min": -1.0,
+          "output_max": 1.0,
+          "iterm_min": -10.0,
+          "iterm_max": 10.0
+        },
+        "speed_right": {
+          "kp": 0.01,
+          "ki": 0.05,
+          "kd": 0.0001,
+          "output_min": -1.0,
+          "output_max": 1.0,
+          "iterm_min": -10.0,
+          "iterm_max": 10.0
+        },
+        "yaw_angle": {
+          "kp": 2.0,
+          "ki": 0.0,
+          "kd": 0.05,
+          "output_min": -60.0,
+          "output_max": 60.0,
+          "iterm_min": -20.0,
+          "iterm_max": 20.0
+        },
+        "yaw_rate": {
+          "kp": 0.1,
+          "ki": 0.01,
+          "kd": 0.005,
+          "output_min": -100.0,
+          "output_max": 100.0,
+          "iterm_min": -50.0,
+          "iterm_max": 50.0
+        },
+        "max_target_pitch_offset_deg": 5.0,
+        "yaw_control_enabled": false,
+        "revision": 0
+      },
+      "longitudinal_cascade": {
+        "pitch": {
+          "kp": 0.0,
+          "ki": 0.0,
+          "kd": 0.0,
+          "output_min": -1.0,
+          "output_max": 1.0,
+          "iterm_min": -1.0,
+          "iterm_max": 1.0
+        },
+        "velocity": {
+          "kp": 0.0,
+          "ki": 0.0,
+          "kd": 0.0,
+          "output_min": -1.0,
+          "output_max": 1.0,
+          "iterm_min": -1.0,
+          "iterm_max": 1.0
+        },
+        "position_kp": 0.0,
+        "pitch_trim_deg": 0.0,
+        "max_pitch_offset_deg": 0.0,
+        "max_pitch_rate_dps": 0.0,
+        "max_velocity_mps": 0.0,
+        "max_hold_velocity_mps": 0.0,
+        "max_acceleration_mps2": 0.0,
+        "max_deceleration_mps2": 0.0,
+        "hold_position_deadband_m": 0.0,
+        "hold_velocity_deadband_mps": 0.0,
+        "sync_kp": 0.0,
+        "sync_kd": 0.0,
+        "sync_max_effort": 0.0,
+        "max_effort": 1.0,
+        "configured": false,
+        "revision": 0
+      }
+    }
   },
   "imu": {
     "i2c_port": 0,
@@ -67,51 +159,6 @@
     "critical_battery_motor_shutdown_enabled": false,
     "adc_bitwidth": 12,
     "adc_atten": 3
-  },
-  "pid_angle": {
-    "kp": 15.0,
-    "ki": 0.0,
-    "kd": 0.0,
-    "output_min": -720.0,
-    "output_max": 720.0,
-    "iterm_min": -10.0,
-    "iterm_max": 10.0
-  },
-  "pid_speed_left": {
-    "kp": 0.01,
-    "ki": 0.05,
-    "kd": 0.0001,
-    "output_min": -1.0,
-    "output_max": 1.0,
-    "iterm_min": -10.0,
-    "iterm_max": 10.0
-  },
-  "pid_speed_right": {
-    "kp": 0.01,
-    "ki": 0.05,
-    "kd": 0.0001,
-    "output_min": -1.0,
-    "output_max": 1.0,
-    "iterm_min": -10.0,
-    "iterm_max": 10.0
-  },
-  "pid_yaw_angle": {
-    "kp": 2.0,
-    "ki": 0.0,
-    "kd": 0.05,
-    "output_min": -60.0,
-    "output_max": 60.0,
-    "iterm_min": -20.0,
-    "iterm_max": 20.0
-  },
-  "pid_yaw_rate": {
-    "kp": 0.1,
-    "ki": 0.01,
-    "kd": 0.005,
-    "output_min": -100.0,
-    "output_max": 100.0,
-    "iterm_min": -50.0,
-    "iterm_max": 50.0
   },
   "pid_tuning": {
     "step_effort": 0.35,

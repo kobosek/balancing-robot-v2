@@ -31,24 +31,26 @@ void ConfigChangePublisher::publishImuConfig(const MPU6050Config& config, bool r
 void ConfigChangePublisher::publishChanges(const ConfigData& oldConfig, const ConfigData& newConfig) const {
     ESP_LOGI(TAG, "Publishing granular configuration events for changed components");
 
-    if (oldConfig.pid_angle != newConfig.pid_angle) {
-        CONFIG_PidConfigUpdate event("angle", newConfig.pid_angle);
+    const auto& oldNested = oldConfig.control.strategies.nested_pid;
+    const auto& newNested = newConfig.control.strategies.nested_pid;
+    if (oldNested.angle != newNested.angle) {
+        CONFIG_PidConfigUpdate event("angle", newNested.angle);
         m_eventBus.publish(event);
     }
-    if (oldConfig.pid_speed_left != newConfig.pid_speed_left) {
-        CONFIG_PidConfigUpdate event("speed_left", newConfig.pid_speed_left);
+    if (oldNested.speed_left != newNested.speed_left) {
+        CONFIG_PidConfigUpdate event("speed_left", newNested.speed_left);
         m_eventBus.publish(event);
     }
-    if (oldConfig.pid_speed_right != newConfig.pid_speed_right) {
-        CONFIG_PidConfigUpdate event("speed_right", newConfig.pid_speed_right);
+    if (oldNested.speed_right != newNested.speed_right) {
+        CONFIG_PidConfigUpdate event("speed_right", newNested.speed_right);
         m_eventBus.publish(event);
     }
-    if (oldConfig.pid_yaw_angle != newConfig.pid_yaw_angle) {
-        CONFIG_PidConfigUpdate event("yaw_angle", newConfig.pid_yaw_angle);
+    if (oldNested.yaw_angle != newNested.yaw_angle) {
+        CONFIG_PidConfigUpdate event("yaw_angle", newNested.yaw_angle);
         m_eventBus.publish(event);
     }
-    if (oldConfig.pid_yaw_rate != newConfig.pid_yaw_rate) {
-        CONFIG_PidConfigUpdate event("yaw_rate", newConfig.pid_yaw_rate);
+    if (oldNested.yaw_rate != newNested.yaw_rate) {
+        CONFIG_PidConfigUpdate event("yaw_rate", newNested.yaw_rate);
         m_eventBus.publish(event);
     }
     if (oldConfig.imu != newConfig.imu) {

@@ -69,12 +69,8 @@ esp_err_t JsonConfigParser::serialize(const ConfigData& config, std::string& out
     ADD_SECTION("dimensions", json_config_sections::serializeDimensions(config.dimensions));
     ADD_SECTION("web", json_config_sections::serializeWeb(config.web));
 
-    // --- PIDs ---
-    ADD_SECTION("pid_angle", json_config_sections::serializePid(config.pid_angle));
-    ADD_SECTION("pid_speed_left", json_config_sections::serializePid(config.pid_speed_left));
-    ADD_SECTION("pid_speed_right", json_config_sections::serializePid(config.pid_speed_right));
-    ADD_SECTION("pid_yaw_angle", json_config_sections::serializePid(config.pid_yaw_angle));
-    ADD_SECTION("pid_yaw_rate", json_config_sections::serializePid(config.pid_yaw_rate));
+    // Strategy-owned controllers are serialized by serializeControl under
+    // control.strategies. PID tuning remains a shared procedure section.
     ADD_SECTION("pid_tuning", json_config_sections::serializePidTuning(config.pid_tuning));
 
     // Clean up the macro definition
@@ -118,13 +114,15 @@ esp_err_t JsonConfigParser::deserialize(const std::string& input, ConfigData& co
     // --- Config Version ---
     cJSON *version_item = cJSON_GetObjectItem(root, "config_version");
     if (version_item && (!cJSON_IsNumber(version_item) ||
-        (version_item->valuedouble != 1 && version_item->valuedouble != 2))) {
-        ESP_LOGE(TAG, "Unsupported config_version (supported: 1, 2)");
+        (version_item->valuedouble != 1 && version_item->valuedouble != 2 && version_item->valuedouble != 3))) {
+        ESP_LOGE(TAG, "Unsupported config_version (supported: 1, 2, 3)");
         return ESP_ERR_NOT_SUPPORTED;
     }
-    if (!version_item || version_item->valueint == 1)
-        ESP_LOGI(TAG, "Migrating legacy configuration to version 2 in memory");
-    tempConfig.config_version = 2;
+    const int inputVersion = version_item ? version_item->valueint : 1;
+    if (inputVersion < 3) {
+        ESP_LOGI(TAG, "Migrating legacy configuration from version %d to version 3 in memory", inputVersion);
+    }
+    tempConfig.config_version = 3;
 
     // --- WiFi ---
     cJSON *wifi_section = cJSON_GetObjectItem(root, "wifi");
@@ -184,26 +182,45 @@ esp_err_t JsonConfigParser::deserialize(const std::string& input, ConfigData& co
         if (!json_config_sections::deserializeWeb(web_section, tempConfig.web)) web_success = false;
     } else { ESP_LOGW(TAG, "'web' section missing."); web_success = false; }
 
-    // --- PIDs ---
-    cJSON *pid_section;
-    pid_section = cJSON_GetObjectItem(root, "pid_angle");
-    if (pid_section && !json_config_sections::deserializePid(pid_section, tempConfig.pid_angle)) pid_success = false; else if (!pid_section) { ESP_LOGW(TAG, "'pid_angle' missing."); pid_success = false; }
-
-    pid_section = cJSON_GetObjectItem(root, "pid_speed_left");
-    if (pid_section && !json_config_sections::deserializePid(pid_section, tempConfig.pid_speed_left)) pid_success = false; else if (!pid_section) { ESP_LOGW(TAG, "'pid_speed_left' missing."); pid_success = false; }
-
-    pid_section = cJSON_GetObjectItem(root, "pid_speed_right");
-    if (pid_section && !json_config_sections::deserializePid(pid_section, tempConfig.pid_speed_right)) pid_success = false; else if (!pid_section) { ESP_LOGW(TAG, "'pid_speed_right' missing."); pid_success = false; }
-
-    pid_section = cJSON_GetObjectItem(root, "pid_yaw_angle");
-    if (pid_section) {
-        if (!json_config_sections::deserializePid(pid_section, tempConfig.pid_yaw_angle)) pid_success = false;
+    // --- Strategy-owned PID sets ---
+    if (inputVersion >= 3) {
+        if (!control_section || !cJSON_GetObjectItem(control_section, "strategies")) {
+            ESP_LOGE(TAG, "Version 3 configuration is missing control.strategies");
+            pid_success = false;
+        }
     } else {
-        ESP_LOGW(TAG, "'pid_yaw_angle' missing. Using defaults.");
-    }
+        PIDConfig anglePid;
+        PIDConfig speedLeftPid;
+        PIDConfig speedRightPid;
+        PIDConfig yawAnglePid = tempConfig.control.strategies.nested_pid.yaw_angle;
+        PIDConfig yawRatePid;
+        cJSON* pid_section = cJSON_GetObjectItem(root, "pid_angle");
+        if (pid_section && !json_config_sections::deserializePid(pid_section, anglePid)) pid_success = false;
+        else if (!pid_section) { ESP_LOGW(TAG, "'pid_angle' missing."); pid_success = false; }
+        pid_section = cJSON_GetObjectItem(root, "pid_speed_left");
+        if (pid_section && !json_config_sections::deserializePid(pid_section, speedLeftPid)) pid_success = false;
+        else if (!pid_section) { ESP_LOGW(TAG, "'pid_speed_left' missing."); pid_success = false; }
+        pid_section = cJSON_GetObjectItem(root, "pid_speed_right");
+        if (pid_section && !json_config_sections::deserializePid(pid_section, speedRightPid)) pid_success = false;
+        else if (!pid_section) { ESP_LOGW(TAG, "'pid_speed_right' missing."); pid_success = false; }
+        pid_section = cJSON_GetObjectItem(root, "pid_yaw_angle");
+        if (pid_section && !json_config_sections::deserializePid(pid_section, yawAnglePid)) pid_success = false;
+        else if (!pid_section) ESP_LOGW(TAG, "'pid_yaw_angle' missing. Using defaults.");
+        pid_section = cJSON_GetObjectItem(root, "pid_yaw_rate");
+        if (pid_section && !json_config_sections::deserializePid(pid_section, yawRatePid)) pid_success = false;
+        else if (!pid_section) { ESP_LOGW(TAG, "'pid_yaw_rate' missing."); pid_success = false; }
 
-    pid_section = cJSON_GetObjectItem(root, "pid_yaw_rate");
-    if (pid_section && !json_config_sections::deserializePid(pid_section, tempConfig.pid_yaw_rate)) pid_success = false; else if (!pid_section) { ESP_LOGW(TAG, "'pid_yaw_rate' missing."); pid_success = false; }
+        auto& nested = tempConfig.control.strategies.nested_pid;
+        nested.angle = anglePid;
+        nested.speed_left = speedLeftPid;
+        nested.speed_right = speedRightPid;
+        nested.yaw_angle = yawAnglePid;
+        nested.yaw_rate = yawRatePid;
+        nested.max_target_pitch_offset_deg = tempConfig.control.max_target_pitch_offset_deg;
+        nested.yaw_control_enabled = tempConfig.control.yaw_control_enabled;
+        tempConfig.control.strategies.active = BalanceStrategyId::NESTED_PID;
+        tempConfig.control.strategies.revision = 0;
+    }
 
     cJSON *pid_tuning_section = cJSON_GetObjectItem(root, "pid_tuning");
     if (pid_tuning_section) {

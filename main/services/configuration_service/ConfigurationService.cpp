@@ -7,6 +7,7 @@
 #include "IMU_GyroOffsetsUpdated.hpp" // For handling gyro offset updates
 
 #include <string>
+#include <inttypes.h>
 #include "esp_log.h"                    // Moved from header
 
 ConfigurationService::ConfigurationService(IStorageService& storage, IConfigParser& parser, EventBus& bus, const std::string& configKey) :
@@ -80,7 +81,7 @@ esp_err_t ConfigurationService::updateConfigFromJson(const std::string& json, st
     ConfigData tempConfig; // Create a temporary config to parse into
     esp_err_t ret = m_configParser.deserialize(json, tempConfig);
     if (ret != ESP_OK) {
-        if (error) *error = ret == ESP_ERR_NOT_SUPPORTED ? "Unsupported config_version; supported versions are 1 and 2" : "Invalid configuration JSON or field type";
+        if (error) *error = ret == ESP_ERR_NOT_SUPPORTED ? "Unsupported config_version; supported versions are 1, 2 and 3" : "Invalid configuration JSON or field type";
         ESP_LOGE(TAG, "Failed to deserialize JSON for update: %s", esp_err_to_name(ret));
         return ret;
     }
@@ -96,21 +97,46 @@ esp_err_t ConfigurationService::updateConfigFromJson(const std::string& json, st
     ConfigData oldConfig;
     ConfigData newConfig;
     
-    // Lock only when updating the internal state and saving
+    // Lock only when updating the internal state and saving. A v3 client must
+    // send the revision it read; this prevents an older config card from
+    // overwriting newer strategy parameters.
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         oldConfig = m_configData;  // Store old config for comparison
+        if (tempConfig.control.strategies.revision != oldConfig.control.strategies.revision) {
+            if (error) *error = "Configuration revision conflict; reload before saving";
+            ESP_LOGW(TAG, "Rejected config update with stale strategy revision (%" PRIu32 ", current %" PRIu32 ")",
+                     tempConfig.control.strategies.revision,
+                     oldConfig.control.strategies.revision);
+            return ESP_ERR_INVALID_STATE;
+        }
+        if (tempConfig.control.strategies.active != oldConfig.control.strategies.active) {
+            tempConfig.control.strategies.revision = oldConfig.control.strategies.revision + 1;
+        }
+        if (tempConfig.control.strategies.nested_pid != oldConfig.control.strategies.nested_pid) {
+            tempConfig.control.strategies.nested_pid.revision = oldConfig.control.strategies.nested_pid.revision + 1;
+            tempConfig.control.strategies.revision = oldConfig.control.strategies.revision + 1;
+        }
+        if (tempConfig.control.strategies.longitudinal_cascade != oldConfig.control.strategies.longitudinal_cascade) {
+            tempConfig.control.strategies.longitudinal_cascade.revision = oldConfig.control.strategies.longitudinal_cascade.revision + 1;
+            tempConfig.control.strategies.revision = oldConfig.control.strategies.revision + 1;
+        }
         m_configData = tempConfig; // Update internal state
         newConfig = m_configData;
         ret = saveInternal();      // Attempt to save
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to save configuration after update.");
-            // Even if save fails, the config in memory *is* updated.
+            m_configData = oldConfig;
+            newConfig = oldConfig;
         } else {
              ESP_LOGI(TAG, "Configuration updated and saved successfully (Version: %d).", m_configData.config_version);
         }
     } // Mutex released
     
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
     // Publish granular events for changed components
     m_configChangePublisher.publishChanges(oldConfig, newConfig);
     
@@ -131,19 +157,27 @@ esp_err_t ConfigurationService::applyPidConfig(const std::string& pidName, const
         oldConfig = m_configData;
         newConfig = m_configData;
 
+        auto& nested = newConfig.control.strategies.nested_pid;
         if (pidName == "angle") {
-            newConfig.pid_angle = config;
+            nested.angle = config;
         } else if (pidName == "speed_left") {
-            newConfig.pid_speed_left = config;
+            nested.speed_left = config;
         } else if (pidName == "speed_right") {
-            newConfig.pid_speed_right = config;
+            nested.speed_right = config;
         } else if (pidName == "yaw_angle") {
-            newConfig.pid_yaw_angle = config;
+            nested.yaw_angle = config;
         } else if (pidName == "yaw_rate") {
-            newConfig.pid_yaw_rate = config;
+            nested.yaw_rate = config;
         } else {
             ESP_LOGE(TAG, "Unknown PID name for applyPidConfig: %s", pidName.c_str());
             return ESP_ERR_INVALID_ARG;
+        }
+
+        if (nested != m_configData.control.strategies.nested_pid) {
+            newConfig.control.strategies.nested_pid.revision =
+                m_configData.control.strategies.nested_pid.revision + 1;
+            newConfig.control.strategies.revision =
+                m_configData.control.strategies.revision + 1;
         }
 
         std::string validationError;
@@ -157,15 +191,13 @@ esp_err_t ConfigurationService::applyPidConfig(const std::string& pidName, const
             ret = saveInternal();
             if (ret != ESP_OK) {
                 ESP_LOGE(TAG, "Failed to persist PID config '%s'", pidName.c_str());
+                m_configData = oldConfig;
+                newConfig = oldConfig;
             }
         }
     }
 
-    if (oldConfig.pid_angle != newConfig.pid_angle ||
-        oldConfig.pid_speed_left != newConfig.pid_speed_left ||
-        oldConfig.pid_speed_right != newConfig.pid_speed_right ||
-        oldConfig.pid_yaw_angle != newConfig.pid_yaw_angle ||
-        oldConfig.pid_yaw_rate != newConfig.pid_yaw_rate) {
+    if (oldConfig.control.strategies.nested_pid != newConfig.control.strategies.nested_pid) {
         m_configChangePublisher.publishChanges(oldConfig, newConfig);
         m_configChangePublisher.publishFullConfig(newConfig);
     }

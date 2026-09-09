@@ -3,8 +3,8 @@
 #include <cmath>
 
 bool ConfigValidator::validate(const ConfigData& config, std::string& error) const {
-    if (config.config_version != 2) {
-        error = "config_version must be 2";
+    if (config.config_version != 3) {
+        error = "config_version must be 3";
         return false;
     }
     if (config.wifi.ssid.empty() || config.wifi.ssid.length() > 32) {
@@ -143,6 +143,13 @@ bool ConfigValidator::validate(const ConfigData& config, std::string& error) con
     }
 
     auto validate_pid = [&](const PIDConfig& pid, const std::string& name) -> bool {
+        if (!std::isfinite(pid.pid_kp) || !std::isfinite(pid.pid_ki) ||
+            !std::isfinite(pid.pid_kd) || !std::isfinite(pid.pid_output_min) ||
+            !std::isfinite(pid.pid_output_max) || !std::isfinite(pid.pid_iterm_min) ||
+            !std::isfinite(pid.pid_iterm_max)) {
+            error = name + " contains a non-finite value";
+            return false;
+        }
         if (pid.pid_kp < 0.0f || pid.pid_kp > 500.0f) {
             error = name + ".kp out of range [0, 500]";
             return false;
@@ -166,11 +173,54 @@ bool ConfigValidator::validate(const ConfigData& config, std::string& error) con
         return true;
     };
 
-    if (!validate_pid(config.pid_angle, "pid_angle") ||
-        !validate_pid(config.pid_speed_left, "pid_speed_left") ||
-        !validate_pid(config.pid_speed_right, "pid_speed_right") ||
-        !validate_pid(config.pid_yaw_angle, "pid_yaw_angle") ||
-        !validate_pid(config.pid_yaw_rate, "pid_yaw_rate")) {
+    const auto& nested = config.control.strategies.nested_pid;
+    if (config.control.max_target_pitch_offset_deg != nested.max_target_pitch_offset_deg ||
+        config.control.yaw_control_enabled != nested.yaw_control_enabled) {
+        error = "control compatibility fields do not match control.strategies.nested_pid";
+        return false;
+    }
+    if (!validate_pid(nested.angle, "control.strategies.nested_pid.angle") ||
+        !validate_pid(nested.speed_left, "control.strategies.nested_pid.speed_left") ||
+        !validate_pid(nested.speed_right, "control.strategies.nested_pid.speed_right") ||
+        !validate_pid(nested.yaw_angle, "control.strategies.nested_pid.yaw_angle") ||
+        !validate_pid(nested.yaw_rate, "control.strategies.nested_pid.yaw_rate")) {
+        return false;
+    }
+
+    const auto& longitudinal = config.control.strategies.longitudinal_cascade;
+    if (!validate_pid(longitudinal.pitch, "control.strategies.longitudinal_cascade.pitch") ||
+        !validate_pid(longitudinal.velocity, "control.strategies.longitudinal_cascade.velocity")) {
+        return false;
+    }
+    const float longitudinalValues[] = {
+        longitudinal.position_kp,
+        longitudinal.pitch_trim_deg,
+        longitudinal.max_pitch_offset_deg,
+        longitudinal.max_pitch_rate_dps,
+        longitudinal.max_velocity_mps,
+        longitudinal.max_hold_velocity_mps,
+        longitudinal.max_acceleration_mps2,
+        longitudinal.max_deceleration_mps2,
+        longitudinal.hold_position_deadband_m,
+        longitudinal.hold_velocity_deadband_mps,
+        longitudinal.sync_kp,
+        longitudinal.sync_kd,
+        longitudinal.sync_max_effort,
+        longitudinal.max_effort
+    };
+    for (float value : longitudinalValues) {
+        if (!std::isfinite(value)) {
+            error = "control.strategies.longitudinal_cascade contains a non-finite value";
+            return false;
+        }
+    }
+    if (longitudinal.max_effort < 0.0f || longitudinal.max_effort > 1.0f ||
+        longitudinal.sync_max_effort < 0.0f || longitudinal.sync_max_effort > 1.0f) {
+        error = "control.strategies.longitudinal_cascade effort limits out of range [0,1]";
+        return false;
+    }
+    if (config.control.strategies.active == BalanceStrategyId::LONGITUDINAL_CASCADE) {
+        error = "longitudinal_cascade strategy is not available yet";
         return false;
     }
 

@@ -14,7 +14,7 @@
 #include "config/PidTuningConfig.hpp"
 
 struct ConfigData {
-    int config_version = 2;
+    int config_version = 3;
     WiFiConfig wifi;
     MainLoopConfig mainLoop;
     ControlConfig control;
@@ -22,11 +22,6 @@ struct ConfigData {
     EncoderConfig encoder;
     MotorConfig motor;
     BatteryConfig battery;
-    PIDConfig pid_angle;
-    PIDConfig pid_speed_left;
-    PIDConfig pid_speed_right;
-    PIDConfig pid_yaw_angle = {2.0f, 0.0f, 0.05f, -60.0f, 60.0f, -20.0f, 20.0f};
-    PIDConfig pid_yaw_rate;
     PidTuningConfig pid_tuning;
     SystemBehaviorConfig behavior;
     RobotDimensionsConfig dimensions;

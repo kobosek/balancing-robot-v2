@@ -119,39 +119,40 @@ void NestedPidBalanceStrategy::reset()
 void NestedPidBalanceStrategy::applyConfig(const ConfigData& config)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
+    const auto& nested = config.control.strategies.nested_pid;
     ESP_LOGD(TAG, "Applying nested PID balance config.");
-    m_anglePid.updateParams(config.pid_angle);
+    m_anglePid.updateParams(nested.angle);
     m_speedPidLeft.setParameters({
-        config.pid_speed_left.pid_kp,
-        config.pid_speed_left.pid_ki,
-        config.pid_speed_left.pid_kd,
-        config.pid_speed_left.pid_output_min,
-        config.pid_speed_left.pid_output_max,
-        config.pid_speed_left.pid_iterm_min,
-        config.pid_speed_left.pid_iterm_max
+        nested.speed_left.pid_kp,
+        nested.speed_left.pid_ki,
+        nested.speed_left.pid_kd,
+        nested.speed_left.pid_output_min,
+        nested.speed_left.pid_output_max,
+        nested.speed_left.pid_iterm_min,
+        nested.speed_left.pid_iterm_max
     });
     m_speedPidRight.setParameters({
-        config.pid_speed_right.pid_kp,
-        config.pid_speed_right.pid_ki,
-        config.pid_speed_right.pid_kd,
-        config.pid_speed_right.pid_output_min,
-        config.pid_speed_right.pid_output_max,
-        config.pid_speed_right.pid_iterm_min,
-        config.pid_speed_right.pid_iterm_max
+        nested.speed_right.pid_kp,
+        nested.speed_right.pid_ki,
+        nested.speed_right.pid_kd,
+        nested.speed_right.pid_output_min,
+        nested.speed_right.pid_output_max,
+        nested.speed_right.pid_iterm_min,
+        nested.speed_right.pid_iterm_max
     });
-    m_yawAnglePid.updateParams(config.pid_yaw_angle);
-    m_yawRatePid.updateParams(config.pid_yaw_rate);
+    m_yawAnglePid.updateParams(nested.yaw_angle);
+    m_yawRatePid.updateParams(nested.yaw_rate);
 
     const bool previousYawControlEnabled = m_yaw_control_enabled;
-    m_yaw_control_enabled = config.control.yaw_control_enabled;
+    m_yaw_control_enabled = nested.yaw_control_enabled;
     if (previousYawControlEnabled != m_yaw_control_enabled) {
         m_yawAnglePid.reset();
         m_yawRatePid.reset();
         m_has_target_yaw = false;
     }
 
-    m_angle_pid_output_min = config.pid_angle.getOutputMin();
-    m_angle_pid_output_max = config.pid_angle.getOutputMax();
+    m_angle_pid_output_min = nested.angle.getOutputMin();
+    m_angle_pid_output_max = nested.angle.getOutputMax();
     updateDimensions(config.encoder, config.dimensions);
 }
 

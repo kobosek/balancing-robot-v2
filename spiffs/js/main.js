@@ -186,6 +186,9 @@ async function handleToggleYawControl() {
         const isEnabled = !!currentConfig.control.yaw_control_enabled;
         const configToSend = JSON.parse(JSON.stringify(currentConfig));
         configToSend.control.yaw_control_enabled = !isEnabled;
+        if (configToSend.control.strategies?.nested_pid) {
+            configToSend.control.strategies.nested_pid.yaw_control_enabled = !isEnabled;
+        }
 
         const saveResult = await postConfigApi(configToSend);
         if (!saveResult) {

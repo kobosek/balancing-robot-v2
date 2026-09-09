@@ -28,11 +28,11 @@ public:
     // Getters
     ConfigData getConfigData() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData; }
     const WiFiConfig& getWiFiConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.wifi; }
-    const PIDConfig& getPidAngleConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.pid_angle; }
-    const PIDConfig& getPidSpeedLeftConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.pid_speed_left; }
-    const PIDConfig& getPidSpeedRightConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.pid_speed_right; }
-    const PIDConfig& getPidYawAngleConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.pid_yaw_angle; }
-    const PIDConfig& getPidYawRateConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.pid_yaw_rate; }
+    const PIDConfig& getPidAngleConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.control.strategies.nested_pid.angle; }
+    const PIDConfig& getPidSpeedLeftConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.control.strategies.nested_pid.speed_left; }
+    const PIDConfig& getPidSpeedRightConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.control.strategies.nested_pid.speed_right; }
+    const PIDConfig& getPidYawAngleConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.control.strategies.nested_pid.yaw_angle; }
+    const PIDConfig& getPidYawRateConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.control.strategies.nested_pid.yaw_rate; }
     const PidTuningConfig& getPidTuningConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.pid_tuning; }
     const MPU6050Config& getMpu6050Config() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.imu; }
     const MainLoopConfig& getMainLoopConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.mainLoop; }
@@ -40,6 +40,7 @@ public:
     const MotorConfig& getMotorConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.motor; }
     const BatteryConfig& getBatteryConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.battery; }
     const ControlConfig& getControlConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.control; }
+    BalanceStrategiesConfig getBalanceStrategiesConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.control.strategies; }
     // --- Getters for NEW sections ---
     const SystemBehaviorConfig& getSystemBehaviorConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.behavior; }
     const RobotDimensionsConfig& getRobotDimensionsConfig() const { std::lock_guard<std::mutex> lock(m_mutex); return m_configData.dimensions; }

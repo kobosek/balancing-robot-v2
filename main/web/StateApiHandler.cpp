@@ -148,7 +148,16 @@ esp_err_t StateApiHandler::handleRequest(httpd_req_t *req) {
     cJSON_AddBoolToObject(root, "auto_balancing_enabled", systemStatus.autoBalancingEnabled);
     cJSON_AddBoolToObject(root, "fall_detection_enabled", systemStatus.fallDetectionEnabled);
     cJSON_AddBoolToObject(root, "critical_battery_motor_shutdown_enabled", systemStatus.criticalBatteryMotorShutdownEnabled);
-    cJSON_AddBoolToObject(root, "yaw_control_enabled", configData.control.yaw_control_enabled);
+    cJSON_AddStringToObject(root, "active_balance_strategy",
+                            balanceStrategyIdToString(configData.control.strategies.active));
+    cJSON_AddStringToObject(root, "configured_balance_strategy",
+                            balanceStrategyIdToString(configData.control.strategies.active));
+    cJSON_AddNumberToObject(root, "balance_strategy_config_revision",
+                            configData.control.strategies.revision);
+    cJSON_AddBoolToObject(root, "strategy_change_in_progress", false);
+    cJSON_AddBoolToObject(root, "longitudinal_cascade_available", false);
+    cJSON_AddBoolToObject(root, "yaw_control_enabled",
+                          configData.control.strategies.nested_pid.yaw_control_enabled);
     cJSON_AddNumberToObject(root, "battery_voltage", batteryStatus.voltage);
     cJSON_AddNumberToObject(root, "battery_adc_pin_voltage", batteryStatus.adcPinVoltage);
     cJSON_AddNumberToObject(root, "battery_percentage", batteryStatus.percentage);
