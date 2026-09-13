@@ -5,6 +5,7 @@
 
 #include "EventBus.hpp"
 #include "EventHandler.hpp"
+#include "ControlOperationGate.hpp"
 #include <mutex>
 #include <string>
 #include "esp_log.h"
@@ -47,11 +48,17 @@ struct SystemStatusSnapshot {
     bool autoBalancingEnabled;
     bool fallDetectionEnabled;
     bool criticalBatteryMotorShutdownEnabled;
+    uint64_t armId;
+    uint32_t generation;
+    bool commandInputEnabled;
 };
 
 class StateManager : public EventHandler {
 public:
-    StateManager(EventBus& eventBus, const SystemBehaviorConfig& initialBehaviorConfig, const BatteryConfig& initialBatteryConfig);
+    StateManager(EventBus& eventBus,
+                 const SystemBehaviorConfig& initialBehaviorConfig,
+                 const BatteryConfig& initialBatteryConfig,
+                 ControlOperationGate* operationGate = nullptr);
     ~StateManager() = default;
 
     SystemStatusSnapshot getStatusSnapshot() const;
@@ -83,11 +90,14 @@ private:
     static constexpr const char* TAG = "StateManager";
 
     EventBus& m_eventBus;
+    ControlOperationGate* m_operationGate = nullptr;
     mutable std::recursive_mutex m_mutex;
     SystemState m_currentState;
     IMUService* m_imu = nullptr;
     uint64_t m_armId = 0, m_imuRevision = 0;
     uint32_t m_generation = 0;
+    uint32_t m_configRevision = 0;
+    bool m_hasConfigRevision = false;
     int64_t m_maxSampleAgeUs = 20000, m_lastStopUs = 0;
     bool m_calibrationBusy = false;
     bool m_imu_available = false;
@@ -97,6 +107,8 @@ private:
     bool m_criticalBatteryMotorShutdownEnabled = false;
     bool m_autoBalancingEnabled = true;
     bool m_fallDetectionEnabled = true;
+    ControlOperationReservation m_motionReservation;
+    ControlOperationReservation m_calibrationReservation;
 
     void setState(SystemState newState);
 

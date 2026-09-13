@@ -57,6 +57,11 @@ private:
     BalanceStrategyId m_active_strategy = BalanceStrategyId::NESTED_PID;
     float m_max_linear_velocity_mps = 0.0f;
     uint64_t m_linear_command_sequence = 0;
+    uint64_t m_input_arm_id = 0;
+    uint64_t m_last_source_sequence = 0;
+    uint64_t m_source_sequence_arm_id = 0;
+    uint32_t m_config_revision = 0;
+    bool m_has_config_revision = false;
 
     // --- Event Handlers ---
     void handleInputModeChange(const COMMAND_InputModeChanged& event);
@@ -66,7 +71,11 @@ private:
     // --- Internal Helpers ---
     void periodicTimeoutCheck();
     void publishTargetCommand(float pitchOffsetDeg, float angVelDps);
-    void publishLinearVelocityCommand(float velocityMps, bool stop);
+    void publishLinearVelocityCommand(float velocityMps, bool stop,
+                                      uint64_t armId,
+                                      uint64_t sequence = 0,
+                                      int64_t receivedTimestampUs = 0);
+    uint64_t reserveLinearCommandLocked();
     void applyConfig(const ControlConfig& controlConf, const SystemBehaviorConfig& behaviorConf);
     esp_err_t startTimeoutTimer();
     esp_err_t stopTimeoutTimer();

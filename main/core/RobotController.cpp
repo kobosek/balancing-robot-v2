@@ -2,6 +2,8 @@
 
 #include "OrientationEstimator.hpp"
 #include "CONFIG_BehaviorConfigUpdate.hpp"
+#include "CONFIG_EncoderConfigUpdate.hpp"
+#include "CONFIG_FullConfigUpdate.hpp"
 #include "EncoderService.hpp"
 #include "MotorService.hpp"
 #include "BatteryService.hpp"
@@ -16,6 +18,24 @@
 #include "esp_timer.h"
 #include <cmath>
 #include <algorithm>
+#include <cstring>
+#include <limits>
+
+namespace {
+
+uint8_t telemetryFaultReason(const char* cause)
+{
+    if (!cause) return 255;
+    if (std::strcmp(cause, "invalid-encoder") == 0) return 1;
+    if (std::strcmp(cause, "invalid-input") == 0) return 2;
+    if (std::strcmp(cause, "revoked-arm") == 0) return 3;
+    if (std::strcmp(cause, "invalid-odometry") == 0) return 4;
+    if (std::strcmp(cause, "changed-during-step") == 0) return 5;
+    if (std::strcmp(cause, "motor-commit") == 0) return 6;
+    return 7;
+}
+
+}
 
 RobotController::RobotController(
     std::shared_ptr<OrientationEstimator> estimator,
@@ -25,7 +45,8 @@ RobotController::RobotController(
     ControlModeExecutor& controlModeExecutor,
     ControlEventDispatcher& controlEventDispatcher,
     const SystemBehaviorConfig& behavior,
-    const EncoderConfig& encoderConfig
+    const EncoderConfig& encoderConfig,
+    int controlIntervalMs
 ) :
     m_estimator(estimator),
     m_encoderService(encoderService),
@@ -42,6 +63,7 @@ RobotController::RobotController(
 {
     m_maxSampleAgeUs = behavior.imu_max_sample_age_ms * 1000LL;
     m_motionCommandTimeoutUs = behavior.joystick_timeout_ms * 1000LL;
+    m_controlIntervalMs = std::max(1, std::min(1000, controlIntervalMs));
     ESP_LOGI(TAG, "RobotController constructed.");
 }
 
@@ -51,6 +73,13 @@ void RobotController::handleEvent(const BaseEvent& event) {
         const auto& config = event.as<CONFIG_BehaviorConfigUpdate>().config;
         m_maxSampleAgeUs = config.imu_max_sample_age_ms * 1000LL;
         m_motionCommandTimeoutUs = config.joystick_timeout_ms * 1000LL;
+    } else if (event.is<CONFIG_EncoderConfigUpdate>()) {
+        handleEncoderConfigUpdate(event.as<CONFIG_EncoderConfigUpdate>());
+    } else if (event.is<CONFIG_FullConfigUpdate>()) {
+        const auto& config = event.as<CONFIG_FullConfigUpdate>().configData;
+        m_controlIntervalMs.store(
+            std::max(1, std::min(1000, config.mainLoop.interval_ms)),
+            std::memory_order_relaxed);
     } else if (event.is<MOTION_TargetMovement>()) {
         handleTargetMovementCommand(event.as<MOTION_TargetMovement>());
     } else if (event.is<MOTION_TargetLinearVelocity>()) {
@@ -63,6 +92,18 @@ void RobotController::handleEvent(const BaseEvent& event) {
     }
 }
 
+void RobotController::handleEncoderConfigUpdate(
+    const CONFIG_EncoderConfigUpdate& event)
+{
+    std::lock_guard<std::mutex> lock(m_odometryMutex);
+    // Geometry and count scale belong to the same validated encoder snapshot
+    // consumed by EncoderService.  Reconfigure atomically and invalidate the
+    // old position base; the next coherent frame establishes a new one.
+    m_longitudinalOdometry.configure(longitudinalOdometryConfigFromEncoder(
+        event.config, m_maxSampleAgeUs.load(std::memory_order_relaxed)));
+    m_hasOdometryArm = false;
+}
+
 
 void RobotController::handleTargetMovementCommand(const MOTION_TargetMovement& event) {
     m_latestTargetPitchOffset_deg.store(event.targetPitchOffset_deg, std::memory_order_relaxed);
@@ -73,41 +114,93 @@ void RobotController::handleTargetMovementCommand(const MOTION_TargetMovement& e
 void RobotController::handleTargetLinearVelocityCommand(
     const MOTION_TargetLinearVelocity& event)
 {
-    const uint64_t floor = m_motionCommandFloor.load(std::memory_order_acquire);
-    if (event.sequence != 0 && event.sequence <= floor) {
+    // Keep the mode lock while accepting the command. This makes the
+    // arm/session check atomic with a mode transition that clears the command
+    // snapshot; a delayed callback cannot slip in between those operations.
+    const char* warning = nullptr;
+    uint64_t currentArm = 0;
+    uint64_t floor = 0;
+    uint64_t latestSequence = 0;
+    int64_t nowUs = 0;
+    bool invalidTimestamp = false;
+    bool invalidVelocity = false;
+    {
+        std::lock_guard<std::mutex> modeLock(m_modeMutex);
+        currentArm = m_armId;
+        if (event.sequence == 0 || event.armId != currentArm) {
+            warning = "wrong-session";
+        } else {
+            floor = m_motionCommandFloor.load(std::memory_order_acquire);
+            if (event.sequence <= floor) {
+                warning = "stale-sequence";
+            } else {
+                std::lock_guard<std::mutex> lock(m_commandMutex);
+                if (event.sequence <= m_motionCommandFloor.load(std::memory_order_relaxed)) {
+                    warning = "stale-sequence";
+                } else if (m_latestMotionCommand.valid &&
+                           event.sequence <= m_latestMotionCommand.sequence) {
+                    latestSequence = m_latestMotionCommand.sequence;
+                    warning = "out-of-order";
+                } else {
+                    nowUs = esp_timer_get_time();
+                    invalidTimestamp = event.receivedTimestampUs <= 0 ||
+                        event.receivedTimestampUs > nowUs;
+                    invalidVelocity = !std::isfinite(event.targetVelocityMps);
+                    if (invalidTimestamp || invalidVelocity) {
+                        // Consume the sequence and clear the previous command so malformed or
+                        // future-dated input cannot leave an older drive request fresh until
+                        // its normal timeout expires.
+                        m_motionCommandFloor.store(event.sequence, std::memory_order_release);
+                        m_latestMotionCommand = {};
+                        warning = "invalid";
+                    } else {
+                        m_latestMotionCommand.valid = true;
+                        m_latestMotionCommand.fresh = true;
+                        m_latestMotionCommand.stop = event.stop;
+                        m_latestMotionCommand.targetVelocityMps = event.targetVelocityMps;
+                        m_latestMotionCommand.sequence = event.sequence;
+                        m_latestMotionCommand.receivedTimestampUs = event.receivedTimestampUs;
+                        m_latestMotionCommand.armId = event.armId;
+                    }
+                }
+            }
+        }
+    }
+
+    // Logging is intentionally outside both the mode and command mutexes. The
+    // control task shares these locks and must not inherit a slow log path.
+    if (!warning) {
+        ESP_LOGV(TAG, "RC Handler: Updated linear target: %.3f m/s stop=%d seq=%llu",
+                 event.targetVelocityMps, event.stop ? 1 : 0,
+                 static_cast<unsigned long long>(event.sequence));
+    } else if (std::strcmp(warning, "wrong-session") == 0) {
+        ESP_LOGW(TAG, "Ignoring linear command from wrong session: arm=%llu current=%llu seq=%llu",
+                 static_cast<unsigned long long>(event.armId),
+                 static_cast<unsigned long long>(currentArm),
+                 static_cast<unsigned long long>(event.sequence));
+    } else if (std::strcmp(warning, "stale-sequence") == 0) {
         ESP_LOGW(TAG, "Ignoring stale linear command sequence=%llu floor=%llu",
                  static_cast<unsigned long long>(event.sequence),
                  static_cast<unsigned long long>(floor));
-        return;
-    }
-
-    std::lock_guard<std::mutex> lock(m_commandMutex);
-    if (event.sequence != 0 && event.sequence <=
-        m_motionCommandFloor.load(std::memory_order_relaxed)) {
-        return;
-    }
-    if (event.sequence != 0 && m_latestMotionCommand.valid &&
-        event.sequence <= m_latestMotionCommand.sequence) {
+    } else if (std::strcmp(warning, "out-of-order") == 0) {
         ESP_LOGW(TAG, "Ignoring out-of-order linear command sequence=%llu latest=%llu",
                  static_cast<unsigned long long>(event.sequence),
-                 static_cast<unsigned long long>(m_latestMotionCommand.sequence));
-        return;
+                 static_cast<unsigned long long>(latestSequence));
+    } else {
+        ESP_LOGW(TAG, "Rejecting invalid linear command: seq=%llu timestamp=%lld now=%lld finite=%d",
+                 static_cast<unsigned long long>(event.sequence),
+                 static_cast<long long>(event.receivedTimestampUs),
+                 static_cast<long long>(nowUs),
+                 invalidVelocity ? 0 : 1);
     }
-    m_latestMotionCommand.valid = true;
-    m_latestMotionCommand.fresh = true;
-    m_latestMotionCommand.stop = event.stop;
-    m_latestMotionCommand.targetVelocityMps = event.targetVelocityMps;
-    m_latestMotionCommand.sequence = event.sequence;
-    m_latestMotionCommand.receivedTimestampUs = event.receivedTimestampUs;
-    ESP_LOGV(TAG, "RC Handler: Updated linear target: %.3f m/s stop=%d seq=%llu",
-             event.targetVelocityMps, event.stop ? 1 : 0,
-             static_cast<unsigned long long>(event.sequence));
 }
 
 void RobotController::handleControlRunModeChanged(const CONTROL_RunModeChanged& event) {
     std::lock_guard<std::mutex> modeLock(m_modeMutex);
     if (event.armId < m_armId) return;
-    {
+    const bool sessionChanged = event.armId != m_armId ||
+        event.generation != m_generation || event.mode != m_controlMode;
+    if (sessionChanged) {
         std::lock_guard<std::mutex> commandLock(m_commandMutex);
         const uint64_t latestSequence = m_latestMotionCommand.sequence;
         const uint64_t previousFloor = m_motionCommandFloor.load(std::memory_order_relaxed);
@@ -125,6 +218,11 @@ void RobotController::handleControlRunModeChanged(const CONTROL_RunModeChanged& 
 
 void RobotController::runControlStep(float dt) {
     const int64_t startTimeMicros = esp_timer_get_time();
+    int32_t motorCommitResult = 0;
+    bool motorCommitAttempted = false;
+    bool motorCommitSucceeded = false;
+    uint8_t faultReason = 0;
+    bool faultLatched = false;
 
     bool telemetryEnabled;
     int telemetryStateCode;
@@ -158,13 +256,18 @@ void RobotController::runControlStep(float dt) {
     m_controlEventDispatcher.enqueueOrientation(orientation);
 
     const auto encoders = m_encoderService.getFrame();
-    if (!m_hasOdometryArm || arm != m_lastOdometryArm) {
-        m_longitudinalOdometry.reset();
-        m_lastOdometryArm = arm;
-        m_hasOdometryArm = true;
+    LongitudinalOdometryResult odometry;
+    {
+        std::lock_guard<std::mutex> lock(m_odometryMutex);
+        if (!m_hasOdometryArm || arm != m_lastOdometryArm) {
+            m_longitudinalOdometry.reset();
+            m_lastOdometryArm = arm;
+            m_hasOdometryArm = true;
+        }
+        m_longitudinalOdometry.setMaxSampleAgeUs(
+            m_maxSampleAgeUs.load(std::memory_order_relaxed));
+        odometry = m_longitudinalOdometry.update(encoders, esp_timer_get_time());
     }
-    m_longitudinalOdometry.setMaxSampleAgeUs(m_maxSampleAgeUs.load(std::memory_order_relaxed));
-    const auto odometry = m_longitudinalOdometry.update(encoders, esp_timer_get_time());
     const float speedL_dps = encoders.left.speedDps;
     const float speedR_dps = encoders.right.speedDps;
     const bool reusedImuSample = orientation.sample_sequence == m_lastImuSequence &&
@@ -202,10 +305,14 @@ void RobotController::runControlStep(float dt) {
     modeInput.motionTimeoutUs = m_motionCommandTimeoutUs.load(std::memory_order_relaxed);
     modeInput.motion = motionCommand;
     modeInput.odometry = odometry;
+    modeInput.controlArmId = arm;
 
     const auto fault = [&](const char* cause, esp_err_t error = ESP_OK) {
         const auto observed = esp_timer_get_time();
         const auto latest = m_estimator->getOrientation();
+        faultReason = telemetryFaultReason(cause);
+        faultLatched = true;
+        if (error != ESP_OK) motorCommitResult = static_cast<int32_t>(error);
         m_motorService.inhibitImu(arm);
         m_controlModeExecutor.reset();
         if (m_lastFaultArm != arm) {
@@ -215,35 +322,66 @@ void RobotController::runControlStep(float dt) {
         }
     };
     const bool active = currentMode != ControlRunMode::DISABLED;
+    const BalanceStrategyId activeBalanceStrategy =
+        m_controlModeExecutor.activeBalanceStrategyId();
+    const bool legacyTargetsRequired = currentMode != ControlRunMode::BALANCING ||
+        activeBalanceStrategy == BalanceStrategyId::NESTED_PID;
     const auto inputsValid = [&] {
-        return orientation.fresh(esp_timer_get_time(), m_maxSampleAgeUs.load()) &&
+        const int64_t now = esp_timer_get_time();
+        const int64_t maxSampleAgeUs = m_maxSampleAgeUs.load(std::memory_order_relaxed);
+        const bool encodersFresh = encoders.left.sampleTimestampUs > 0 &&
+            encoders.right.sampleTimestampUs > 0 &&
+            now >= encoders.left.sampleTimestampUs &&
+            now >= encoders.right.sampleTimestampUs &&
+            now - encoders.left.sampleTimestampUs <= maxSampleAgeUs &&
+            now - encoders.right.sampleTimestampUs <= maxSampleAgeUs;
+        const bool legacyTargetsFinite = !legacyTargetsRequired ||
+            (std::isfinite(currentTargetPitchOffset_deg) &&
+             std::isfinite(currentTargetAngVel_dps));
+        return orientation.fresh(now, maxSampleAgeUs) &&
             orientation.generation == generation && encoders.left.valid && encoders.right.valid &&
-            esp_timer_get_time() - encoders.left.sampleTimestampUs <= m_maxSampleAgeUs.load() &&
-            esp_timer_get_time() - encoders.right.sampleTimestampUs <= m_maxSampleAgeUs.load() && std::isfinite(dt) && dt > 0 &&
+            encodersFresh && std::isfinite(dt) && dt > 0 &&
             std::isfinite(speedL_dps) && std::isfinite(speedR_dps) &&
-            std::isfinite(currentTargetPitchOffset_deg) && std::isfinite(currentTargetAngVel_dps) &&
-            (!motionCommand.valid || std::isfinite(motionCommand.targetVelocityMps));
+            legacyTargetsFinite;
     };
     ControlModeResult modeResult{};
     if (active && (!inputsValid() || !m_motorService.isArmAllowed(arm, generation))) {
-        fault(!encoders.left.valid || !encoders.right.valid ? "invalid-encoder" : inputsValid() ? "revoked-arm" : "invalid-input");
+        const char* cause = !encoders.left.valid || !encoders.right.valid
+            ? "invalid-encoder" : inputsValid() ? "revoked-arm" : "invalid-input";
+        fault(cause, ESP_ERR_INVALID_STATE);
+        modeResult.strategyId = activeBalanceStrategy;
+        modeResult.strategyRevision = m_controlModeExecutor.activeBalanceStrategyRevision();
+        modeResult.configRevision = m_controlModeExecutor.appliedConfigRevision();
+        modeResult.diagnostics.strategyId = activeBalanceStrategy;
+        modeResult.diagnostics.phase = BalanceControlPhase::FAULT;
+        modeResult.diagnostics.loopMode = activeBalanceStrategy ==
+            BalanceStrategyId::NESTED_PID ? -1 : modeResult.diagnostics.loopMode;
+        modeResult.valid = false;
     } else {
         if (arm != m_lastExecutedArm) { m_controlModeExecutor.reset(); m_lastExecutedArm = arm; }
         modeResult = m_controlModeExecutor.execute(modeInput);
         const auto latest = m_estimator->getOrientation();
         const bool longitudinalOdometryInvalid = active &&
             modeResult.diagnostics.strategyId == BalanceStrategyId::LONGITUDINAL_CASCADE &&
-            (!odometry.odometryValid || !modeResult.diagnostics.valid);
-        if (active && (longitudinalOdometryInvalid || !inputsValid() || !latest.valid || latest.generation != generation ||
+            modeResult.diagnostics.velocityLoopEnabled && !odometry.odometryValid;
+        if (active && (!modeResult.valid || longitudinalOdometryInvalid || !inputsValid() || !latest.valid || latest.generation != generation ||
             !std::isfinite(modeResult.effort.left) || !std::isfinite(modeResult.effort.right))) {
             fault(longitudinalOdometryInvalid ? "invalid-odometry" : "changed-during-step");
-            modeResult = {};
+            modeResult.valid = false;
+            modeResult.effort = {};
         } else {
+            motorCommitAttempted = active;
             const auto result = m_motorService.setMotorEffort(modeResult.effort.left, modeResult.effort.right, arm, generation,
                 active ? std::min(orientation.sample_timestamp_us,
                     std::min(encoders.left.sampleTimestampUs, encoders.right.sampleTimestampUs)) : 0,
                 active ? m_maxSampleAgeUs.load() : 0);
-            if (active && result != ESP_OK) { fault("motor-commit", result); modeResult = {}; }
+            motorCommitResult = static_cast<int32_t>(result);
+            motorCommitSucceeded = active && result == ESP_OK;
+            if (active && result != ESP_OK) {
+                fault("motor-commit", result);
+                modeResult.valid = false;
+                modeResult.effort = {};
+            }
         }
     }
 
@@ -254,6 +392,9 @@ void RobotController::runControlStep(float dt) {
                                                                yaw_rate_dps,
                                                                speedL_dps,
                                                                speedR_dps,
+                                                               arm,
+                                                               generation,
+                                                               odometry,
                                                                modeResult);
     snapshot.imuValid = orientation.fresh(esp_timer_get_time(), m_maxSampleAgeUs.load());
     snapshot.imuAgeMs = orientation.sample_timestamp_us > 0 ?
@@ -262,6 +403,18 @@ void RobotController::runControlStep(float dt) {
     snapshot.encoderLeftValid = encoders.left.valid;
     snapshot.encoderRightValid = encoders.right.valid;
     snapshot.imuSampleRepeated = reusedImuSample;
+    snapshot.motorCommitAttempted = motorCommitAttempted;
+    snapshot.motorCommitSucceeded = motorCommitSucceeded;
+    snapshot.motorCommitResult = motorCommitResult;
+    snapshot.faultReason = faultReason;
+    snapshot.faultLatched = faultLatched;
+    snapshot.imuSampleSequence = orientation.sample_sequence;
+    const int64_t stepCostUs = std::max<int64_t>(
+        0, esp_timer_get_time() - startTimeMicros);
+    snapshot.controlStepCostUs = static_cast<uint32_t>(std::min<int64_t>(
+        stepCostUs, std::numeric_limits<uint32_t>::max()));
+    snapshot.controlStepLate = stepCostUs >
+        static_cast<int64_t>(controlIntervalMs()) * 1000;
     m_controlEventDispatcher.enqueueTelemetry(snapshot);
 
     ESP_LOGV(TAG, "Ctrl Step: dt=%.4f, P=%.1f Yaw=%.1f YawR=%.1f | TgtPO=%.1f, CmdYawR=%.1f, TgtYaw=%.1f, DesYawR=%.1f | SSetL=%.1f, SSetR=%.1f | SActL=%.1f, SActR=%.1f | EffL=%.2f, EffR=%.2f",
@@ -283,6 +436,9 @@ TelemetryDataPoint RobotController::buildTelemetrySnapshot(int64_t timestamp_us,
                                                            float yaw_rate_dps,
                                                            float speedL_dps,
                                                            float speedR_dps,
+                                                           uint64_t commandSessionId,
+                                                           uint32_t controlGeneration,
+                                                           const LongitudinalOdometryResult& odometry,
                                                            const ControlModeResult& modeResult) const {
     TelemetryDataPoint snapshot = {};
     snapshot.timestamp_us = timestamp_us;
@@ -298,6 +454,76 @@ TelemetryDataPoint RobotController::buildTelemetrySnapshot(int64_t timestamp_us,
     snapshot.targetYawRate_dps = modeResult.telemetryDesiredYawRate_dps;
     snapshot.speedSetpointLeft_dps = modeResult.speedSetpointLeft_dps;
     snapshot.speedSetpointRight_dps = modeResult.speedSetpointRight_dps;
+
+    const auto& diagnostics = modeResult.diagnostics;
+    const BalanceStrategyId telemetryStrategy = modeResult.valid
+        ? modeResult.strategyId : m_controlModeExecutor.activeBalanceStrategyId();
+    snapshot.strategyId = static_cast<uint8_t>(telemetryStrategy);
+    snapshot.loopMode = diagnostics.loopMode;
+    snapshot.controlPhase = static_cast<uint8_t>(diagnostics.phase);
+    snapshot.strategyRevision = modeResult.valid ? modeResult.strategyRevision
+        : m_controlModeExecutor.activeBalanceStrategyRevision();
+    snapshot.configRevision = modeResult.configRevision != 0 ? modeResult.configRevision
+        : m_controlModeExecutor.appliedConfigRevision();
+    snapshot.commandSessionId = commandSessionId;
+    snapshot.controlGeneration = controlGeneration;
+    snapshot.odometryGeneration = odometry.generation;
+    snapshot.odometrySequence = odometry.odometrySequence;
+    snapshot.controlValid = modeResult.valid;
+    snapshot.targetPitchValid = diagnostics.targetPitchValid;
+    snapshot.targetPitchClamped = diagnostics.targetPitchClamped;
+    snapshot.targetPitchRateLimited = diagnostics.targetPitchRateLimited;
+    snapshot.positionTargetValid = diagnostics.positionTargetValid;
+    snapshot.positionHoldActive = diagnostics.positionHoldActive;
+    snapshot.synchronizationTargetValid = diagnostics.synchronizationTargetValid;
+    snapshot.velocityLoopEnabled = diagnostics.velocityLoopEnabled;
+    snapshot.positionLoopEnabled = diagnostics.positionLoopEnabled;
+    snapshot.synchronizationEnabled = diagnostics.synchronizationEnabled;
+    snapshot.motionCommandValid = diagnostics.motionCommandValid;
+    snapshot.motionCommandFresh = diagnostics.motionCommandFresh;
+    snapshot.velocityFeedbackValid = diagnostics.velocityFeedbackValid;
+    snapshot.velocityTargetClamped = diagnostics.velocityTargetClamped;
+    snapshot.velocityOutputSaturated = diagnostics.velocityOutputSaturated;
+    snapshot.velocityAntiWindup = diagnostics.velocityAntiWindup;
+    snapshot.pitchPidSaturated = diagnostics.pitchPidSaturated;
+    snapshot.balanceSaturated = diagnostics.balanceSaturated;
+    snapshot.mixerSaturated = diagnostics.mixerSaturated;
+    snapshot.syncLimited = diagnostics.syncLimited;
+    snapshot.motionRequestLimited = diagnostics.motionRequestLimited;
+    snapshot.targetPitch_deg = diagnostics.targetPitchValid
+        ? diagnostics.targetPitch_deg : snapshot.desiredAngle_deg;
+    snapshot.targetVelocityMps = diagnostics.targetVelocityMps;
+    snapshot.commandVelocityMps = diagnostics.commandVelocityMps;
+    snapshot.measuredVelocityMps = diagnostics.measuredVelocityMps;
+    snapshot.holdVelocityRequestMps = diagnostics.holdVelocityRequestMps;
+    snapshot.holdVelocityTargetMps = diagnostics.holdVelocityTargetMps;
+    snapshot.positionM = diagnostics.positionM;
+    snapshot.holdPositionM = diagnostics.holdPositionM;
+    snapshot.positionErrorM = diagnostics.positionErrorM;
+    snapshot.distanceDifferenceM = diagnostics.distanceDifferenceM;
+    snapshot.distanceDifferenceTargetM = diagnostics.distanceDifferenceTargetM;
+    snapshot.syncVelocityDifferenceMps = diagnostics.syncVelocityDifferenceMps;
+    snapshot.requestedBalanceEffort = diagnostics.requestedBalanceEffort;
+    snapshot.balanceEffort = diagnostics.balanceEffort;
+    snapshot.requestedSyncEffort = diagnostics.requestedSyncEffort;
+    snapshot.syncEffort = diagnostics.syncEffort;
+    snapshot.leftEffort = diagnostics.leftEffort;
+    snapshot.rightEffort = diagnostics.rightEffort;
+    snapshot.yawControlAvailable = telemetryStrategy == BalanceStrategyId::NESTED_PID;
+    snapshot.yawTargetValid = snapshot.yawControlAvailable &&
+        diagnostics.yawControlEnabled;
+    if (!modeResult.valid) {
+        snapshot.phaseReason = 5; // FAULT/invalid control result.
+    } else if (diagnostics.phase == BalanceControlPhase::BRAKE) {
+        snapshot.phaseReason = diagnostics.motionCommandFresh ? 2 : 1;
+    } else if (diagnostics.motionRequestLimited) {
+        snapshot.phaseReason = 6;
+    } else if (diagnostics.velocityFeedbackValid == false &&
+               diagnostics.velocityLoopEnabled) {
+        snapshot.phaseReason = 4;
+    } else if (diagnostics.phase == BalanceControlPhase::HOLD) {
+        snapshot.phaseReason = diagnostics.positionHoldActive ? 0 : 3;
+    }
 
     return snapshot;
 }

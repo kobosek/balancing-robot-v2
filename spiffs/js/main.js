@@ -6,8 +6,8 @@ import { assignElements, uiElements, updateStatusSectionUI, disableCommandButton
 import { setupWebSocket, setWebSocketDisconnectHandler, sendWebSocketMessage } from './websocket.js';
 import { setupJoystick, setJoystickTransport, stopJoystickSendInterval } from './joystick.js'; // Import stop function
 import { setupGraphs, drawAllGraphs } from './graph.js'; // Use new names
-import { createConfigForms, toggleConfigMenu, showConfigForm, showGeneralConfigForm } from './configUI.js'; // Import showGeneralConfigForm
-import { sendCommandApi, fetchConfigApi, fetchStateApi, postConfigApi, uploadOtaFirmware } from './api.js';
+import { createConfigForms, toggleConfigMenu, showConfigForm, showGeneralConfigForm, showLongitudinalConfigForm, applySelectedBalanceStrategy } from './configUI.js'; // Import showGeneralConfigForm
+import { sendCommandApi, fetchConfigApi, fetchStateApi, postConfigApi, createConfigOperationId, pendingConfigOperation, uploadOtaFirmware, acknowledgeConfigOperationApi, reconcilePendingConfigOperations } from './api.js';
 import { updateTelemetryData } from './telemetry.js';
 import { DATA_FETCH_INTERVAL_MS, STATE_FETCH_INTERVAL_MS } from './constants.js';
 import { loadPersistedLogs, startLogsPolling, stopLogsPolling, handleClearLogs, handleSaveLogsHtml, handleSaveLogsText, renderPersistedLogs, toggleLogsPanel } from './logs.js';
@@ -54,11 +54,18 @@ function setupEventListeners() {
 
     // Config Menu
     uiElements.openConfigBtn?.addEventListener('click', toggleConfigMenu);
-    uiElements.angleConfigBtn?.addEventListener('click', () => showConfigForm('pid_angle', uiElements.angleConfigFormContainer));
-    uiElements.speedLeftConfigBtn?.addEventListener('click', () => showConfigForm('pid_speed_left', uiElements.speedLeftConfigFormContainer));
-    uiElements.speedRightConfigBtn?.addEventListener('click', () => showConfigForm('pid_speed_right', uiElements.speedRightConfigFormContainer));
-    uiElements.yawRateConfigBtn?.addEventListener('click', () => showConfigForm('pid_yaw_rate', uiElements.yawRateConfigFormContainer)); // <<< ADDED Yaw Rate
+    uiElements.nestedPidConfigBtn?.addEventListener('click', () => showConfigForm('nested_pid', uiElements.nestedPidConfigFormContainer));
+    uiElements.longitudinalConfigBtn?.addEventListener('click', () => showLongitudinalConfigForm(uiElements.longitudinalConfigFormContainer));
     uiElements.generalConfigBtn?.addEventListener('click', () => showGeneralConfigForm(uiElements.generalConfigFormContainer));
+    uiElements.balanceStrategySelect?.addEventListener('change', () => {
+        if (uiElements.balanceStrategySelect) {
+            uiElements.balanceStrategySelect.dataset.userEditing = 'true';
+            uiElements.balanceStrategySelect.dataset.selectionVersion = String(
+                Number(uiElements.balanceStrategySelect.dataset.selectionVersion || 0) + 1);
+        }
+        updateStatusSectionUI();
+    });
+    uiElements.applyBalanceStrategyBtn?.addEventListener('click', applySelectedBalanceStrategy);
 
     // Command Buttons
     uiElements.startBtn?.addEventListener('click', () => handleCommandClick('start', uiElements.startBtn));
@@ -81,6 +88,7 @@ function setupEventListeners() {
     uiElements.startGuidedCalibrationBtn?.addEventListener('click', () => handleCommandClick('start_guided_calibration', uiElements.startGuidedCalibrationBtn));
     uiElements.cancelGuidedCalibrationBtn?.addEventListener('click', () => handleCommandClick('cancel_guided_calibration', uiElements.cancelGuidedCalibrationBtn));
     uiElements.otaUploadBtn?.addEventListener('click', handleOtaUpload);
+    uiElements.acknowledgeConfigOperationBtn?.addEventListener('click', handleAcknowledgeConfigOperation);
     uiElements.toggleLogsBtn?.addEventListener('click', toggleLogsPanel);
     uiElements.clearLogsBtn?.addEventListener('click', handleClearLogs);
     uiElements.saveLogsTextBtn?.addEventListener('click', handleSaveLogsText);
@@ -177,6 +185,14 @@ async function handleToggleYawControl() {
     disableCommandButton(uiElements.toggleYawControlBtn, true);
 
     try {
+        if (appState.currentSystemState?.active_balance_strategy !== 'nested_pid') {
+            alert('Yaw control is available only for Nested PID. The saved Nested PID setting was preserved.');
+            return;
+        }
+        if (appState.currentSystemState?.state_name !== 'IDLE') {
+            alert('Yaw control configuration can be changed only while the robot is IDLE.');
+            return;
+        }
         const currentConfig = appState.configDataCache || await fetchConfigApi();
         if (!currentConfig?.control) {
             alert("Cannot change yaw control because control config is unavailable.");
@@ -190,7 +206,17 @@ async function handleToggleYawControl() {
             configToSend.control.strategies.nested_pid.yaw_control_enabled = !isEnabled;
         }
 
-        const saveResult = await postConfigApi(configToSend);
+        const pending = pendingConfigOperation('yaw-control', configToSend);
+        const conflicting = pendingConfigOperation('yaw-control');
+        if (conflicting && !pending) {
+            alert('A previous yaw configuration operation is unresolved. Reconcile it before retrying.');
+            return;
+        }
+        const operationId = pending?.operationId || createConfigOperationId();
+        const saveResult = await postConfigApi(configToSend, operationId, {
+            scope: 'yaw-control', kind: 'configuration',
+            baseRevision: Number(configToSend.config_revision || 0)
+        });
         if (!saveResult) {
             return;
         }
@@ -229,7 +255,17 @@ async function handleToggleCriticalBatteryShutdown() {
         configToSend.battery.critical_battery_motor_shutdown_enabled = !isEnabled;
 
         console.log(`Saving critical battery shutdown = ${!isEnabled}`);
-        const saveResult = await postConfigApi(configToSend);
+        const pending = pendingConfigOperation('battery-shutdown', configToSend);
+        const conflicting = pendingConfigOperation('battery-shutdown');
+        if (conflicting && !pending) {
+            alert('A previous battery configuration operation is unresolved. Reconcile it before retrying.');
+            return;
+        }
+        const operationId = pending?.operationId || createConfigOperationId();
+        const saveResult = await postConfigApi(configToSend, operationId, {
+            scope: 'battery-shutdown', kind: 'configuration',
+            baseRevision: Number(configToSend.config_revision || 0)
+        });
         if (!saveResult) {
             return;
         }
@@ -301,6 +337,9 @@ function startDataFetching() {
     Promise.all([fetchConfigApi(), fetchStateApi(), updateTelemetryData()])
         .then(() => {
             console.log("Initial config, state, and telemetry fetched.");
+            return reconcilePendingConfigOperations();
+        })
+        .then(() => {
             updateStatusSectionUI(); // Update UI after first state fetch
             drawAllGraphs(); // Draw graphs after initial data
         })
@@ -337,6 +376,25 @@ function stopDataFetching() {
         appState.timers.stateFetch = null;
     }
     stopLogsPolling();
+}
+
+async function handleAcknowledgeConfigOperation() {
+    const operationId = String(appState.currentSystemState?.operation_id || '0');
+    if (operationId === '0' || !appState.currentSystemState?.operation_recovery_pending) {
+        return;
+    }
+
+    disableCommandButton(uiElements.acknowledgeConfigOperationBtn, true);
+    try {
+        await acknowledgeConfigOperationApi(operationId);
+        await Promise.all([fetchConfigApi(), fetchStateApi()]);
+        updateStatusSectionUI();
+    } catch (error) {
+        console.error('Error reconciling configuration operation:', error);
+        alert(`Configuration recovery failed: ${error.message || 'Unknown error'}`);
+    } finally {
+        updateStatusSectionUI();
+    }
 }
 
 // --- Page Unload Cleanup ---

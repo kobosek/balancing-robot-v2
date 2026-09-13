@@ -2,6 +2,7 @@
 
 #include <memory>
 #include "esp_err.h"
+#include "ControlOperationGate.hpp"
 
 class EventBus;
 class SPIFFSStorageService;
@@ -40,6 +41,7 @@ public:
     RobotController& robotController() const;
     BatteryService& batteryService() const;
     IMUService& imuService() const;
+    EncoderService& encoderService() const;
 
     std::shared_ptr<ConfigurationService> configServiceHandle() const { return m_configService; }
     std::shared_ptr<StateManager> stateManagerHandle() const { return m_stateManager; }
@@ -55,9 +57,12 @@ public:
     std::shared_ptr<OTAService> otaServiceHandle() const { return m_otaService; }
     std::shared_ptr<WebServer> webServerHandle() const { return m_webServer; }
     std::shared_ptr<IMUService> imuServiceHandle() const { return m_imuService; }
+    std::shared_ptr<EncoderService> encoderServiceHandle() const { return m_encoderService; }
 
 private:
     static constexpr const char* TAG = "AppContext";
+
+    ControlOperationGate m_operationGate;
 
     esp_err_t initializeCoreServices();
     esp_err_t initializeSupportServices();
@@ -78,7 +83,7 @@ private:
     std::shared_ptr<IMUService> m_imuService;
     std::shared_ptr<OrientationEstimator> m_orientationEstimator;
 
-    std::unique_ptr<EncoderService> m_encoderService;
+    std::shared_ptr<EncoderService> m_encoderService;
     std::shared_ptr<MotorService> m_motorService;
     std::shared_ptr<BalancingAlgorithm> m_balancingAlgorithm;
     std::shared_ptr<BalanceMonitor> m_balanceMonitor;

@@ -9,7 +9,7 @@ const graphConfigs = [
         yRightAxis: { min: -Y_EFFORT_RANGE, max: Y_EFFORT_RANGE, steps: 4, label: 'Joy (-1:1)', color: GRAPH_COLORS[1] },
         series: [
             { dataKey: 'pitchDeg', color: GRAPH_COLORS[0], yAxis: 'left', lineWidth: 2.0 },        // Actual Pitch (Purple)
-            { dataKey: 'desiredAngleDeg', color: GRAPH_COLORS[6], yAxis: 'left', lineWidth: 1.0 }, // Desired Angle (Teal)
+            { dataKey: 'targetPitchDeg', color: GRAPH_COLORS[6], yAxis: 'left', lineWidth: 1.0 }, // True pitch target (Teal)
             { dataKey: 'joystickX', color: GRAPH_COLORS[1], yAxis: 'right', lineWidth: 1.0 },       // Joy X (Blue)
             { dataKey: 'joystickY', color: GRAPH_COLORS[3], yAxis: 'right', lineWidth: 1.0 },       // Joy Y (Green)
         ]
@@ -34,6 +34,33 @@ const graphConfigs = [
             { dataKey: 'yawAngleDeg', color: GRAPH_COLORS[7], yAxis: 'left', lineWidth: 2.0 },
             { dataKey: 'targetYawRateDPS', color: GRAPH_COLORS[5], yAxis: 'right', lineWidth: 1.0 },
             { dataKey: 'yawRateDPS', color: GRAPH_COLORS[1], yAxis: 'right', lineWidth: 1.5 },
+        ]
+    },
+    // Graph 4: longitudinal position and body velocity.
+    {
+        yLeftAxis: { min: -2, max: 2, steps: 4, label: 'Position (m)', color: GRAPH_COLORS[6] },
+        yRightAxis: { min: -1, max: 1, steps: 4, label: 'Velocity (m/s)', color: GRAPH_COLORS[3] },
+        series: [
+            { dataKey: 'positionM', color: GRAPH_COLORS[6], yAxis: 'left', lineWidth: 2.0 },
+            { dataKey: 'holdPositionM', color: GRAPH_COLORS[4], yAxis: 'left', lineWidth: 1.0 },
+            { dataKey: 'positionErrorM', color: GRAPH_COLORS[7], yAxis: 'left', lineWidth: 1.0 },
+            { dataKey: 'targetVelocityMps', color: GRAPH_COLORS[5], yAxis: 'right', lineWidth: 1.0 },
+            { dataKey: 'commandVelocityMps', color: GRAPH_COLORS[1], yAxis: 'right', lineWidth: 1.0 },
+            { dataKey: 'measuredVelocityMps', color: GRAPH_COLORS[3], yAxis: 'right', lineWidth: 2.0 }
+        ]
+    },
+    // Graph 5: wheel synchronization and the effort headroom budget.
+    {
+        yLeftAxis: { min: -1, max: 1, steps: 4, label: 'Sync error', color: GRAPH_COLORS[2] },
+        yRightAxis: { min: -Y_EFFORT_RANGE, max: Y_EFFORT_RANGE, steps: 4, label: 'Effort', color: GRAPH_COLORS[1] },
+        series: [
+            { dataKey: 'distanceDifferenceM', color: GRAPH_COLORS[2], yAxis: 'left', lineWidth: 2.0 },
+            { dataKey: 'distanceDifferenceTargetM', color: GRAPH_COLORS[4], yAxis: 'left', lineWidth: 1.0 },
+            { dataKey: 'syncVelocityDifferenceMps', color: GRAPH_COLORS[7], yAxis: 'left', lineWidth: 1.0 },
+            { dataKey: 'requestedBalanceEffort', color: GRAPH_COLORS[5], yAxis: 'right', lineWidth: 1.0 },
+            { dataKey: 'balanceEffort', color: GRAPH_COLORS[6], yAxis: 'right', lineWidth: 1.5 },
+            { dataKey: 'requestedSyncEffort', color: GRAPH_COLORS[0], yAxis: 'right', lineWidth: 1.0 },
+            { dataKey: 'syncEffort', color: GRAPH_COLORS[3], yAxis: 'right', lineWidth: 1.5 }
         ]
     },
 ];
@@ -133,8 +160,19 @@ function drawSingleGraph(graphState) {
         drawYAxis(config.yLeftAxis, true); drawYAxis(config.yRightAxis, false);
         const configuredIntervalMs = parseInt(appState.configDataCache?.mainLoop?.interval_ms ?? 5, 10);
         const intervalMs = Number.isFinite(configuredIntervalMs) && configuredIntervalMs > 0 ? configuredIntervalMs : 5;
-        const totalTimeSec = (MAX_DATA_POINTS * intervalMs) / 1000.0;
-        const xTimeSteps = Math.min(4, Math.floor(graphWidth / 80)); ctx.lineWidth = 0.5; ctx.fillStyle = '#666'; ctx.strokeStyle = '#ccc';
+        const timestamps = Array.isArray(telemetryData.timestampUs)
+            ? telemetryData.timestampUs : [];
+        const finiteTimes = timestamps.filter(value => Number.isFinite(value));
+        const firstTime = finiteTimes.length ? finiteTimes[0] : null;
+        const lastTime = finiteTimes.length ? finiteTimes[finiteTimes.length - 1] : null;
+        const timeSpanUs = firstTime !== null && lastTime !== null &&
+            lastTime > firstTime ? lastTime - firstTime : 0;
+        const totalTimeSec = timeSpanUs > 0
+            ? timeSpanUs / 1000000.0 : (MAX_DATA_POINTS * intervalMs) / 1000.0;
+        // A narrow canvas still needs one finite interval for the time axis.
+        // Without the lower bound, the single-tick case divides by zero and
+        // paints NaN coordinates during a resize or mobile layout change.
+        const xTimeSteps = Math.max(1, Math.min(4, Math.floor(graphWidth / 80))); ctx.lineWidth = 0.5; ctx.fillStyle = '#666'; ctx.strokeStyle = '#ccc';
         for (let i = 0; i <= xTimeSteps; i++) {
             const x = padding.left + graphWidth * (i / xTimeSteps); ctx.beginPath(); ctx.moveTo(x, padding.top); ctx.lineTo(x, padding.top + graphHeight + 5); ctx.stroke();
             ctx.textAlign = 'center'; const secondsAgo = (totalTimeSec - (i * totalTimeSec / xTimeSteps)).toFixed(1); ctx.fillText(`${secondsAgo}s`, x, padding.top + graphHeight + 15);
@@ -145,7 +183,11 @@ function drawSingleGraph(graphState) {
              ctx.strokeStyle = color; ctx.lineWidth = lineWidth; ctx.beginPath(); let firstValidPoint = true; const range = yMax - yMin; if (Math.abs(range) < 1e-6) return; let pointsDrawn = 0;
              for (let i = 0; i < data.length; i++) {
                  const val = data[i]; if (val === null || isNaN(val)) { firstValidPoint = true; continue; }
-                 const x = padding.left + graphWidth * (i / (MAX_DATA_POINTS - 1)); const normalizedValue = (val - yMin) / range; const y = yBase + yHeight * (1 - normalizedValue);
+                 const sampleTime = timestamps[i];
+                 const xFraction = timeSpanUs > 0 && Number.isFinite(sampleTime)
+                     ? (sampleTime - firstTime) / timeSpanUs
+                     : (data.length > 1 ? i / (data.length - 1) : 0.5);
+                 const x = padding.left + graphWidth * Math.max(0, Math.min(1, xFraction)); const normalizedValue = (val - yMin) / range; const y = yBase + yHeight * (1 - normalizedValue);
                  const clampedY = Math.max(yBase, Math.min(yBase + yHeight, y)); if (firstValidPoint) { ctx.moveTo(x, clampedY); firstValidPoint = false; } else { ctx.lineTo(x, clampedY); } pointsDrawn++;
              } if (pointsDrawn > 1) { ctx.stroke(); }
          };

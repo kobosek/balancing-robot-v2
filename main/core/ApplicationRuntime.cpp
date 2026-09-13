@@ -37,7 +37,16 @@ esp_err_t ApplicationRuntime::start(ApplicationContext& context, int controlInte
         return ESP_FAIL;
     }
 
-    if (!m_controlTask->start(configMAX_PRIORITIES - 1, 1, 4096)) {
+    // ControlModeExecutor's PID-tuning path performs strategy reset and owns
+    // the complete control snapshot. ESP-IDF's xTaskCreatePinnedToCore API
+    // receives stack depth in bytes (unlike vanilla FreeRTOS words). Keep a
+    // measured margin for the longitudinal snapshot and PID-tuning path;
+    // ControlTask reports its high-water mark periodically at runtime.
+    // Keep the control loop high priority, but leave room for the idle/system
+    // work on CPU1. ControlTask also yields once per completed step below so
+    // a long or catch-up iteration cannot starve IDLE1 indefinitely.
+    constexpr uint32_t controlTaskStackBytes = 16384;
+    if (!m_controlTask->start(configMAX_PRIORITIES - 3, 1, controlTaskStackBytes)) {
         ESP_LOGE(TAG, "Failed to start Control task!");
         return ESP_FAIL;
     }

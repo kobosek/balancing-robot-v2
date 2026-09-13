@@ -195,3 +195,59 @@ BALANCING from an IDLE transition accompanied by 'Control inhibited: invalid-enc
 and arm-revocation gates. The stored speed PID integral range exceeds its output range;
 assess saturation/windup using actual traces rather than assume that retuning explains
 new isolated jerks. Details: docs/imu-pcnt-sensor-review.md.
+
+## 2026-09-10: longitudinal E2 integration coverage
+
+The isolated Unity component now links the production `RobotController`,
+`ControlModeExecutor`, `PidTuningService`, guided calibration, battery status and
+configuration dependencies alongside the existing strategy code. The new
+`test_control_integration.cpp` publishes a real `COMMAND_InputModeChanged` and
+`UI_JoystickInput` through `CommandProcessor` and `EventBus`, then drives the
+controller with fake IMU, PCNT, PWM and clock sources. It verifies that a valid
+longitudinal session reaches the configured velocity strategy and produces an
+actuator-boundary effort, then sends a same-session neutral command. The test
+does not link the production motor driver.
+
+The Unity image built successfully (`imu_recovery_tests.bin`, 0x7d8d0 bytes), and
+the integration case is retained in the whole-archive image. Assertions have not
+been executed on an ESP32; the runner, storage interruption cases and all motor,
+sign, deadzone and timing measurements remain open acceptance work. No flashing,
+monitoring or physical motor operation was performed.
+
+## 2026-09-10: E2 software completion and scheduling follow-up
+
+The portable control_math component was configured and built with the bundled
+MSVC CMake toolchain; control_math_example.exe executed successfully. The
+firmware and isolated Unity images also rebuilt successfully after the ControlTask
+watchdog mitigation: the task now has 8192 words of stack, runs below the maximum
+priority, and yields one tick after each completed control step. This keeps the
+measured-step-time contract while giving the idle/system work on CPU1 a scheduling
+window.
+
+Node web checks, JavaScript syntax checks and git diff --check passed. The Unity
+assertions, storage fault-injection cases, and physical confirmation of signs,
+deadzone under load, limiter thresholds, watchdog behavior and control stability
+still require a runner or the ESP32. No flashing, monitoring or motor operation
+was performed; the formal software E2 tick is closed, while device follow-up remains open in H/I.
+
+## 2026-09-10: F.1-F.3 software completion
+
+LongitudinalCascadeBalanceStrategy now activates POSITION_HOLD as a real HOLD-only
+position loop. It captures sTarget once after the configured settle conditions,
+uses a proportional sTarget-s request with hysteresis, limits the return speed,
+and sends the limited request through the existing motion profile and velocity PI.
+DRIVE and BRAKE do not accumulate a position route. An odometry generation change
+fails closed and clears the previous hold target.
+
+Optional wheel synchronization now captures dTarget once per DRIVE segment, keeps it
+through BRAKE and HOLD, and recaptures after a profiled direction reversal. It combines
+velocity-difference damping with distance-error P correction, applies independent
+position and velocity noise deadbands, and passes the result through the balance-first
+mixer headroom. The diagnostics snapshot includes s, sTarget, d, dTarget, vHold,
+uSync, odometry sequence and generation.
+
+Software validation: firmware and isolated Unity builds passed after the F changes.
+New regression sources cover position capture/return, disturbance while correcting,
+deadbanded synchronization, BRAKE reference retention, reversal recapture, and
+odometry-generation invalidation. Unity assertions and physical sign, deadzone,
+headroom and stability tests are intentionally left for H/I on the user's hardware.

@@ -1,10 +1,12 @@
 #pragma once
 
 #include "config/EncoderConfig.hpp"
+#include "EventHandler.hpp"
 #include "driver/pulse_cnt.h"
 #include "freertos/FreeRTOS.h"
 #include <cstdint>
 #include <mutex>
+#include <string>
 
 struct EncoderWheelFrame {
     int32_t rawCount = 0; // ESP-IDF accumulated count, not the hardware register.
@@ -26,7 +28,10 @@ struct EncoderFrame {
     EncoderWheelFrame left, right;
 };
 
-class EncoderService {
+class BaseEvent;
+class CONFIG_EncoderConfigUpdate;
+
+class EncoderService : public EventHandler {
 public:
     explicit EncoderService(const EncoderConfig& config, int64_t nominalPeriodUs = 5000);
     ~EncoderService();
@@ -34,6 +39,8 @@ public:
     void update();
     void reset(); // Logical baseline only; never clears a running hardware counter.
     EncoderFrame getFrame() const;
+    void handleEvent(const BaseEvent& event) override;
+    std::string getHandlerName() const override { return TAG; }
     float getLeftSpeedDegPerSec() const { return getFrame().left.speedDps; }
     float getRightSpeedDegPerSec() const { return getFrame().right.speedDps; }
 
@@ -41,9 +48,10 @@ private:
     static constexpr const char* TAG = "EncoderService";
     // Leave ample headroom for the SDK's signed 32-bit accumulator.
     static constexpr int32_t REBASE_THRESHOLD = 1 << 28;
-    const EncoderConfig m_config;
+    EncoderConfig m_config;
     const int64_t m_nominalPeriodUs;
     float m_filterLogRetention = 0;
+    bool m_initialized = false;
     pcnt_unit_handle_t m_unit_left = nullptr, m_unit_right = nullptr;
     pcnt_channel_handle_t m_channel_left_a = nullptr, m_channel_left_b = nullptr;
     pcnt_channel_handle_t m_channel_right_a = nullptr, m_channel_right_b = nullptr;
@@ -62,6 +70,11 @@ private:
     EncoderFrame m_frame;
     void publish(EncoderFrame frame);
     EncoderWheelFrame readWheel(pcnt_unit_handle_t unit, WheelState& state);
+    void recalculateScale();
+    void resetUnlocked();
+    void deinitHardwareUnlocked();
+    esp_err_t initHardwareUnlocked();
+    void handleConfigUpdate(const CONFIG_EncoderConfigUpdate& event);
     esp_err_t initPCNTUnit(int pinA, int pinB, pcnt_unit_handle_t* unit,
                           pcnt_channel_handle_t* channelA, pcnt_channel_handle_t* channelB);
 };

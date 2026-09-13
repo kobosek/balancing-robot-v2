@@ -50,17 +50,24 @@ float LongitudinalMotionProfile::advanceToward(float current,
                                                float target,
                                                float rate,
                                                float dtSeconds,
-                                               bool& limited)
+                                               bool& limited,
+                                               bool& valid)
 {
     if (!std::isfinite(current) || !std::isfinite(target) ||
         !std::isfinite(rate) || !std::isfinite(dtSeconds) ||
         dtSeconds <= 0.0f || rate <= 0.0f) {
         limited = true;
+        valid = false;
         return current;
     }
 
     const float delta = target - current;
     const float maxStep = rate * dtSeconds;
+    if (!std::isfinite(delta) || !std::isfinite(maxStep) || maxStep <= 0.0f) {
+        limited = true;
+        valid = false;
+        return current;
+    }
     if (std::fabs(delta) <= maxStep) {
         return target;
     }
@@ -100,8 +107,20 @@ LongitudinalMotionProfileResult LongitudinalMotionProfile::update(
     const float rate = accelerating
         ? m_config.maxAccelerationMps2
         : m_config.maxDecelerationMps2;
-    m_targetVelocityMps = advanceToward(m_targetVelocityMps, target, rate,
-                                        dtSeconds, limited);
+    bool stepValid = true;
+    const float nextTarget = advanceToward(m_targetVelocityMps, target, rate,
+                                            dtSeconds, limited, stepValid);
+    if (!stepValid || !std::isfinite(nextTarget)) {
+        // Keep the last finite target for diagnostics and possible recovery,
+        // but do not present an invalid arithmetic step as a valid profile.
+        result.targetVelocityMps = m_targetVelocityMps;
+        result.valid = false;
+        result.limited = limited;
+        result.atRest = std::fabs(m_targetVelocityMps) <= 1e-5f;
+        result.reachedCommand = false;
+        return result;
+    }
+    m_targetVelocityMps = nextTarget;
 
     result.targetVelocityMps = m_targetVelocityMps;
     result.valid = true;

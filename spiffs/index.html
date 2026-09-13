@@ -49,26 +49,42 @@
                 <div class="status-item"><span class="status-label">Auto Balancing:</span> <span id="autoBalancingStatus" class="status-value">UNKNOWN</span></div>
                 <div class="status-item"><span class="status-label">Fall Detect:</span> <span id="fallDetectStatus" class="status-value">UNKNOWN</span></div>
                 <div class="status-item"><span class="status-label">Yaw Control:</span> <span id="yawControlStatus" class="status-value">UNKNOWN</span></div>
+                <div class="status-item"><span class="status-label">Active Strategy:</span> <span id="activeBalanceStrategyValue" class="status-value">UNKNOWN</span></div>
+                <div class="status-item"><span class="status-label">Configured Strategy:</span> <span id="configuredBalanceStrategyValue" class="status-value">UNKNOWN</span></div>
+                <div class="status-item"><span class="status-label">Edited Set:</span> <span id="editedBalanceStrategyValue" class="status-value">NONE</span></div>
+                <div class="status-item"><span class="status-label">Strategy Readiness:</span> <span id="balanceStrategyCapabilityValue" class="status-value">UNKNOWN</span></div>
+                <div class="status-item"><span class="status-label">Longitudinal Telemetry:</span> <span id="longitudinalTelemetryStatus" class="status-value">INACTIVE</span></div>
                 <div class="status-item"><span class="status-label">Crit Batt Shutdown:</span> <span id="criticalBatteryShutdownStatus" class="status-value">UNKNOWN</span></div>
                 <div class="status-item"><span class="status-label">Guided Cal:</span> <span id="guidedCalibrationStatus" class="status-value">IDLE</span></div>
                 <div class="status-item"><span class="status-label">OTA:</span> <span id="otaStatusValue" class="status-value">UNKNOWN</span></div>
+                <div class="status-item">
+                    <span class="status-label">Config Operation:</span>
+                    <span id="configurationOperationStatus" class="status-value">IDLE</span>
+                    <button id="acknowledgeConfigOperationBtn" class="toggle-button" disabled>Reconcile</button>
+                </div>
                 <div class="status-item"><span class="status-label">Control Conn:</span> <span id="wsStatus" class="status-value" style="font-weight: bold;">INIT</span></div>
 
                 <!-- Configuration Section -->
                 <h2>Configuration</h2>
                 <button id="openConfigBtn">Show/Hide Config</button>
                 <div id="configMenu" style="display: none;">
-                     <!-- Buttons to show specific config forms -->
-                     <button id="angleConfigBtn">Angle PID</button>
-                     <button id="speedLeftConfigBtn">Speed PID Left</button>
-                     <button id="speedRightConfigBtn">Speed PID Right</button>
-                     <button id="yawRateConfigBtn">Yaw Control PIDs</button>
-                     <button id="generalConfigBtn">General</button>
+                     <div class="config-menu-actions" aria-label="Configuration sections">
+                         <button id="nestedPidConfigBtn">Nested PID</button>
+                         <button id="longitudinalConfigBtn">Longitudinal Cascade</button>
+                         <button id="generalConfigBtn">General</button>
+                     </div>
+                     <div class="strategy-selector">
+                        <label for="balanceStrategySelect">Strategy to apply:</label>
+                        <select id="balanceStrategySelect">
+                            <option value="nested_pid">Nested PID</option>
+                            <option value="longitudinal_cascade">Longitudinal Cascade</option>
+                        </select>
+                        <button id="applyBalanceStrategyBtn" class="toggle-button">Apply strategy</button>
+                        <div id="strategySelectionStatus" class="config-help">No strategy change pending.</div>
+                     </div>
                      <!-- Containers for the forms (populated by JS) -->
-                     <div id="angleConfigFormContainer" class="form-container" style="display: none;"></div>
-                     <div id="speedLeftConfigFormContainer" class="form-container" style="display: none;"></div>
-                     <div id="speedRightConfigFormContainer" class="form-container" style="display: none;"></div>
-                     <div id="yawRateConfigFormContainer" class="form-container" style="display: none;"></div> <!-- <<< ADDED Yaw Rate Container -->
+                     <div id="nestedPidConfigFormContainer" class="form-container strategy-form-container" style="display: none;"></div>
+                     <div id="longitudinalConfigFormContainer" class="form-container strategy-form-container" style="display: none;"></div>
                      <div id="generalConfigFormContainer" class="form-container" style="display: none;"></div>
                      <div class="ota-panel">
                         <h3>OTA Update</h3>
@@ -120,13 +136,13 @@
             <pre id="logsOutput" class="logs-output"></pre>
         </div>
 
-        <!-- Graph 1: Pitch (Actual vs Desired) & Control Input -->
+        <!-- Graph 1: Pitch (Actual vs true strategy target) & Control Input -->
         <div class="graph-container" id="graphContainer1">
-            <h3>Pitch (Actual vs Desired) & Control Input</h3>
+            <h3>Pitch (Actual vs strategy target) & Control Input</h3>
             <div id="legend1" class="legend">
                 <!-- Populated by JS, corresponds to graphConfigs[0].series -->
                 <div class="legend-item"><span class="legend-color" style="background-color: #6f42c1;"></span> Pitch Actual (deg): <span class="legend-value" id="legendValG1_0">0.0</span></div>
-                <div class="legend-item"><span class="legend-color" style="background-color: #20c997;"></span> Pitch Desired (deg): <span class="legend-value" id="legendValG1_1">0.0</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #20c997;"></span> Pitch Target (deg): <span class="legend-value" id="legendValG1_1">0.0</span></div>
                 <div class="legend-item"><span class="legend-color" style="background-color: #0d6efd;"></span> Joy X (-1:1): <span class="legend-value" id="legendValG1_2">0.0</span></div>
                 <div class="legend-item"><span class="legend-color" style="background-color: #198754;"></span> Joy Y (-1:1): <span class="legend-value" id="legendValG1_3">0.0</span></div>
             </div>
@@ -156,6 +172,35 @@
                 <div class="legend-item"><span class="legend-color" style="background-color: #0d6efd;"></span> Actual Yaw Rate (dps): <span class="legend-value" id="legendValG3_3">0.0</span></div>
              </div>
              <canvas id="telemetryGraph3"></canvas>
+        </div>
+
+        <!-- Graph 4: Longitudinal position and body velocity -->
+        <div class="graph-container" id="graphContainer4">
+            <h3>Longitudinal Position and Velocity</h3>
+            <div id="legend4" class="legend">
+                <div class="legend-item"><span class="legend-color" style="background-color: #20c997;"></span> Position (m): <span class="legend-value" id="legendValG4_0">N/A</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #ffc107;"></span> HOLD target (m): <span class="legend-value" id="legendValG4_1">N/A</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #0dcaf0;"></span> Position error (m): <span class="legend-value" id="legendValG4_2">N/A</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #fd7e14;"></span> Target velocity (m/s): <span class="legend-value" id="legendValG4_3">N/A</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #0d6efd;"></span> Command velocity (m/s): <span class="legend-value" id="legendValG4_4">N/A</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #198754;"></span> Measured velocity (m/s): <span class="legend-value" id="legendValG4_5">N/A</span></div>
+            </div>
+            <canvas id="telemetryGraph4"></canvas>
+        </div>
+
+        <!-- Graph 5: Wheel synchronization and effort budget -->
+        <div class="graph-container" id="graphContainer5">
+            <h3>Wheel Synchronization and Effort</h3>
+            <div id="legend5" class="legend">
+                <div class="legend-item"><span class="legend-color" style="background-color: #dc3545;"></span> Distance difference (m): <span class="legend-value" id="legendValG5_0">N/A</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #ffc107;"></span> Segment target (m): <span class="legend-value" id="legendValG5_1">N/A</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #0dcaf0;"></span> Velocity difference (m/s): <span class="legend-value" id="legendValG5_2">N/A</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #fd7e14;"></span> Requested balance: <span class="legend-value" id="legendValG5_3">N/A</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #20c997;"></span> Applied balance: <span class="legend-value" id="legendValG5_4">N/A</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #6f42c1;"></span> Requested sync: <span class="legend-value" id="legendValG5_5">N/A</span></div>
+                <div class="legend-item"><span class="legend-color" style="background-color: #198754;"></span> Applied sync: <span class="legend-value" id="legendValG5_6">N/A</span></div>
+            </div>
+            <canvas id="telemetryGraph5"></canvas>
         </div>
 
     </div> <!-- End container -->

@@ -6,6 +6,7 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <cmath>
 
 namespace {
 constexpr const char* TAG = "JsonConfigParser";
@@ -43,6 +44,7 @@ esp_err_t JsonConfigParser::serialize(const ConfigData& config, std::string& out
 
     // --- Config Version ---
     cJSON_AddNumberToObject(root, "config_version", config.config_version);
+    cJSON_AddNumberToObject(root, "config_revision", config.config_revision);
 
     // --- WiFi ---
     section = cJSON_CreateObject();
@@ -123,6 +125,18 @@ esp_err_t JsonConfigParser::deserialize(const std::string& input, ConfigData& co
         ESP_LOGI(TAG, "Migrating legacy configuration from version %d to version 3 in memory", inputVersion);
     }
     tempConfig.config_version = 3;
+
+    cJSON* configRevisionItem = cJSON_GetObjectItem(root, "config_revision");
+    if (configRevisionItem && cJSON_IsNumber(configRevisionItem) &&
+        std::isfinite(configRevisionItem->valuedouble) &&
+        configRevisionItem->valuedouble >= 0.0 &&
+        configRevisionItem->valuedouble <= 4294967295.0 &&
+        std::floor(configRevisionItem->valuedouble) == configRevisionItem->valuedouble) {
+        tempConfig.config_revision = static_cast<uint32_t>(configRevisionItem->valuedouble);
+    } else if (configRevisionItem) {
+        ESP_LOGE(TAG, "Invalid config_revision");
+        return ESP_ERR_INVALID_ARG;
+    }
 
     // --- WiFi ---
     cJSON *wifi_section = cJSON_GetObjectItem(root, "wifi");

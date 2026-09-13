@@ -5,6 +5,7 @@
 #include "driver/ledc.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
+#include <cmath>
 
 namespace {
 constexpr const char* TAG = "JsonConfigCodecs";
@@ -128,25 +129,44 @@ bool deserializeControl(cJSON* obj, ControlConfig& config) {
         ESP_LOGW(TAG, "Missing/invalid 'joystick_exponent'");
     }
     item = cJSON_GetObjectItem(obj, "max_target_pitch_offset_deg");
-    const bool hasLegacyMaxPitch = item && cJSON_IsNumber(item);
-    if (hasLegacyMaxPitch) config.max_target_pitch_offset_deg = item->valuedouble;
+    const bool hasLegacyMaxPitch = item != nullptr;
+    if (hasLegacyMaxPitch && cJSON_IsNumber(item) &&
+        std::isfinite(item->valuedouble)) {
+        config.max_target_pitch_offset_deg = item->valuedouble;
+    } else if (hasLegacyMaxPitch) {
+        ok = false;
+        ESP_LOGW(TAG, "Invalid 'max_target_pitch_offset_deg'");
+    }
     item = cJSON_GetObjectItem(obj, "yaw_control_enabled");
-    const bool hasLegacyYaw = item && cJSON_IsBool(item);
-    if (hasLegacyYaw) config.yaw_control_enabled = cJSON_IsTrue(item);
+    const bool hasLegacyYaw = item != nullptr;
+    if (hasLegacyYaw && cJSON_IsBool(item)) {
+        config.yaw_control_enabled = cJSON_IsTrue(item);
+    } else if (hasLegacyYaw) {
+        ok = false;
+        ESP_LOGW(TAG, "Invalid 'yaw_control_enabled'");
+    }
     cJSON* strategies = cJSON_GetObjectItem(obj, "strategies");
     if (strategies) {
         if (!deserializeBalanceStrategies(strategies, config.strategies)) ok = false;
-        // These fields are retained for old UI clients. When present, treat
-        // them as a compatibility patch and copy them into the canonical
-        // NestedPid record before validation.
-        if (hasLegacyMaxPitch) {
-            config.strategies.nested_pid.max_target_pitch_offset_deg = config.max_target_pitch_offset_deg;
+        // The nested strategy record is canonical. Compatibility mirrors are
+        // accepted only when they agree with it; silently copying a stale
+        // top-level value would undo an edit made to the nested record.
+        if (hasLegacyMaxPitch &&
+            config.max_target_pitch_offset_deg !=
+                config.strategies.nested_pid.max_target_pitch_offset_deg) {
+            ok = false;
+            ESP_LOGW(TAG, "Conflicting legacy max_target_pitch_offset_deg");
         }
-        if (hasLegacyYaw) {
-            config.strategies.nested_pid.yaw_control_enabled = config.yaw_control_enabled;
+        if (hasLegacyYaw &&
+            config.yaw_control_enabled !=
+                config.strategies.nested_pid.yaw_control_enabled) {
+            ok = false;
+            ESP_LOGW(TAG, "Conflicting legacy yaw_control_enabled");
         }
-        config.max_target_pitch_offset_deg = config.strategies.nested_pid.max_target_pitch_offset_deg;
-        config.yaw_control_enabled = config.strategies.nested_pid.yaw_control_enabled;
+        config.max_target_pitch_offset_deg =
+            config.strategies.nested_pid.max_target_pitch_offset_deg;
+        config.yaw_control_enabled =
+            config.strategies.nested_pid.yaw_control_enabled;
     }
     cJSON* strategyItem = cJSON_GetObjectItem(obj, "balance_strategy");
     if (strategyItem && cJSON_IsString(strategyItem)) {
@@ -160,13 +180,33 @@ bool deserializeControl(cJSON* obj, ControlConfig& config) {
         } else {
             config.strategies.active = requestedStrategy;
         }
-    } else if (strategies) {
+    } else if (strategyItem || strategies) {
         ok = false;
-        ESP_LOGW(TAG, "Missing/invalid 'balance_strategy'");
+        if (strategyItem) {
+            ESP_LOGW(TAG, "Invalid 'balance_strategy'");
+        } else {
+            ESP_LOGW(TAG, "Missing 'balance_strategy'");
+        }
     }
     cJSON* revisionItem = cJSON_GetObjectItem(obj, "strategies_revision");
-    if (revisionItem && cJSON_IsNumber(revisionItem) && revisionItem->valueint >= 0) {
-        config.strategies.revision = static_cast<uint32_t>(revisionItem->valueint);
+    if (revisionItem) {
+        if (!cJSON_IsNumber(revisionItem) ||
+            !std::isfinite(revisionItem->valuedouble) ||
+            revisionItem->valuedouble < 0.0 ||
+            revisionItem->valuedouble > 4294967295.0 ||
+            std::floor(revisionItem->valuedouble) != revisionItem->valuedouble) {
+            ok = false;
+            ESP_LOGW(TAG, "Invalid 'strategies_revision'");
+        } else {
+            const uint32_t mirroredRevision =
+                static_cast<uint32_t>(revisionItem->valuedouble);
+            if (strategies && mirroredRevision != config.strategies.revision) {
+                ok = false;
+                ESP_LOGW(TAG, "Conflicting strategy revisions");
+            } else {
+                config.strategies.revision = mirroredRevision;
+            }
+        }
     }
     if (!ok) {
         ESP_LOGW(TAG, "Error(s) parsing Control config.");
@@ -226,13 +266,47 @@ cJSON* serializeBalanceStrategies(const BalanceStrategiesConfig& config) {
         !addNumber(longitudinal, "hold_velocity_deadband_mps", config.longitudinal_cascade.hold_velocity_deadband_mps) ||
         !addNumber(longitudinal, "sync_kp", config.longitudinal_cascade.sync_kp) ||
         !addNumber(longitudinal, "sync_kd", config.longitudinal_cascade.sync_kd) ||
+        !addNumber(longitudinal, "sync_position_deadband_m",
+                   config.longitudinal_cascade.sync_position_deadband_m) ||
+        !addNumber(longitudinal, "sync_velocity_deadband_mps",
+                   config.longitudinal_cascade.sync_velocity_deadband_mps) ||
         !addNumber(longitudinal, "sync_max_effort", config.longitudinal_cascade.sync_max_effort) ||
-        !addNumber(longitudinal, "max_effort", config.longitudinal_cascade.max_effort)) {
+        !addNumber(longitudinal, "max_effort", config.longitudinal_cascade.max_effort) ||
+        !addNumber(longitudinal, "hold_enter_velocity_mps",
+                   config.longitudinal_cascade.hold_enter_velocity_mps) ||
+        !addNumber(longitudinal, "hold_exit_velocity_mps",
+                   config.longitudinal_cascade.hold_exit_velocity_mps) ||
+         !addNumber(longitudinal, "hold_pitch_error_deadband_deg",
+                    config.longitudinal_cascade.hold_pitch_error_deadband_deg) ||
+         !addNumber(longitudinal, "hold_pitch_rate_deadband_dps",
+                    config.longitudinal_cascade.hold_pitch_rate_deadband_dps) ||
+         !addNumber(longitudinal, "motion_request_limit_pitch_start_deg",
+                    config.longitudinal_cascade.motion_request_limit_pitch_start_deg) ||
+         !addNumber(longitudinal, "motion_request_limit_pitch_full_deg",
+                    config.longitudinal_cascade.motion_request_limit_pitch_full_deg) ||
+         !addNumber(longitudinal, "motion_request_limit_pitch_release_deg",
+                    config.longitudinal_cascade.motion_request_limit_pitch_release_deg) ||
+         !addNumber(longitudinal, "motion_request_limit_effort_start",
+                    config.longitudinal_cascade.motion_request_limit_effort_start) ||
+         !addNumber(longitudinal, "motion_request_limit_effort_full",
+                    config.longitudinal_cascade.motion_request_limit_effort_full) ||
+         !addNumber(longitudinal, "motion_request_limit_effort_release",
+                    config.longitudinal_cascade.motion_request_limit_effort_release) ||
+         !addNumber(longitudinal, "motion_request_limit_min_scale",
+                    config.longitudinal_cascade.motion_request_limit_min_scale)) {
         cJSON_Delete(nested);
         cJSON_Delete(longitudinal);
         cJSON_Delete(obj);
         return nullptr;
     }
+    cJSON_AddStringToObject(longitudinal, "loop_mode",
+                            longitudinalLoopModeToString(config.longitudinal_cascade.loop_mode));
+    cJSON_AddBoolToObject(longitudinal, "sync_enabled",
+                          config.longitudinal_cascade.sync_enabled);
+    cJSON_AddNumberToObject(longitudinal, "hold_settle_time_ms",
+                            config.longitudinal_cascade.hold_settle_time_ms);
+    cJSON_AddBoolToObject(longitudinal, "motion_request_limit_enabled",
+                          config.longitudinal_cascade.motion_request_limit_enabled);
     cJSON_AddBoolToObject(longitudinal, "configured", config.longitudinal_cascade.configured);
     cJSON_AddNumberToObject(longitudinal, "revision", config.longitudinal_cascade.revision);
 
@@ -249,16 +323,38 @@ bool deserializeBalanceStrategies(cJSON* obj, BalanceStrategiesConfig& config) {
     bool ok = true;
     auto parseNumber = [&](cJSON* parent, const char* name, float& target, bool required) {
         cJSON* item = cJSON_GetObjectItem(parent, name);
-        if (item && cJSON_IsNumber(item)) {
+        if (item && cJSON_IsNumber(item) && std::isfinite(item->valuedouble)) {
             target = static_cast<float>(item->valuedouble);
-        } else if (required) {
+        } else if (required || item) {
             ok = false;
         }
     };
     auto parseRevision = [&](cJSON* parent, const char* name, uint32_t& target) {
         cJSON* item = cJSON_GetObjectItem(parent, name);
-        if (item && cJSON_IsNumber(item) && item->valueint >= 0) {
-            target = static_cast<uint32_t>(item->valueint);
+        if (!item) {
+            return;
+        }
+        // cJSON's valueint is an implementation-sized signed integer and can
+        // silently truncate large JSON numbers.  Revisions are protocol data,
+        // so validate the original double before converting it.
+        if (!cJSON_IsNumber(item) || !std::isfinite(item->valuedouble) ||
+            item->valuedouble < 0.0 || item->valuedouble > 4294967295.0 ||
+            std::floor(item->valuedouble) != item->valuedouble) {
+            ok = false;
+            return;
+        }
+        target = static_cast<uint32_t>(item->valuedouble);
+    };
+    auto parseUnsigned = [&](cJSON* parent, const char* name, uint32_t& target,
+                             bool required = false) {
+        cJSON* item = cJSON_GetObjectItem(parent, name);
+        if (item && cJSON_IsNumber(item) && item->valuedouble >= 0.0 &&
+            std::isfinite(item->valuedouble) &&
+            item->valuedouble <= 4294967295.0 &&
+            std::floor(item->valuedouble) == item->valuedouble) {
+            target = static_cast<uint32_t>(item->valuedouble);
+        } else if (required || item) {
+            ok = false;
         }
     };
     cJSON* nested = cJSON_GetObjectItem(obj, "nested_pid");
@@ -297,12 +393,83 @@ bool deserializeBalanceStrategies(cJSON* obj, BalanceStrategiesConfig& config) {
     parseNumber(longitudinal, "hold_velocity_deadband_mps", config.longitudinal_cascade.hold_velocity_deadband_mps, true);
     parseNumber(longitudinal, "sync_kp", config.longitudinal_cascade.sync_kp, true);
     parseNumber(longitudinal, "sync_kd", config.longitudinal_cascade.sync_kd, true);
+    parseNumber(longitudinal, "sync_position_deadband_m",
+                config.longitudinal_cascade.sync_position_deadband_m, false);
+    parseNumber(longitudinal, "sync_velocity_deadband_mps",
+                config.longitudinal_cascade.sync_velocity_deadband_mps, false);
     parseNumber(longitudinal, "sync_max_effort", config.longitudinal_cascade.sync_max_effort, true);
     parseNumber(longitudinal, "max_effort", config.longitudinal_cascade.max_effort, true);
+    // These optional fields were added incrementally by E2 and F. Existing
+    // v3 files remain readable and receive safe defaults from
+    // LongitudinalCascadeStrategyConfig.
+    parseNumber(longitudinal, "hold_enter_velocity_mps",
+                config.longitudinal_cascade.hold_enter_velocity_mps, false);
+    parseNumber(longitudinal, "hold_exit_velocity_mps",
+                config.longitudinal_cascade.hold_exit_velocity_mps, false);
+    parseNumber(longitudinal, "hold_pitch_error_deadband_deg",
+                config.longitudinal_cascade.hold_pitch_error_deadband_deg, false);
+    parseNumber(longitudinal, "hold_pitch_rate_deadband_dps",
+                config.longitudinal_cascade.hold_pitch_rate_deadband_dps, false);
+    parseNumber(longitudinal, "motion_request_limit_pitch_start_deg",
+                config.longitudinal_cascade.motion_request_limit_pitch_start_deg, false);
+    parseNumber(longitudinal, "motion_request_limit_pitch_full_deg",
+                config.longitudinal_cascade.motion_request_limit_pitch_full_deg, false);
+    parseNumber(longitudinal, "motion_request_limit_pitch_release_deg",
+                config.longitudinal_cascade.motion_request_limit_pitch_release_deg, false);
+    parseNumber(longitudinal, "motion_request_limit_effort_start",
+                config.longitudinal_cascade.motion_request_limit_effort_start, false);
+    parseNumber(longitudinal, "motion_request_limit_effort_full",
+                config.longitudinal_cascade.motion_request_limit_effort_full, false);
+    parseNumber(longitudinal, "motion_request_limit_effort_release",
+                config.longitudinal_cascade.motion_request_limit_effort_release, false);
+    parseNumber(longitudinal, "motion_request_limit_min_scale",
+                config.longitudinal_cascade.motion_request_limit_min_scale, false);
+    parseUnsigned(longitudinal, "hold_settle_time_ms",
+                  config.longitudinal_cascade.hold_settle_time_ms);
+    cJSON* motionLimitEnabled = cJSON_GetObjectItem(longitudinal,
+                                                    "motion_request_limit_enabled");
+    if (motionLimitEnabled && cJSON_IsBool(motionLimitEnabled)) {
+        config.longitudinal_cascade.motion_request_limit_enabled =
+            cJSON_IsTrue(motionLimitEnabled);
+    } else if (motionLimitEnabled) {
+        ok = false;
+    }
+    cJSON* syncEnabled = cJSON_GetObjectItem(longitudinal, "sync_enabled");
+    if (syncEnabled && cJSON_IsBool(syncEnabled)) {
+        config.longitudinal_cascade.sync_enabled = cJSON_IsTrue(syncEnabled);
+    } else if (syncEnabled) {
+        ok = false;
+    }
+    cJSON* loopMode = cJSON_GetObjectItem(longitudinal, "loop_mode");
+    const bool hasLoopMode = loopMode != nullptr;
+    if (loopMode) {
+        if (!cJSON_IsString(loopMode) || !longitudinalLoopModeFromString(
+                loopMode->valuestring, config.longitudinal_cascade.loop_mode)) {
+            ok = false;
+        }
+    }
     cJSON* configured = cJSON_GetObjectItem(longitudinal, "configured");
     if (configured && cJSON_IsBool(configured)) config.longitudinal_cascade.configured = cJSON_IsTrue(configured);
     else ok = false;
     parseRevision(longitudinal, "revision", config.longitudinal_cascade.revision);
+
+    if (!hasLoopMode) {
+        // v3 files written before E2 had no explicit loop mode.  Preserve a
+        // prepared velocity cascade when its profile and PI fields are
+        // complete; an incomplete D-stage record remains the safe pitch-only
+        // baseline.  New writes always serialize loop_mode explicitly.
+        const auto& legacy = config.longitudinal_cascade;
+        const bool looksLikeVelocity = legacy.configured &&
+            legacy.max_velocity_mps > 0.0f &&
+            legacy.max_acceleration_mps2 > 0.0f &&
+            legacy.max_deceleration_mps2 > 0.0f &&
+            (legacy.velocity.pid_kp != 0.0f || legacy.velocity.pid_ki != 0.0f);
+        config.longitudinal_cascade.loop_mode = looksLikeVelocity
+            ? LongitudinalLoopMode::VELOCITY
+            : LongitudinalLoopMode::PITCH_ONLY;
+        ESP_LOGI(TAG, "Migrated missing longitudinal loop_mode to '%s'",
+                 longitudinalLoopModeToString(config.longitudinal_cascade.loop_mode));
+    }
 
     cJSON* active = cJSON_GetObjectItem(obj, "active");
     if (active && cJSON_IsString(active) &&

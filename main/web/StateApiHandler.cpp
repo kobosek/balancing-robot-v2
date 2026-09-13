@@ -8,12 +8,14 @@
 #include "PidTuningService.hpp"
 #include "GuidedCalibrationService.hpp"
 #include "ConfigurationService.hpp"
+#include "ConfigValidator.hpp"
 #include "OTAService.hpp"
 #include "BaseEvent.hpp"
 #include "HttpResponseUtils.hpp"
 #include "cJSON.h"
 #include <memory>
 #include <string>
+#include <cstdio>
 #include "esp_log.h"
 #include "esp_http_server.h"
 
@@ -23,14 +25,17 @@ StateApiHandler::StateApiHandler(StateManager& stateManager,
                                  PidTuningService& pidTuningService,
                                  GuidedCalibrationService& guidedCalibrationService,
                                  ConfigurationService& configService,
-                                 OTAService& otaService, IMUService& imuService)
+                                 OTAService& otaService,
+                                 IMUService& imuService,
+                                 ControlOperationGate& operationGate)
     : m_imuService(imuService), m_stateManager(stateManager),
       m_balancingAlgorithm(balancingAlgorithm),
       m_batteryService(batteryService),
       m_pidTuningService(pidTuningService),
       m_guidedCalibrationService(guidedCalibrationService),
       m_configService(configService),
-      m_otaService(otaService) {
+      m_otaService(otaService),
+      m_operationGate(operationGate) {
     ESP_LOGI(TAG, "StateApiHandler constructed.");
 }
 
@@ -103,6 +108,32 @@ static const char* guidedCalibrationPhaseToString(GuidedCalibrationPhase phase) 
     }
 }
 
+static const char* operationKindToString(ControlOperationKind kind) {
+    switch (kind) {
+        case ControlOperationKind::MOTION:        return "motion";
+        case ControlOperationKind::CONFIGURATION: return "configuration";
+        case ControlOperationKind::OTA:           return "ota";
+        case ControlOperationKind::CALIBRATION:   return "calibration";
+        case ControlOperationKind::NONE:
+        default:                                   return "none";
+    }
+}
+
+static const char* operationPhaseToString(ControlOperationPhase phase) {
+    switch (phase) {
+        case ControlOperationPhase::RESERVED:  return "reserved";
+        case ControlOperationPhase::PREPARING: return "preparing";
+        case ControlOperationPhase::RUNNING:   return "running";
+        case ControlOperationPhase::WRITING:   return "writing";
+        case ControlOperationPhase::APPLYING:  return "applying";
+        case ControlOperationPhase::SUCCEEDED: return "succeeded";
+        case ControlOperationPhase::FAILED:    return "failed";
+        case ControlOperationPhase::ABORTED:   return "aborted";
+        case ControlOperationPhase::IDLE:
+        default:                                return "idle";
+    }
+}
+
 static cJSON* createPidJson(const PIDConfig& config) {
     cJSON* obj = cJSON_CreateObject();
     if (!obj) return nullptr;
@@ -137,6 +168,28 @@ esp_err_t StateApiHandler::handleRequest(httpd_req_t *req) {
     const PidTuningStatus pidTuningStatus = m_pidTuningService.getStatus();
     const GuidedCalibrationStatus guidedStatus = m_guidedCalibrationService.getStatus();
     const OTAStatus otaStatus = m_otaService.getStatus();
+    const ControlOperationStatus operationStatus = [&] {
+        const ControlOperationStatus current = m_operationGate.currentStatus();
+        const ControlOperationStatus configuration =
+            m_configService.getOperationStatus();
+        if (current.known && current.kind == ControlOperationKind::CONFIGURATION &&
+            configuration.known) {
+            return configuration;
+        }
+        if (current.known) {
+            return current;
+        }
+        if (configuration.known) {
+            return configuration;
+        }
+        const ControlOperationStatus last = m_operationGate.lastStatus();
+        if (last.known) {
+            return last;
+        }
+        return configuration;
+    }();
+    const bool operationRecoveryPending =
+        m_configService.isOperationRecoveryPending();
 
     auto cjson_deleter = [](cJSON* ptr){ if(ptr) cJSON_Delete(ptr); };
     auto char_deleter = [](char* ptr){ if(ptr) free(ptr); };
@@ -157,11 +210,74 @@ esp_err_t StateApiHandler::handleRequest(httpd_req_t *req) {
                             balanceStrategyIdToString(configData.control.strategies.active));
     cJSON_AddNumberToObject(root, "balance_strategy_config_revision",
                             configData.control.strategies.revision);
-    cJSON_AddBoolToObject(root, "strategy_change_in_progress", false);
+    cJSON_AddNumberToObject(root, "config_revision", configData.config_revision);
+    char commandSessionId[24] = {};
+    std::snprintf(commandSessionId, sizeof(commandSessionId), "%llu",
+                  static_cast<unsigned long long>(systemStatus.armId));
+    cJSON_AddStringToObject(root, "command_session_id", commandSessionId);
+    cJSON_AddBoolToObject(root, "command_input_enabled",
+                          systemStatus.commandInputEnabled);
+    cJSON_AddNumberToObject(root, "control_generation",
+                            static_cast<double>(systemStatus.generation));
+    cJSON_AddBoolToObject(root, "strategy_change_in_progress",
+                          operationStatus.active &&
+                          operationStatus.kind == ControlOperationKind::CONFIGURATION);
+    cJSON_AddBoolToObject(root, "operation_recovery_pending",
+                          operationRecoveryPending);
+    cJSON_AddBoolToObject(root, "operation_known", operationStatus.known);
+    cJSON_AddBoolToObject(root, "operation_active", operationStatus.active);
+    char operationId[24] = {};
+    std::snprintf(operationId, sizeof(operationId), "%llu",
+                  static_cast<unsigned long long>(operationStatus.operationId));
+    cJSON_AddStringToObject(root, "operation_id", operationId);
+    cJSON_AddStringToObject(root, "operation_kind",
+                            operationKindToString(operationStatus.kind));
+    cJSON_AddStringToObject(root, "operation_phase",
+                            operationPhaseToString(operationStatus.phase));
+    cJSON_AddNumberToObject(root, "operation_result_code",
+                            operationStatus.resultCode);
+    cJSON_AddNumberToObject(root, "operation_base_revision",
+                            operationStatus.baseRevision);
+    cJSON_AddNumberToObject(root, "operation_target_revision",
+                            operationStatus.targetRevision);
+    ConfigValidator configValidator;
+    cJSON* strategyCapabilities = cJSON_AddObjectToObject(root,
+                                                           "strategy_capabilities");
+    const auto addStrategyCapability = [&](BalanceStrategyId strategyId) {
+        if (!strategyCapabilities) {
+            return;
+        }
+        BalanceStrategyCapability capability;
+        configValidator.describeStrategy(configData, strategyId, capability);
+        cJSON* strategyObject = cJSON_AddObjectToObject(
+            strategyCapabilities, balanceStrategyIdToString(strategyId));
+        if (!strategyObject) {
+            return;
+        }
+        cJSON_AddBoolToObject(strategyObject, "active", capability.active);
+        cJSON_AddBoolToObject(strategyObject, "configured", capability.configured);
+        cJSON_AddBoolToObject(strategyObject, "can_activate", capability.canActivate);
+        cJSON_AddNumberToObject(strategyObject, "revision", capability.revision);
+        if (strategyId == BalanceStrategyId::LONGITUDINAL_CASCADE) {
+            cJSON_AddStringToObject(strategyObject, "loop_mode",
+                                    longitudinalLoopModeToString(capability.loopMode));
+        } else {
+            cJSON_AddStringToObject(strategyObject, "loop_mode", "nested_pid");
+        }
+        // Longitudinal motion intentionally has no yaw/turn loop yet. Keep
+        // this capability explicit at the API boundary so clients other than
+        // the bundled WebUI do not infer support from the joystick schema.
+        cJSON_AddBoolToObject(strategyObject, "turn_control_supported",
+                              strategyId == BalanceStrategyId::NESTED_PID);
+        cJSON_AddStringToObject(strategyObject, "reason", capability.reason.c_str());
+    };
+    addStrategyCapability(BalanceStrategyId::NESTED_PID);
+    addStrategyCapability(BalanceStrategyId::LONGITUDINAL_CASCADE);
     cJSON_AddBoolToObject(root, "longitudinal_cascade_available",
                           configData.control.strategies.longitudinal_cascade.configured);
     cJSON_AddBoolToObject(root, "yaw_control_enabled",
                           configData.control.strategies.nested_pid.yaw_control_enabled);
+    cJSON_AddBoolToObject(root, "longitudinal_turn_control_supported", false);
     cJSON_AddNumberToObject(root, "battery_voltage", batteryStatus.voltage);
     cJSON_AddNumberToObject(root, "battery_adc_pin_voltage", batteryStatus.adcPinVoltage);
     cJSON_AddNumberToObject(root, "battery_percentage", batteryStatus.percentage);
@@ -212,6 +328,13 @@ esp_err_t StateApiHandler::handleRequest(httpd_req_t *req) {
         cJSON_AddStringToObject(otaObj, "app_version", otaStatus.appVersion.c_str());
         cJSON_AddStringToObject(otaObj, "active_target", otaStatus.activeTarget.c_str());
         cJSON_AddStringToObject(otaObj, "message", otaStatus.message.c_str());
+        char bundleId[24] = {};
+        std::snprintf(bundleId, sizeof(bundleId), "%llu",
+                      static_cast<unsigned long long>(otaStatus.bundleId));
+        cJSON_AddStringToObject(otaObj, "bundle_id", bundleId);
+        cJSON_AddStringToObject(otaObj, "bundle_stage", otaStatus.bundleStage.c_str());
+        cJSON_AddBoolToObject(otaObj, "bundle_recovery_pending",
+                              otaStatus.bundleRecoveryPending);
     }
 
     cJSON* tuningObj = cJSON_AddObjectToObject(root, "pid_tuning");
@@ -222,6 +345,14 @@ esp_err_t StateApiHandler::handleRequest(httpd_req_t *req) {
         cJSON_AddNumberToObject(tuningObj, "progress", pidTuningStatus.progress);
         cJSON_AddStringToObject(tuningObj, "message", pidTuningStatus.message.c_str());
         cJSON_AddBoolToObject(tuningObj, "has_candidate", pidTuningStatus.hasCandidate);
+        cJSON_AddStringToObject(tuningObj, "candidate_strategy",
+                                balanceStrategyIdToString(pidTuningStatus.candidateStrategy));
+        cJSON_AddBoolToObject(tuningObj, "candidate_base_revision_valid",
+                              pidTuningStatus.candidateBaseRevisionValid);
+        cJSON_AddNumberToObject(tuningObj, "candidate_base_config_revision",
+                                pidTuningStatus.candidateBaseConfigRevision);
+        cJSON_AddBoolToObject(tuningObj, "save_in_progress",
+                              pidTuningStatus.saveInProgress);
 
         cJSON* candidateObj = cJSON_AddObjectToObject(tuningObj, "candidate");
         if (candidateObj) {

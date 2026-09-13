@@ -22,10 +22,15 @@ struct ControlModeInput {
     int64_t motionTimeoutUs = 0;
     LongitudinalMotionCommand motion = {};
     LongitudinalOdometryResult odometry = {};
+    uint64_t controlArmId = 0;
 };
 
 struct ControlModeResult {
     MotorEffort effort = {};
+    BalanceStrategyId strategyId = BalanceStrategyId::NESTED_PID;
+    uint32_t strategyRevision = 0;
+    uint32_t configRevision = 0;
+    bool valid = false;
     float telemetryTargetPitchOffset_deg = 0.0f;
     float telemetryTargetAngularVelocity_dps = 0.0f;
     float telemetryTargetYaw_deg = 0.0f;
@@ -44,6 +49,9 @@ public:
 
     ControlModeResult execute(const ControlModeInput& input);
     void reset();
+    BalanceStrategyId activeBalanceStrategyId() const;
+    uint32_t activeBalanceStrategyRevision() const;
+    uint32_t appliedConfigRevision() const;
 
 private:
     BalancingAlgorithm& m_balancingAlgorithm;

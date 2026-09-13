@@ -45,8 +45,12 @@
 
 namespace policy = state_manager_policy;
 
-StateManager::StateManager(EventBus& eventBus, const SystemBehaviorConfig& initialBehaviorConfig, const BatteryConfig& initialBatteryConfig) :
+StateManager::StateManager(EventBus& eventBus,
+                           const SystemBehaviorConfig& initialBehaviorConfig,
+                           const BatteryConfig& initialBatteryConfig,
+                           ControlOperationGate* operationGate) :
     m_eventBus(eventBus),
+    m_operationGate(operationGate),
     m_currentState(SystemState::INIT) {
     applyConfig(initialBehaviorConfig, initialBatteryConfig);
 }
@@ -70,7 +74,10 @@ SystemStatusSnapshot StateManager::getStatusSnapshot() const {
         policy::toApiStateName(m_currentState),
         m_autoBalancingEnabled,
         m_fallDetectionEnabled,
-        m_criticalBatteryMotorShutdownEnabled
+        m_criticalBatteryMotorShutdownEnabled,
+        m_armId,
+        m_generation,
+        policy::isCommandInputEnabled(m_currentState)
     };
 }
 
@@ -84,11 +91,33 @@ void StateManager::markFatalError() {
 
 void StateManager::setState(SystemState newState) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    ControlOperationReservation nextMotionReservation;
     if (policy::isMotorActiveState(newState) && newState != m_currentState) {
+        if (m_operationGate && m_operationGate->configurationRecoveryPending()) {
+            ESP_LOGW(TAG, "Start rejected: interrupted configuration operation requires reconciliation");
+            return;
+        }
+        if (m_operationGate && m_operationGate->otaRecoveryPending()) {
+            ESP_LOGW(TAG, "Start rejected: interrupted OTA bundle requires explicit recovery");
+            return;
+        }
+        const bool alreadyOwnsMotion = m_motionReservation.valid();
+        if (m_operationGate && !alreadyOwnsMotion &&
+            !m_operationGate->tryAcquire(ControlOperationKind::MOTION,
+                                         nextMotionReservation)) {
+            ESP_LOGW(TAG, "Start rejected: another control operation is reserved");
+            return;
+        }
         const char* reason = m_calibrationBusy ? "calibration-busy" : !m_imu ? "imu-unbound" :
             !m_imu_available ? "imu-availability-revoked" :
             policy::batteryBlocksMotion(m_criticalBatteryMotorShutdownEnabled, m_battery_critical) ? "critical-battery" : nullptr;
         if (reason || !m_imu->reserveMotion(m_generation, &reason)) {
+            if (nextMotionReservation.valid()) {
+                (void)m_operationGate->release(
+                    nextMotionReservation,
+                    ControlOperationPhase::FAILED,
+                    ESP_ERR_INVALID_STATE);
+            }
             const auto status = m_imu ? m_imu->getStatusSnapshot() : IMUStatusSnapshot{};
             ESP_LOGW(TAG, "Start rejected: %s; IMU=%s ready=%d busy=%d configPending=%d ageUs=%lld generation=%lu fault=%u",
                 reason, status.state, status.ready, status.busy, status.configurationPending,
@@ -111,7 +140,22 @@ void StateManager::setState(SystemState newState) {
     }
 
     if (stateChanged) {
+        if (nextMotionReservation.valid()) {
+            m_motionReservation = nextMotionReservation;
+            if (m_operationGate) {
+                (void)m_operationGate->updatePhase(
+                    m_motionReservation, ControlOperationPhase::RUNNING);
+            }
+        }
         publishStateDerivedModes();
+
+        // Keep the reservation through the synchronous disable/policy events.
+        // A concurrent configuration or OTA request must not observe IDLE
+        // before motor output and IMU ownership have been revoked.
+        if (!policy::isMotorActiveState(newState) &&
+            m_motionReservation.valid() && m_operationGate) {
+            m_operationGate->release(m_motionReservation);
+        }
 
         if (policy::shouldInitiatePendingCalibration(previousState, newState, m_pending_calibration)) {
             ESP_LOGD(TAG, "Entering IDLE state, checking for pending calibration.");
@@ -183,6 +227,15 @@ void StateManager::subscribeToEvents(EventBus& bus) {
 }
 
 void StateManager::handleConfigUpdate(const CONFIG_FullConfigUpdate& event) {
+    if (m_hasConfigRevision &&
+        event.configData.config_revision < m_configRevision) {
+        ESP_LOGW(TAG, "Ignoring stale state configuration revision %lu (current %lu)",
+                 static_cast<unsigned long>(event.configData.config_revision),
+                 static_cast<unsigned long>(m_configRevision));
+        return;
+    }
+    m_configRevision = event.configData.config_revision;
+    m_hasConfigRevision = true;
     applyConfig(event.configData.behavior, event.configData.battery);
 }
 
@@ -384,6 +437,13 @@ void StateManager::handleCalibrationComplete(const IMU_CalibrationCompleted& eve
     ESP_LOGI(TAG, "Calibration Complete Event Received (Status: %s).", esp_err_to_name(event.status));
     m_calibrationBusy = false;
     publishStateDerivedModes();
+    if (m_calibrationReservation.valid() && m_operationGate) {
+        (void)m_operationGate->release(
+            m_calibrationReservation,
+            event.status == ESP_OK ? ControlOperationPhase::SUCCEEDED
+                                   : ControlOperationPhase::FAILED,
+            event.status);
+    }
 }
 
 void StateManager::handleImuCommunicationError(const IMU_CommunicationError& event) {
@@ -412,7 +472,20 @@ void StateManager::initiateCalibration(bool force) {
     if (m_calibrationBusy) return;
     if (force && policy::isMotorActiveState(m_currentState)) setState(SystemState::IDLE);
     if (policy::shouldRequestCalibrationNow(m_currentState, force)) {
+        if (m_operationGate &&
+            !m_operationGate->tryAcquire(ControlOperationKind::CALIBRATION,
+                                         m_calibrationReservation)) {
+            ESP_LOGW(TAG, "Calibration deferred/rejected: another control operation is reserved");
+            IMU_CalibrationRequestRejected rejectEvent(
+                IMU_CalibrationRequestRejected::Reason::OTHER, false);
+            m_eventBus.publish(rejectEvent);
+            return;
+        }
         m_calibrationBusy = true; // Before dispatch: the request is asynchronous.
+        if (m_operationGate && m_calibrationReservation.valid()) {
+            (void)m_operationGate->updatePhase(
+                m_calibrationReservation, ControlOperationPhase::RUNNING);
+        }
         m_pending_calibration = false;
         publishOtaUpdatePolicy();
         IMU_CalibrationRequest requestEvent;
@@ -435,6 +508,11 @@ void StateManager::initiateCalibration(bool force) {
 void StateManager::handleCalibrationRejected(const IMU_CalibrationRequestRejected& event) {
     m_calibrationBusy = false;
     publishOtaUpdatePolicy();
+    if (m_calibrationReservation.valid() && m_operationGate) {
+        (void)m_operationGate->release(
+            m_calibrationReservation, ControlOperationPhase::FAILED,
+            ESP_ERR_INVALID_STATE);
+    }
     ESP_LOGW(TAG, "Calibration was rejected.");
     if (event.retryWhenPossible) {
         m_pending_calibration = true;
@@ -476,7 +554,7 @@ void StateManager::publishRoutineRunModes() {
 }
 
 void StateManager::publishCommandInputMode() {
-    COMMAND_InputModeChanged event(policy::isCommandInputEnabled(m_currentState));
+    COMMAND_InputModeChanged event(policy::isCommandInputEnabled(m_currentState), m_armId);
     m_eventBus.publish(event);
 }
 

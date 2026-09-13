@@ -1,5 +1,7 @@
 // main/EncoderService.cpp
 #include "EncoderService.hpp"           // Relative path within module's include dir
+#include "CONFIG_EncoderConfigUpdate.hpp"
+#include "BaseEvent.hpp"
 #include "esp_check.h"
 #include <cmath>
 #include <algorithm>
@@ -16,21 +18,40 @@ EncoderService::EncoderService(const EncoderConfig& config, int64_t nominalPerio
     m_unit_left(nullptr),
     m_unit_right(nullptr)
 {
-    // Pre-calculate conversion factor: (DEG/rev) / (pulses/rev_motor) / gear_ratio
-    // DEG/rev = 360
-    if (m_config.pulses_per_revolution_motor > 0 && m_config.gear_ratio > 0) {
-        m_degs_per_pulse = 360.0f / (m_config.pulses_per_revolution_motor * m_config.gear_ratio); // <-- Changed calculation
-        ESP_LOGI(TAG,"Encoder degrees per pulse calculated: %f", m_degs_per_pulse);
-    } else {
-        ESP_LOGE(TAG,"Invalid encoder config: pulses/rev or gear ratio is zero!");
-        m_degs_per_pulse = 0.0f;
-    }
-    if (m_config.speed_filter_alpha > 0 && m_config.speed_filter_alpha < 1)
-        m_filterLogRetention = std::log1p(-m_config.speed_filter_alpha);
+    recalculateScale();
     reset();
 }
 
 EncoderService::~EncoderService() {
+    std::lock_guard<std::mutex> lock(m_writerMutex);
+    deinitHardwareUnlocked();
+}
+
+void EncoderService::recalculateScale()
+{
+    // Pre-calculate conversion factor: (DEG/rev) / (pulses/rev_motor) /
+    // gear_ratio.  This is kept in the service so a validated runtime
+    // geometry update takes effect without reconstructing RobotController.
+    if (std::isfinite(m_config.pulses_per_revolution_motor) &&
+        std::isfinite(m_config.gear_ratio) &&
+        m_config.pulses_per_revolution_motor > 0.0f &&
+        m_config.gear_ratio > 0.0f) {
+        m_degs_per_pulse = 360.0f /
+            (m_config.pulses_per_revolution_motor * m_config.gear_ratio);
+        ESP_LOGI(TAG, "Encoder degrees per pulse calculated: %f", m_degs_per_pulse);
+    } else {
+        ESP_LOGE(TAG, "Invalid encoder config: pulses/rev or gear ratio is zero!");
+        m_degs_per_pulse = 0.0f;
+    }
+    m_filterLogRetention = 0.0f;
+    if (m_config.speed_filter_alpha > 0.0f &&
+        m_config.speed_filter_alpha < 1.0f) {
+        m_filterLogRetention = std::log1p(-m_config.speed_filter_alpha);
+    }
+}
+
+void EncoderService::deinitHardwareUnlocked()
+{
     if (m_unit_left) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_stop(m_unit_left));
         ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_disable(m_unit_left));
@@ -39,20 +60,34 @@ EncoderService::~EncoderService() {
         ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_stop(m_unit_right));
         ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_disable(m_unit_right));
     }
+    // Watch points belong to the unit and must be removed while the unit is
+    // still intact.  Do this before deleting either channel so a partially
+    // failed teardown cannot leave an ISR callback registered on a dead unit.
+    if (m_unit_left) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_remove_watch_point(m_unit_left, m_config.pcnt_low_limit));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_remove_watch_point(m_unit_left, m_config.pcnt_high_limit));
+    }
+    if (m_unit_right) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_remove_watch_point(m_unit_right, m_config.pcnt_low_limit));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_remove_watch_point(m_unit_right, m_config.pcnt_high_limit));
+    }
     if (m_channel_left_a) { pcnt_del_channel(m_channel_left_a); }
     if (m_channel_left_b) { pcnt_del_channel(m_channel_left_b); }
     if (m_channel_right_a) { pcnt_del_channel(m_channel_right_a); }
     if (m_channel_right_b) { pcnt_del_channel(m_channel_right_b); }
     if (m_unit_left) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_remove_watch_point(m_unit_left, m_config.pcnt_low_limit));
-        ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_remove_watch_point(m_unit_left, m_config.pcnt_high_limit));
         ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_del_unit(m_unit_left));
     }
     if (m_unit_right) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_remove_watch_point(m_unit_right, m_config.pcnt_low_limit));
-        ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_remove_watch_point(m_unit_right, m_config.pcnt_high_limit));
         ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_del_unit(m_unit_right));
     }
+    m_unit_left = nullptr;
+    m_unit_right = nullptr;
+    m_channel_left_a = nullptr;
+    m_channel_left_b = nullptr;
+    m_channel_right_a = nullptr;
+    m_channel_right_b = nullptr;
+    m_initialized = false;
 }
 
 EncoderFrame EncoderService::getFrame() const {
@@ -69,8 +104,7 @@ void EncoderService::publish(EncoderFrame frame) {
     portEXIT_CRITICAL(&m_frameMux);
 }
 
-void EncoderService::reset() {
-    std::lock_guard<std::mutex> lock(m_writerMutex);
+void EncoderService::resetUnlocked() {
     // Seed from the real accumulated count; do not discard edges in hardware.
     m_left.seeded = m_right.seeded = false;
     m_left.logicalCount = m_right.logicalCount = 0;
@@ -85,16 +119,36 @@ void EncoderService::reset() {
     publish(frame);
 }
 
+void EncoderService::reset() {
+    std::lock_guard<std::mutex> lock(m_writerMutex);
+    resetUnlocked();
+}
+
 esp_err_t EncoderService::init() {
+    std::lock_guard<std::mutex> lock(m_writerMutex);
+    return initHardwareUnlocked();
+}
+
+esp_err_t EncoderService::initHardwareUnlocked() {
     ESP_LOGI(TAG, "Initializing EncoderService...");
+    if (m_initialized) {
+        return ESP_OK;
+    }
     esp_err_t ret;
     ret = initPCNTUnit(m_config.left_pin_a, m_config.left_pin_b, &m_unit_left, &m_channel_left_a, &m_channel_left_b);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed init Left Encoder PCNT");
+    if (ret != ESP_OK) {
+        deinitHardwareUnlocked();
+        return ret;
+    }
     ESP_LOGI(TAG, "Left Encoder PCNT Initialized (Pins A:%d, B:%d)", m_config.left_pin_a, m_config.left_pin_b);
     ret = initPCNTUnit(m_config.right_pin_a, m_config.right_pin_b, &m_unit_right, &m_channel_right_a, &m_channel_right_b);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed init Right Encoder PCNT");
+    if (ret != ESP_OK) {
+        deinitHardwareUnlocked();
+        return ret;
+    }
     ESP_LOGI(TAG, "Right Encoder PCNT Initialized (Pins A:%d, B:%d)", m_config.right_pin_a, m_config.right_pin_b);
-    reset();
+    m_initialized = true;
+    resetUnlocked();
     ESP_LOGI(TAG, "EncoderService Initialized Successfully.");
     return ESP_OK;
 }
@@ -281,4 +335,47 @@ void EncoderService::update() {
     frame.right = readWheel(m_unit_right, m_right);
     frame.sampleTimestampUs = esp_timer_get_time();
     publish(frame);
+}
+
+void EncoderService::handleEvent(const BaseEvent& event)
+{
+    if (event.is<CONFIG_EncoderConfigUpdate>()) {
+        handleConfigUpdate(event.as<CONFIG_EncoderConfigUpdate>());
+    } else {
+        ESP_LOGV(TAG, "%s: Received unhandled event '%s'",
+                 getHandlerName().c_str(), event.eventName());
+    }
+}
+
+void EncoderService::handleConfigUpdate(const CONFIG_EncoderConfigUpdate& event)
+{
+    std::lock_guard<std::mutex> lock(m_writerMutex);
+    if (m_config == event.config) return;
+
+    const bool hardwareRestart = event.requiresHardwareInit;
+    if (hardwareRestart) {
+        // The configuration operation is serialized with motion disable by
+        // ControlOperationGate. Tear down both units before assigning pins or
+        // watchpoint limits so no ISR can continue against a partial config.
+        deinitHardwareUnlocked();
+    }
+    m_config = event.config;
+    recalculateScale();
+    if (hardwareRestart) {
+        const esp_err_t ret = initHardwareUnlocked();
+        if (ret != ESP_OK) {
+            m_initialized = false;
+            ESP_LOGE(TAG, "Encoder hardware configuration was not applied: %s",
+                     esp_err_to_name(ret));
+            resetUnlocked();
+            return;
+        }
+    } else {
+        // Geometry/filter changes alter the meaning of logical counts and
+        // therefore start a fresh local continuity epoch, while leaving the
+        // running PCNT units untouched.
+        resetUnlocked();
+    }
+    ESP_LOGI(TAG, "Encoder configuration applied (%s)",
+             hardwareRestart ? "hardware restarted" : "scale/filter updated");
 }

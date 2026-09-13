@@ -46,6 +46,26 @@ TEST_CASE("version three keeps strategy sets separate and rejects incomplete act
     source.control.strategies.nested_pid.speed_left.pid_kp = 0.11f;
     source.control.strategies.longitudinal_cascade.velocity.pid_kp = 1.7f;
     source.control.strategies.longitudinal_cascade.configured = false;
+    source.control.strategies.longitudinal_cascade.loop_mode = LongitudinalLoopMode::VELOCITY;
+    source.control.strategies.longitudinal_cascade.hold_enter_velocity_mps = 0.03f;
+    source.control.strategies.longitudinal_cascade.hold_exit_velocity_mps = 0.07f;
+    source.control.strategies.longitudinal_cascade.hold_pitch_error_deadband_deg = 1.5f;
+    source.control.strategies.longitudinal_cascade.hold_pitch_rate_deadband_dps = 12.0f;
+    source.control.strategies.longitudinal_cascade.hold_settle_time_ms = 240;
+    source.control.strategies.longitudinal_cascade.sync_enabled = true;
+    source.control.strategies.longitudinal_cascade.sync_kp = 0.4f;
+    source.control.strategies.longitudinal_cascade.sync_kd = 0.2f;
+    source.control.strategies.longitudinal_cascade.sync_position_deadband_m = 0.003f;
+    source.control.strategies.longitudinal_cascade.sync_velocity_deadband_mps = 0.012f;
+    source.control.strategies.longitudinal_cascade.motion_request_limit_enabled = false;
+    source.control.strategies.longitudinal_cascade.motion_request_limit_pitch_start_deg = 5.0f;
+    source.control.strategies.longitudinal_cascade.motion_request_limit_pitch_full_deg = 9.0f;
+    source.control.strategies.longitudinal_cascade.motion_request_limit_pitch_release_deg = 4.0f;
+    source.control.strategies.longitudinal_cascade.motion_request_limit_effort_start = 0.7f;
+    source.control.strategies.longitudinal_cascade.motion_request_limit_effort_full = 0.9f;
+    source.control.strategies.longitudinal_cascade.motion_request_limit_effort_release = 0.6f;
+    source.control.strategies.longitudinal_cascade.motion_request_limit_min_scale = 0.25f;
+    source.config_revision = 17;
     std::string json;
     TEST_ASSERT_EQUAL(ESP_OK, parser.serialize(source, json));
 
@@ -53,6 +73,33 @@ TEST_CASE("version three keeps strategy sets separate and rejects incomplete act
     TEST_ASSERT_EQUAL(ESP_OK, parser.deserialize(json, roundTrip));
     TEST_ASSERT_EQUAL_FLOAT(0.11f, roundTrip.control.strategies.nested_pid.speed_left.pid_kp);
     TEST_ASSERT_EQUAL_FLOAT(1.7f, roundTrip.control.strategies.longitudinal_cascade.velocity.pid_kp);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(LongitudinalLoopMode::VELOCITY),
+                          static_cast<int>(roundTrip.control.strategies.longitudinal_cascade.loop_mode));
+    TEST_ASSERT_EQUAL_FLOAT(0.03f,
+                            roundTrip.control.strategies.longitudinal_cascade.hold_enter_velocity_mps);
+    TEST_ASSERT_EQUAL_FLOAT(0.07f,
+                            roundTrip.control.strategies.longitudinal_cascade.hold_exit_velocity_mps);
+    TEST_ASSERT_EQUAL_FLOAT(1.5f,
+                            roundTrip.control.strategies.longitudinal_cascade.hold_pitch_error_deadband_deg);
+    TEST_ASSERT_EQUAL_UINT32(240,
+                             roundTrip.control.strategies.longitudinal_cascade.hold_settle_time_ms);
+    TEST_ASSERT_FALSE(roundTrip.control.strategies.longitudinal_cascade.motion_request_limit_enabled);
+    TEST_ASSERT_EQUAL_FLOAT(5.0f,
+                            roundTrip.control.strategies.longitudinal_cascade.motion_request_limit_pitch_start_deg);
+    TEST_ASSERT_EQUAL_FLOAT(9.0f,
+                            roundTrip.control.strategies.longitudinal_cascade.motion_request_limit_pitch_full_deg);
+    TEST_ASSERT_EQUAL_FLOAT(0.25f,
+                            roundTrip.control.strategies.longitudinal_cascade.motion_request_limit_min_scale);
+    TEST_ASSERT_TRUE(roundTrip.control.strategies.longitudinal_cascade.sync_enabled);
+    TEST_ASSERT_EQUAL_FLOAT(0.4f,
+                            roundTrip.control.strategies.longitudinal_cascade.sync_kp);
+    TEST_ASSERT_EQUAL_FLOAT(0.2f,
+                            roundTrip.control.strategies.longitudinal_cascade.sync_kd);
+    TEST_ASSERT_EQUAL_FLOAT(0.003f,
+                            roundTrip.control.strategies.longitudinal_cascade.sync_position_deadband_m);
+    TEST_ASSERT_EQUAL_FLOAT(0.012f,
+                            roundTrip.control.strategies.longitudinal_cascade.sync_velocity_deadband_mps);
+    TEST_ASSERT_EQUAL_UINT32(17, roundTrip.config_revision);
     TEST_ASSERT_EQUAL_INT(0, static_cast<int>(roundTrip.control.strategies.active));
 
     cJSON* root = cJSON_Parse(json.c_str());
@@ -68,6 +115,68 @@ TEST_CASE("version three keeps strategy sets separate and rejects incomplete act
     TEST_ASSERT_FALSE(validator.validate(output, validationError));
     TEST_ASSERT_NOT_EQUAL(std::string::npos, validationError.find("requires configured"));
     cJSON_free(unavailable);
+    cJSON_Delete(root);
+}
+TEST_CASE("canonical nested strategy fields reject conflicting compatibility aliases", "[config][strategy]") {
+    JsonConfigParser parser;
+    ConfigData source;
+    source.wifi.ssid = "test-network";
+    std::string json;
+    TEST_ASSERT_EQUAL(ESP_OK, parser.serialize(source, json));
+    cJSON* root = cJSON_Parse(json.c_str());
+    cJSON* control = cJSON_GetObjectItem(root, "control");
+    cJSON_ReplaceItemInObject(control, "max_target_pitch_offset_deg", cJSON_CreateNumber(9.0));
+    char* conflicting = cJSON_PrintUnformatted(root);
+    ConfigData output;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, parser.deserialize(conflicting, output));
+    cJSON_free(conflicting);
+    cJSON_Delete(root);
+}
+TEST_CASE("v3 files without loop mode keep the safe baseline or recover a complete velocity setup", "[config][strategy]") {
+    JsonConfigParser parser;
+    ConfigData source;
+    source.wifi.ssid = "test-network";
+    auto& longitudinal = source.control.strategies.longitudinal_cascade;
+    longitudinal.configured = true;
+    longitudinal.velocity.pid_kp = 1.0f;
+    longitudinal.max_velocity_mps = 1.0f;
+    longitudinal.max_acceleration_mps2 = 1.0f;
+    longitudinal.max_deceleration_mps2 = 1.0f;
+    longitudinal.loop_mode = LongitudinalLoopMode::VELOCITY;
+
+    std::string json;
+    TEST_ASSERT_EQUAL(ESP_OK, parser.serialize(source, json));
+    cJSON* root = cJSON_Parse(json.c_str());
+    cJSON* control = cJSON_GetObjectItem(root, "control");
+    cJSON* strategies = cJSON_GetObjectItem(control, "strategies");
+    cJSON* oldLongitudinal = cJSON_GetObjectItem(strategies, "longitudinal_cascade");
+    cJSON_DeleteItemFromObject(oldLongitudinal, "loop_mode");
+    char* legacyVelocity = cJSON_PrintUnformatted(root);
+    ConfigData migratedVelocity;
+    TEST_ASSERT_EQUAL(ESP_OK, parser.deserialize(legacyVelocity, migratedVelocity));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(LongitudinalLoopMode::VELOCITY),
+                          static_cast<int>(migratedVelocity.control.strategies.longitudinal_cascade.loop_mode));
+    cJSON_free(legacyVelocity);
+    cJSON_Delete(root);
+
+    longitudinal.configured = false;
+    longitudinal.max_velocity_mps = 0.0f;
+    longitudinal.max_acceleration_mps2 = 0.0f;
+    longitudinal.max_deceleration_mps2 = 0.0f;
+    longitudinal.velocity.pid_kp = 0.0f;
+    longitudinal.loop_mode = LongitudinalLoopMode::PITCH_ONLY;
+    TEST_ASSERT_EQUAL(ESP_OK, parser.serialize(source, json));
+    root = cJSON_Parse(json.c_str());
+    control = cJSON_GetObjectItem(root, "control");
+    strategies = cJSON_GetObjectItem(control, "strategies");
+    oldLongitudinal = cJSON_GetObjectItem(strategies, "longitudinal_cascade");
+    cJSON_DeleteItemFromObject(oldLongitudinal, "loop_mode");
+    char* legacyPitch = cJSON_PrintUnformatted(root);
+    ConfigData migratedPitch;
+    TEST_ASSERT_EQUAL(ESP_OK, parser.deserialize(legacyPitch, migratedPitch));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(LongitudinalLoopMode::PITCH_ONLY),
+                          static_cast<int>(migratedPitch.control.strategies.longitudinal_cascade.loop_mode));
+    cJSON_free(legacyPitch);
     cJSON_Delete(root);
 }
 TEST_CASE("configured longitudinal pitch baseline requires usable limits and gains", "[config][strategy]") {
@@ -90,6 +199,62 @@ TEST_CASE("configured longitudinal pitch baseline requires usable limits and gai
 
     longitudinal.max_effort = 0.8f;
     config.control.strategies.active = BalanceStrategyId::LONGITUDINAL_CASCADE;
+    TEST_ASSERT_TRUE(validator.validate(config, error));
+}
+
+TEST_CASE("position hold and synchronization activation require their typed limits", "[config][strategy]") {
+    ConfigData config;
+    config.wifi.ssid = "test-network";
+    config.control.strategies.active = BalanceStrategyId::LONGITUDINAL_CASCADE;
+    auto& longitudinal = config.control.strategies.longitudinal_cascade;
+    longitudinal.configured = true;
+    longitudinal.pitch = {0.2f, 0.0f, 0.01f, -1.0f, 1.0f, -1.0f, 1.0f};
+    longitudinal.velocity = {1.0f, 1.0f, 0.0f, -2.0f, 2.0f, -2.0f, 2.0f};
+    longitudinal.max_pitch_offset_deg = 5.0f;
+    longitudinal.max_pitch_rate_dps = 90.0f;
+    longitudinal.max_velocity_mps = 1.0f;
+    longitudinal.max_hold_velocity_mps = 0.2f;
+    longitudinal.max_acceleration_mps2 = 1.0f;
+    longitudinal.max_deceleration_mps2 = 1.0f;
+    longitudinal.position_kp = 1.0f;
+    longitudinal.hold_position_deadband_m = 0.01f;
+    longitudinal.loop_mode = LongitudinalLoopMode::POSITION_HOLD;
+    longitudinal.max_effort = 0.8f;
+    longitudinal.sync_enabled = true;
+    longitudinal.sync_kp = 0.5f;
+    longitudinal.sync_position_deadband_m = 0.002f;
+    longitudinal.sync_velocity_deadband_mps = 0.005f;
+    longitudinal.sync_max_effort = 0.2f;
+
+    ConfigValidator validator;
+    std::string error;
+    TEST_ASSERT_TRUE(validator.validate(config, error));
+
+    longitudinal.position_kp = 0.0f;
+    TEST_ASSERT_FALSE(validator.validate(config, error));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, error.find("position_hold"));
+
+    longitudinal.position_kp = 1.0f;
+    longitudinal.sync_max_effort = 0.0f;
+    TEST_ASSERT_FALSE(validator.validate(config, error));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, error.find("synchronization"));
+}
+TEST_CASE("motor deadzone validation is bounded by the LEDC duty resolution", "[config][motor]") {
+    ConfigData config;
+    config.wifi.ssid = "test-network";
+    ConfigValidator validator;
+    std::string error;
+
+    config.motor.duty_resolution = 0;
+    TEST_ASSERT_FALSE(validator.validate(config, error));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, error.find("duty_resolution"));
+
+    config.motor.duty_resolution = 10;
+    config.motor.deadzone_duty = 1024;
+    TEST_ASSERT_FALSE(validator.validate(config, error));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, error.find("deadzone_duty"));
+
+    config.motor.deadzone_duty = 500;
     TEST_ASSERT_TRUE(validator.validate(config, error));
 }
 TEST_CASE("future version and malformed new field are rejected without replacing output", "[imu][config]") {

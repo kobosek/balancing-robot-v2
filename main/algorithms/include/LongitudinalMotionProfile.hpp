@@ -38,6 +38,5 @@ private:
 
     float clampCommand(float commandVelocityMps) const;
     static float advanceToward(float current, float target, float rate,
-                               float dtSeconds, bool& limited);
+                               float dtSeconds, bool& limited, bool& valid);
 };
-

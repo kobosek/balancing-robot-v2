@@ -114,13 +114,25 @@ LongitudinalOdometryResult LongitudinalOdometry::statusResult(
 {
     LongitudinalOdometryResult result = m_latest;
     result.status = status;
-    result.frameAccepted = status == LongitudinalOdometryUpdateStatus::ACCEPTED ||
-        status == LongitudinalOdometryUpdateStatus::INVALID_FRAME;
-    result.sequence = frame.sequence;
-    result.sampleTimestampUs = sampleTimestampUs;
+    result.frameAccepted = status == LongitudinalOdometryUpdateStatus::ACCEPTED;
     result.generation = m_generation;
-    result.leftContinuityEpoch = frame.left.continuityEpoch;
-    result.rightContinuityEpoch = frame.right.continuityEpoch;
+    result.observedSequence = frame.sequence;
+    result.observedSampleTimestampUs = sampleTimestampUs;
+    result.observedLeftContinuityEpoch = frame.left.continuityEpoch;
+    result.observedRightContinuityEpoch = frame.right.continuityEpoch;
+    if (status == LongitudinalOdometryUpdateStatus::ACCEPTED) {
+        // `odometrySequence` records the monotonically consumed frame even
+        // when a continuity/rebase/error event makes its numeric values
+        // unusable.  In that case `sequence`, timestamp and epochs must stay
+        // attached to the last sample represented by the copied numbers.
+        result.odometrySequence = frame.sequence;
+        if (!m_continuityBroken) {
+            result.sequence = frame.sequence;
+            result.sampleTimestampUs = sampleTimestampUs;
+            result.leftContinuityEpoch = frame.left.continuityEpoch;
+            result.rightContinuityEpoch = frame.right.continuityEpoch;
+        }
+    }
     return result;
 }
 
@@ -137,22 +149,122 @@ LongitudinalOdometryResult LongitudinalOdometry::update(const EncoderFrame& fram
         auto result = statusResult(frame, LongitudinalOdometryUpdateStatus::DUPLICATE,
                                    sampleTimestampUs);
         result.frameAccepted = false;
+        // A control step may legitimately read the same coherent encoder
+        // frame twice while the producer is between publications.  Reusing
+        // the cached numbers is safe only while the duplicate itself proves
+        // that both wheel samples are still coherent and fresh.  Otherwise
+        // keep the cached numbers for diagnostics, but make the result
+        // unusable so the active control path faults instead of extending an
+        // old drive command.
+        const bool wheelTimestampsValid = leftTimestampUs > 0 &&
+            rightTimestampUs > 0;
+        const int64_t timestampSkewUs = wheelTimestampsValid
+            ? std::llabs(leftTimestampUs - rightTimestampUs) : 0;
+        const bool skewValid = wheelTimestampsValid &&
+            timestampSkewUs <= m_config.maxWheelTimestampSkewUs;
+        const bool ageValid = wheelTimestampsValid &&
+            (nowUs <= 0 || (nowUs >= leftTimestampUs &&
+                nowUs >= rightTimestampUs &&
+                nowUs - leftTimestampUs <= m_config.maxSampleAgeUs &&
+                nowUs - rightTimestampUs <= m_config.maxSampleAgeUs));
+        const bool timestampValid = m_scalingValid && wheelTimestampsValid &&
+            skewValid && sampleTimestampUs >= std::max(leftTimestampUs,
+                                                        rightTimestampUs) &&
+            ageValid;
+        const bool feedbackValid = frame.left.valid && frame.right.valid &&
+            frame.left.error == ESP_OK && frame.right.error == ESP_OK &&
+            std::isfinite(frame.left.speedDps) &&
+            std::isfinite(frame.right.speedDps);
+        const bool epochChanged = m_hasEpoch &&
+            (frame.left.continuityEpoch != m_leftEpoch ||
+             frame.right.continuityEpoch != m_rightEpoch);
+        const bool continuityIssue = epochChanged || frame.left.rebased ||
+            frame.right.rebased || frame.left.error != ESP_OK ||
+            frame.right.error != ESP_OK;
+        if (continuityIssue) {
+            markContinuityBroken(frame.left.continuityEpoch,
+                                 frame.right.continuityEpoch,
+                                 epochChanged);
+            result.generation = m_generation;
+        }
+        if (!timestampValid || !feedbackValid || continuityIssue ||
+            !result.odometryValid || !result.positionValid ||
+            !result.velocityValid) {
+            result.sampleTimingValid = false;
+            result.leftFeedbackValid = false;
+            result.rightFeedbackValid = false;
+            result.velocityValid = false;
+            result.continuityValid = false;
+            result.positionValid = false;
+            result.odometryValid = false;
+            if (continuityIssue) {
+                m_latest = result;
+            }
+        }
         return result;
     }
     if (m_hasSequence && frame.sequence < m_lastSequence) {
+        // A frame that arrives behind the consumed sequence is more than a
+        // harmless diagnostic duplicate: the producer has lost ordering, so
+        // the count base can no longer be assumed to describe one coherent
+        // history.  Invalidate the generation/base before returning the old
+        // numeric sample for diagnostics.  The next monotonic frame will
+        // capture a new local base instead of integrating across the gap.
+        const bool epochChanged = m_hasEpoch &&
+            (frame.left.continuityEpoch != m_leftEpoch ||
+             frame.right.continuityEpoch != m_rightEpoch);
+        markContinuityBroken(frame.left.continuityEpoch,
+                             frame.right.continuityEpoch,
+                             epochChanged);
         auto result = statusResult(frame, LongitudinalOdometryUpdateStatus::OUT_OF_ORDER,
                                    sampleTimestampUs);
         result.frameAccepted = false;
+        result.sampleTimingValid = false;
+        result.leftFeedbackValid = false;
+        result.rightFeedbackValid = false;
+        result.velocityValid = false;
+        result.continuityValid = false;
+        result.positionValid = false;
+        result.odometryValid = false;
+        m_latest = result;
         return result;
     }
-    if (sampleTimestampUs <= 0 ||
-        (m_hasSequence && sampleTimestampUs <= m_lastSampleTimestampUs)) {
+    if (sampleTimestampUs <= 0) {
+        markContinuityBroken(frame.left.continuityEpoch,
+                             frame.right.continuityEpoch,
+                             m_hasEpoch &&
+                                 (frame.left.continuityEpoch != m_leftEpoch ||
+                                  frame.right.continuityEpoch != m_rightEpoch));
+        auto result = statusResult(frame, LongitudinalOdometryUpdateStatus::INVALID_FRAME,
+                                   sampleTimestampUs);
+        result.sampleTimingValid = false;
+        result.leftFeedbackValid = false;
+        result.rightFeedbackValid = false;
+        result.velocityValid = false;
+        result.continuityValid = false;
+        result.positionValid = false;
+        result.odometryValid = false;
+        m_latest = result;
+        return result;
+    }
+    if (m_hasSequence && sampleTimestampUs <= m_lastSampleTimestampUs) {
+        markContinuityBroken(frame.left.continuityEpoch,
+                             frame.right.continuityEpoch,
+                             m_hasEpoch &&
+                                 (frame.left.continuityEpoch != m_leftEpoch ||
+                                  frame.right.continuityEpoch != m_rightEpoch));
         auto result = statusResult(frame, LongitudinalOdometryUpdateStatus::OUT_OF_ORDER,
                                    sampleTimestampUs);
-        result.frameAccepted = false;
+        result.sampleTimingValid = false;
+        result.leftFeedbackValid = false;
+        result.rightFeedbackValid = false;
+        result.velocityValid = false;
+        result.continuityValid = false;
+        result.positionValid = false;
+        result.odometryValid = false;
+        m_latest = result;
         return result;
     }
-
     // A monotonically sequenced frame is consumed once, even when its timing
     // is invalid. Counts and continuity state are changed only below after
     // the timing checks pass.
@@ -173,6 +285,11 @@ LongitudinalOdometryResult LongitudinalOdometry::update(const EncoderFrame& fram
         sampleTimestampUs >= std::max(leftTimestampUs, rightTimestampUs) && ageValid;
 
     if (!timingValid) {
+        markContinuityBroken(frame.left.continuityEpoch,
+                             frame.right.continuityEpoch,
+                             m_hasEpoch &&
+                                 (frame.left.continuityEpoch != m_leftEpoch ||
+                                  frame.right.continuityEpoch != m_rightEpoch));
         auto result = statusResult(frame, LongitudinalOdometryUpdateStatus::INVALID_FRAME,
                                    sampleTimestampUs);
         result.sampleTimingValid = false;
@@ -256,6 +373,10 @@ LongitudinalOdometryResult LongitudinalOdometry::update(const EncoderFrame& fram
     result.leftContinuityEpoch = frame.left.continuityEpoch;
     result.rightContinuityEpoch = frame.right.continuityEpoch;
     result.sampleTimestampUs = sampleTimestampUs;
+    result.observedSequence = frame.sequence;
+    result.observedSampleTimestampUs = sampleTimestampUs;
+    result.observedLeftContinuityEpoch = frame.left.continuityEpoch;
+    result.observedRightContinuityEpoch = frame.right.continuityEpoch;
     result.leftPositionM = leftPositionM;
     result.rightPositionM = rightPositionM;
     result.positionM = (leftPositionM + rightPositionM) * 0.5;

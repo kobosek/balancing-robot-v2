@@ -2,7 +2,9 @@
 
 struct WebServerConfig {
     int telemetry_buffer_size = 100;
-    int max_config_post_size = 4096;
+    // The v3 document contains both complete strategy records. Keep enough
+    // headroom for the compact full-document POST plus operation metadata.
+    int max_config_post_size = 8192;
     bool web_logs_enabled = true;
     int log_buffer_lines = 250;
     int log_line_max_length = 256;

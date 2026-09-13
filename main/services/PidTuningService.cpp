@@ -17,6 +17,19 @@
 namespace {
 constexpr float MIN_EXTRA_STEP_DELTA = 0.03f;
 constexpr float MAX_SETTLE_WAIT_S = 1.5f;
+
+control_math::PidParameters toPidParameters(const PIDConfig& config)
+{
+    return {
+        config.pid_kp,
+        config.pid_ki,
+        config.pid_kd,
+        config.pid_output_min,
+        config.pid_output_max,
+        config.pid_iterm_min,
+        config.pid_iterm_max
+    };
+}
 }
 
 PidTuningService::PidTuningService(EventBus& eventBus,
@@ -27,8 +40,8 @@ PidTuningService::PidTuningService(EventBus& eventBus,
       m_configService(configService),
       m_encoderService(encoderService),
       m_config(initialConfig),
-      m_validationPidLeft("tuning_validate_left"),
-      m_validationPidRight("tuning_validate_right") {
+      m_validationPidLeft(),
+      m_validationPidRight() {
     resetRuntimeLocked();
 }
 
@@ -61,7 +74,6 @@ void PidTuningService::handleEvent(const BaseEvent& event) {
 
 MotorEffort PidTuningService::update(float dt, float speedLeft_dps, float speedRight_dps) {
     bool shouldPublishFinished = false;
-    bool shouldApplyPreview = false;
     PidTuningState finishedState = PidTuningState::IDLE;
     std::string finishedMessage;
     MotorEffort effort;
@@ -73,12 +85,7 @@ MotorEffort PidTuningService::update(float dt, float speedLeft_dps, float speedR
                               speedRight_dps,
                               shouldPublishFinished,
                               finishedState,
-                              finishedMessage,
-                              shouldApplyPreview);
-    }
-
-    if (shouldApplyPreview) {
-        applyPreview();
+                              finishedMessage);
     }
 
     if (shouldPublishFinished) {
@@ -93,8 +100,7 @@ MotorEffort PidTuningService::updateLocked(float dt,
                                            float speedRight_dps,
                                            bool& shouldPublishFinished,
                                            PidTuningState& finishedState,
-                                           std::string& finishedMessage,
-                                           bool& shouldApplyPreview) {
+                                           std::string& finishedMessage) {
     MotorEffort effort = {0.0f, 0.0f};
     m_lastSpeedSetpointLeft_dps = 0.0f;
     m_lastSpeedSetpointRight_dps = 0.0f;
@@ -205,7 +211,18 @@ MotorEffort PidTuningService::updateLocked(float dt,
 
         case PidTuningPhase::VALIDATE_LEFT:
             m_lastSpeedSetpointLeft_dps = m_config.validation_target_dps;
-            effort.left = clampAbs(m_validationPidLeft.compute(m_config.validation_target_dps, speedLeft_dps, dt), m_config.max_effort);
+            {
+                const auto step = m_validationPidLeft.update(
+                    m_config.validation_target_dps, speedLeft_dps, dt);
+                if (!step.valid) {
+                    failRunLocked("Tuning aborted: invalid left validation PID");
+                    shouldPublishFinished = true;
+                    finishedState = PidTuningState::FAILED;
+                    finishedMessage = m_status.message;
+                    return {0.0f, 0.0f};
+                }
+                effort.left = clampAbs(step.effort, m_config.max_effort);
+            }
             effort.right = 0.0f;
             if (m_phaseElapsed_s >= (m_config.step_duration_ms / 1000.0f) * 0.75f) {
                 m_validationFinalSum_dps += speedLeft_dps;
@@ -221,7 +238,6 @@ MotorEffort PidTuningService::updateLocked(float dt,
                     return {0.0f, 0.0f};
                 }
                 completeRunLocked();
-                shouldApplyPreview = true;
                 shouldPublishFinished = true;
                 finishedState = PidTuningState::PREVIEW_READY;
                 finishedMessage = m_status.message;
@@ -238,7 +254,18 @@ MotorEffort PidTuningService::updateLocked(float dt,
         case PidTuningPhase::VALIDATE_RIGHT:
             m_lastSpeedSetpointRight_dps = m_config.validation_target_dps;
             effort.left = 0.0f;
-            effort.right = clampAbs(m_validationPidRight.compute(m_config.validation_target_dps, speedRight_dps, dt), m_config.max_effort);
+            {
+                const auto step = m_validationPidRight.update(
+                    m_config.validation_target_dps, speedRight_dps, dt);
+                if (!step.valid) {
+                    failRunLocked("Tuning aborted: invalid right validation PID");
+                    shouldPublishFinished = true;
+                    finishedState = PidTuningState::FAILED;
+                    finishedMessage = m_status.message;
+                    return {0.0f, 0.0f};
+                }
+                effort.right = clampAbs(step.effort, m_config.max_effort);
+            }
             if (m_phaseElapsed_s >= (m_config.step_duration_ms / 1000.0f) * 0.75f) {
                 m_validationFinalSum_dps += speedRight_dps;
                 ++m_validationFinalCount;
@@ -253,7 +280,6 @@ MotorEffort PidTuningService::updateLocked(float dt,
                     return {0.0f, 0.0f};
                 }
                 completeRunLocked();
-                shouldApplyPreview = true;
                 shouldPublishFinished = true;
                 finishedState = PidTuningState::PREVIEW_READY;
                 finishedMessage = m_status.message;
@@ -286,79 +312,148 @@ void PidTuningService::handleSaveCommand(const UI_SavePidTuning& event) {
     (void)event;
     PIDConfig tunedConfig;
     PidTuningTarget target = PidTuningTarget::MOTOR_SPEED_LEFT;
+    uint64_t baseConfigRevision = UINT64_MAX;
+    uint64_t candidateToken = 0;
     bool shouldSave = false;
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        if (m_previewAvailable && m_status.state == PidTuningState::PREVIEW_READY) {
+        if (m_previewAvailable && m_status.state == PidTuningState::PREVIEW_READY &&
+            !m_saveInProgress) {
             target = m_status.target;
             tunedConfig = isLeftWheelTarget(target) ? m_candidateLeft : m_candidateRight;
+            baseConfigRevision = m_baseConfigRevision;
+            candidateToken = m_candidateToken;
+            m_saveInProgress = true;
+            m_status.saveInProgress = true;
+            m_status.message = std::string("Saving tuned ") + targetWheelNameLocked() +
+                " motor PID";
             shouldSave = true;
+        } else if (m_saveInProgress) {
+            m_status.message = "Tuned motor PID save is already in progress";
+        }
+    }
+
+    if (shouldSave) {
+        const esp_err_t result = m_configService.applyPidConfig(
+            isLeftWheelTarget(target) ? "speed_left" : "speed_right",
+            tunedConfig,
+            true,
+            baseConfigRevision);
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const bool sameCandidate = candidateToken == m_candidateToken &&
+            m_previewAvailable && m_status.state == PidTuningState::PREVIEW_READY;
+        m_saveInProgress = false;
+        m_status.saveInProgress = false;
+        if (result == ESP_OK && sameCandidate) {
             m_status.state = PidTuningState::SAVED;
             m_status.phase = PidTuningPhase::IDLE;
             m_status.progress = 1.0f;
             m_status.message = std::string("Tuned ") + targetWheelNameLocked() + " motor PID saved";
             m_previewAvailable = false;
+            m_status.hasCandidate = false;
+            m_status.candidateBaseRevisionValid = false;
+            m_status.candidateBaseConfigRevision = 0;
+            m_candidateLeft = PIDConfig();
+            m_candidateRight = PIDConfig();
+            m_status.candidateLeft = PIDConfig();
+            m_status.candidateRight = PIDConfig();
+            ++m_candidateToken;
+        } else if (result != ESP_OK && sameCandidate) {
+            m_status.message = std::string("Tuned ") + targetWheelNameLocked() +
+                " motor PID save failed: " + esp_err_to_name(result);
         }
-    }
-
-    if (shouldSave) {
-        (void)m_configService.applyPidConfig(isLeftWheelTarget(target) ? "speed_left" : "speed_right",
-                                             tunedConfig,
-                                             true);
     }
 }
 
 void PidTuningService::handleDiscardCommand(const UI_DiscardPidTuning& event) {
     (void)event;
-    PIDConfig originalConfig;
-    PidTuningTarget target = PidTuningTarget::MOTOR_SPEED_LEFT;
-    bool shouldRestore = false;
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         if (m_previewAvailable && m_status.state == PidTuningState::PREVIEW_READY) {
-            target = m_status.target;
-            originalConfig = isLeftWheelTarget(target) ? m_originalLeft : m_originalRight;
-            shouldRestore = true;
+            if (m_saveInProgress) {
+                m_status.message = "Cannot discard tuned motor PID while save is in progress";
+                return;
+            }
             m_status.state = PidTuningState::DISCARDED;
             m_status.phase = PidTuningPhase::IDLE;
             m_status.progress = 0.0f;
             m_status.message = std::string("Tuned ") + targetWheelNameLocked() + " motor PID discarded";
             m_previewAvailable = false;
             m_status.hasCandidate = false;
+            m_status.candidateBaseRevisionValid = false;
+            m_status.candidateBaseConfigRevision = 0;
+            m_candidateLeft = PIDConfig();
+            m_candidateRight = PIDConfig();
+            m_status.candidateLeft = PIDConfig();
+            m_status.candidateRight = PIDConfig();
+            ++m_candidateToken;
         }
-    }
-
-    if (shouldRestore) {
-        (void)m_configService.applyPidConfig(isLeftWheelTarget(target) ? "speed_left" : "speed_right",
-                                             originalConfig,
-                                             false);
     }
 }
 
 void PidTuningService::handleRunModeChanged(const PID_TuningRunModeChanged& event) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (event.active) {
-        const PidTuningTarget target = m_startRequested ? m_requestedTarget : PidTuningTarget::MOTOR_SPEED_LEFT;
-        beginRunLocked(target);
-        m_startRequested = false;
-        return;
+    bool rejectStart = false;
+    std::string rejectionMessage;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (event.active) {
+            const PidTuningTarget target = m_startRequested
+                ? m_requestedTarget : PidTuningTarget::MOTOR_SPEED_LEFT;
+            beginRunLocked(target);
+            m_startRequested = false;
+            // StateManager has already entered PID_TUNING. Any synchronous
+            // rejection (wrong strategy, an in-flight Save, or a future
+            // admission check) must publish the terminal event so the state
+            // machine cannot remain stuck in the tuning mode.
+            rejectStart = m_status.state == PidTuningState::FAILED;
+            rejectionMessage = m_status.message;
+        } else if (m_status.state == PidTuningState::RUNNING) {
+            cancelRunLocked("Tuning stopped");
+        }
     }
 
-    if (m_status.state == PidTuningState::RUNNING) {
-        cancelRunLocked("Tuning stopped");
+    if (rejectStart) {
+        // StateManager has already entered PID_TUNING when this event arrives.
+        // Complete the rejection asynchronously after releasing our mutex so
+        // its handler can return the system to IDLE without a lock inversion.
+        publishFinished(PidTuningState::FAILED, rejectionMessage);
     }
 }
 
 void PidTuningService::beginRunLocked(PidTuningTarget target) {
-    m_config = m_configService.getPidTuningConfig();
-    m_originalLeft = m_configService.getPidSpeedLeftConfig();
-    m_originalRight = m_configService.getPidSpeedRightConfig();
+    if (m_saveInProgress) {
+        resetRuntimeLocked();
+        m_startRequested = false;
+        m_status.state = PidTuningState::FAILED;
+        m_status.phase = PidTuningPhase::IDLE;
+        m_status.progress = 0.0f;
+        m_status.message = "Cannot start PID tuning while the previous candidate is being saved";
+        return;
+    }
+    const ConfigData configSnapshot = m_configService.getConfigData();
+    if (configSnapshot.control.strategies.active != BalanceStrategyId::NESTED_PID) {
+        resetRuntimeLocked();
+        m_startRequested = false;
+        m_status.state = PidTuningState::FAILED;
+        m_status.phase = PidTuningPhase::IDLE;
+        m_status.progress = 0.0f;
+        m_status.message = "NestedPid tuning is unavailable for the selected strategy";
+        return;
+    }
+    m_config = configSnapshot.pid_tuning;
+    m_originalLeft = configSnapshot.control.strategies.nested_pid.speed_left;
+    m_originalRight = configSnapshot.control.strategies.nested_pid.speed_right;
+    m_baseConfigRevision = configSnapshot.config_revision;
     m_candidateLeft = m_originalLeft;
     m_candidateRight = m_originalRight;
+    ++m_candidateToken;
     resetRuntimeLocked();
     m_status.target = target;
+    m_status.candidateStrategy = BalanceStrategyId::NESTED_PID;
+    m_status.candidateBaseRevisionValid = true;
+    m_status.candidateBaseConfigRevision = static_cast<uint32_t>(m_baseConfigRevision);
     buildStepPlanLocked();
     m_status.state = PidTuningState::RUNNING;
     m_status.phase = PidTuningPhase::RESET;
@@ -390,8 +485,16 @@ void PidTuningService::completeRunLocked() {
     m_status.state = PidTuningState::PREVIEW_READY;
     m_status.phase = PidTuningPhase::PREVIEW;
     m_status.progress = 1.0f;
-    m_status.message = std::string("Tuned ") + targetWheelNameLocked() + " motor PID ready for preview";
+    // Keep the candidate local to this tuning transaction. It is used for
+    // validation and displayed to the user, but it does not mutate the
+    // canonical balance configuration until an explicit Save succeeds.
+    m_status.message = std::string("Tuned ") + targetWheelNameLocked() + " motor PID ready to save";
     m_status.hasCandidate = true;
+    m_status.candidateStrategy = BalanceStrategyId::NESTED_PID;
+    m_status.candidateBaseRevisionValid = m_baseConfigRevision != UINT64_MAX;
+    m_status.candidateBaseConfigRevision = m_status.candidateBaseRevisionValid
+        ? static_cast<uint32_t>(m_baseConfigRevision) : 0;
+    m_status.saveInProgress = false;
     m_status.candidateLeft = m_candidateLeft;
     m_status.candidateRight = m_candidateRight;
     m_previewAvailable = true;
@@ -440,7 +543,7 @@ void PidTuningService::transitionToValidateLeftLocked() {
     m_phaseElapsed_s = 0.0f;
     m_validationFinalSum_dps = 0.0f;
     m_validationFinalCount = 0;
-    m_validationPidLeft.init(m_candidateLeft);
+    m_validationPidLeft.setParameters(toPidParameters(m_candidateLeft));
     m_validationPidLeft.reset();
     setMessageLocked("Validating left tuned PID");
 }
@@ -450,7 +553,7 @@ void PidTuningService::transitionToValidateRightLocked() {
     m_phaseElapsed_s = 0.0f;
     m_validationFinalSum_dps = 0.0f;
     m_validationFinalCount = 0;
-    m_validationPidRight.init(m_candidateRight);
+    m_validationPidRight.setParameters(toPidParameters(m_candidateRight));
     m_validationPidRight.reset();
     setMessageLocked("Validating right tuned PID");
 }
@@ -611,23 +714,14 @@ void PidTuningService::resetRuntimeLocked() {
     m_lastSpeedSetpointLeft_dps = 0.0f;
     m_lastSpeedSetpointRight_dps = 0.0f;
     m_status.hasCandidate = false;
+    m_status.candidateStrategy = BalanceStrategyId::NESTED_PID;
+    m_status.candidateBaseRevisionValid = false;
+    m_status.candidateBaseConfigRevision = 0;
+    m_status.saveInProgress = m_saveInProgress;
     m_status.candidateLeft = PIDConfig();
     m_status.candidateRight = PIDConfig();
     m_status.leftMetrics = PidTuningResponseMetrics();
     m_status.rightMetrics = PidTuningResponseMetrics();
-}
-
-void PidTuningService::applyPreview() {
-    PidTuningTarget target = PidTuningTarget::MOTOR_SPEED_LEFT;
-    PIDConfig candidate;
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        target = m_status.target;
-        candidate = isLeftWheelTarget(target) ? m_candidateLeft : m_candidateRight;
-    }
-    (void)m_configService.applyPidConfig(isLeftWheelTarget(target) ? "speed_left" : "speed_right",
-                                         candidate,
-                                         false);
 }
 
 void PidTuningService::publishFinished(PidTuningState state, const std::string& message) {

@@ -10,6 +10,7 @@
 #include "ConfigurationService.hpp"
 #include "ControlEventDispatcher.hpp"
 #include "ControlModeExecutor.hpp"
+#include "ControlOperationGate.hpp"
 #include "EncoderService.hpp"
 #include "EventBus.hpp"
 #include "GuidedCalibrationService.hpp"
@@ -32,6 +33,7 @@
 #include "WiFiManager.hpp"
 #include "esp_check.h"
 #include "esp_log.h"
+#include <algorithm>
 
 ApplicationContext::ApplicationContext() = default;
 ApplicationContext::~ApplicationContext() = default;
@@ -90,6 +92,11 @@ IMUService& ApplicationContext::imuService() const
     return *m_imuService;
 }
 
+EncoderService& ApplicationContext::encoderService() const
+{
+    return *m_encoderService;
+}
+
 esp_err_t ApplicationContext::initializeCoreServices()
 {
     m_eventBus = &EventBus::getInstance();
@@ -106,7 +113,8 @@ esp_err_t ApplicationContext::initializeCoreServices()
     ESP_RETURN_ON_FALSE(m_configParser != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate config parser");
     ESP_LOGI(TAG, "Parser initialized");
 
-    m_configService = std::make_shared<ConfigurationService>(*m_storageService, *m_configParser, *m_eventBus);
+    m_configService = std::make_shared<ConfigurationService>(
+        *m_storageService, *m_configParser, *m_eventBus, "config.json", &m_operationGate);
     ESP_RETURN_ON_FALSE(m_configService != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate config service");
 
     ret = m_configService->init();
@@ -127,7 +135,8 @@ esp_err_t ApplicationContext::initializeCoreServices()
     const SystemBehaviorConfig behaviorConf = m_configService->getSystemBehaviorConfig();
     const BatteryConfig batteryConf = m_configService->getBatteryConfig();
 
-    m_stateManager = std::make_shared<StateManager>(*m_eventBus, behaviorConf, batteryConf);
+    m_stateManager = std::make_shared<StateManager>(
+        *m_eventBus, behaviorConf, batteryConf, &m_operationGate);
     ESP_RETURN_ON_FALSE(m_stateManager != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate state manager");
 
     ret = m_stateManager->init();
@@ -152,6 +161,7 @@ esp_err_t ApplicationContext::initializeSupportServices()
     const BatteryConfig batteryConf = m_configService->getBatteryConfig();
     const SystemBehaviorConfig behaviorConf = m_configService->getSystemBehaviorConfig();
     const MPU6050Config imuConf = m_configService->getMpu6050Config();
+    const MainLoopConfig loopConf = m_configService->getMainLoopConfig();
 
     m_wifiManager = std::make_unique<WiFiManager>();
     ESP_RETURN_ON_FALSE(m_wifiManager != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate WiFi manager");
@@ -162,7 +172,7 @@ esp_err_t ApplicationContext::initializeSupportServices()
     m_orientationEstimator = std::make_shared<OrientationEstimator>();
     ESP_RETURN_ON_FALSE(m_orientationEstimator != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate orientation estimator");
 
-    m_encoderService = std::make_unique<EncoderService>(encoderConf, m_configService->getMainLoopConfig().interval_ms * 1000LL);
+    m_encoderService = std::make_shared<EncoderService>(encoderConf, loopConf.interval_ms * 1000LL);
     ESP_RETURN_ON_FALSE(m_encoderService != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate encoder service");
 
     ret = m_encoderService->init();
@@ -174,7 +184,10 @@ esp_err_t ApplicationContext::initializeSupportServices()
     ret = m_batteryService->init();
     ESP_RETURN_ON_ERROR(ret, TAG, "BatteryService init failed");
 
-    m_motorService = std::make_shared<MotorService>(motorConf, *m_eventBus);
+    const int64_t motorWatchdogUs = std::max<int64_t>(
+        30000, static_cast<int64_t>(loopConf.interval_ms) * 3000);
+    m_motorService = std::make_shared<MotorService>(motorConf, *m_eventBus,
+                                                     motorWatchdogUs);
     ESP_RETURN_ON_FALSE(m_motorService != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate motor service");
 
     ret = m_motorService->init();
@@ -196,14 +209,10 @@ esp_err_t ApplicationContext::initializeControlSubsystem()
     const ControlConfig controlConf = m_configService->getControlConfig();
     const SystemBehaviorConfig behaviorConf = m_configService->getSystemBehaviorConfig();
     const EncoderConfig encoderConf = m_configService->getEncoderConfig();
-    const RobotDimensionsConfig dimensionConf = m_configService->getRobotDimensionsConfig();
-    const PIDConfig anglePidConf = m_configService->getPidAngleConfig();
-    const PIDConfig speedLeftPidConf = m_configService->getPidSpeedLeftConfig();
-    const PIDConfig speedRightPidConf = m_configService->getPidSpeedRightConfig();
-    const PIDConfig yawAnglePidConf = m_configService->getPidYawAngleConfig();
-    const PIDConfig yawRatePidConf = m_configService->getPidYawRateConfig();
+    const ConfigData initialConfig = m_configService->getConfigData();
     const PidTuningConfig pidTuningConf = m_configService->getPidTuningConfig();
     const MotorConfig motorConf = m_configService->getMotorConfig();
+    const MainLoopConfig loopConf = m_configService->getMainLoopConfig();
 
     m_commandProcessor = std::make_shared<CommandProcessor>(*m_eventBus, controlConf, behaviorConf);
     ESP_RETURN_ON_FALSE(m_commandProcessor != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate command processor");
@@ -211,17 +220,7 @@ esp_err_t ApplicationContext::initializeControlSubsystem()
     esp_err_t ret = m_commandProcessor->init();
     ESP_RETURN_ON_ERROR(ret, TAG, "CommandProcessor init failed");
 
-    m_balancingAlgorithm = std::make_shared<BalancingAlgorithm>(
-        *m_eventBus,
-        anglePidConf,
-        speedLeftPidConf,
-        speedRightPidConf,
-        yawAnglePidConf,
-        yawRatePidConf,
-        controlConf,
-        encoderConf,
-        dimensionConf
-    );
+    m_balancingAlgorithm = std::make_shared<BalancingAlgorithm>(*m_eventBus, initialConfig);
     ESP_RETURN_ON_FALSE(m_balancingAlgorithm != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate balancing algorithm");
 
     ret = m_balancingAlgorithm->init();
@@ -257,7 +256,8 @@ esp_err_t ApplicationContext::initializeControlSubsystem()
         *m_controlModeExecutor,
         *m_controlEventDispatcher,
         behaviorConf,
-        encoderConf
+        encoderConf,
+        loopConf.interval_ms
     );
     ESP_RETURN_ON_FALSE(m_robotController != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate robot controller");
     ESP_LOGI(TAG, "RobotController initialized");
@@ -273,6 +273,7 @@ esp_err_t ApplicationContext::initializeConnectivitySubsystem()
     ESP_RETURN_ON_FALSE(m_otaService != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate OTA service");
 
     m_otaService->bindImu(*m_imuService);
+    m_otaService->bindOperationGate(m_operationGate);
     esp_err_t ret = m_otaService->init();
     ESP_RETURN_ON_ERROR(ret, TAG, "OTAService init failed");
 
@@ -288,7 +289,8 @@ esp_err_t ApplicationContext::initializeConnectivitySubsystem()
         *m_guidedCalibrationService,
         *m_configService,
         *m_otaService,
-        *m_imuService
+        *m_imuService,
+        m_operationGate
     );
     auto otaApiHandler = std::make_unique<OTAApiHandler>(*m_otaService);
     auto logsApiHandler = std::make_unique<LogsApiHandler>(*m_logBufferService);

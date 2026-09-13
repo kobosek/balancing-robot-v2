@@ -87,21 +87,22 @@ esp_err_t MX1616H_HWDriver::setRawDuty(uint32_t duty1, uint32_t duty2) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t ret;
-
-
     // Use the speed mode associated with the timer for API calls
     ledc_mode_t current_speed_mode = m_speed_mode;
-
-    ret = ledc_set_duty(current_speed_mode, m_channel1, duty1);
-    if (ret != ESP_OK) return ret;
-    ret = ledc_update_duty(current_speed_mode, m_channel1);
-    if (ret != ESP_OK) return ret;
-
-    ret = ledc_set_duty(current_speed_mode, m_channel2, duty2);
-    if (ret != ESP_OK) return ret;
-    ret = ledc_update_duty(current_speed_mode, m_channel2);
-    if (ret != ESP_OK) return ret;
-
-    return ESP_OK;
+    // A stop request is a safety transaction: an error on one channel must
+    // not prevent the other channel from receiving its zero duty update.
+    // Return the first error after attempting all four driver operations.
+    esp_err_t firstError = ESP_OK;
+    const auto apply = [&](ledc_channel_t channel, uint32_t duty) {
+        esp_err_t ret = ledc_set_duty(current_speed_mode, channel, duty);
+        if (ret != ESP_OK) {
+            if (firstError == ESP_OK) firstError = ret;
+            return;
+        }
+        ret = ledc_update_duty(current_speed_mode, channel);
+        if (ret != ESP_OK && firstError == ESP_OK) firstError = ret;
+    };
+    apply(m_channel1, duty1);
+    apply(m_channel2, duty2);
+    return firstError;
 }

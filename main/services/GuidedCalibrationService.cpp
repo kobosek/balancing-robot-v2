@@ -184,6 +184,15 @@ void GuidedCalibrationService::applyConfig(const PidTuningConfig& tuningConfig, 
 
 void GuidedCalibrationService::handleConfigUpdate(const CONFIG_FullConfigUpdate& event) {
     std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_hasConfigRevision &&
+        event.configData.config_revision < m_configRevision) {
+        ESP_LOGW(TAG, "Ignoring stale guided-calibration config revision %lu (current %lu)",
+                 static_cast<unsigned long>(event.configData.config_revision),
+                 static_cast<unsigned long>(m_configRevision));
+        return;
+    }
+    m_configRevision = event.configData.config_revision;
+    m_hasConfigRevision = true;
     applyConfig(event.configData.pid_tuning, event.configData.motor);
 }
 

@@ -1,5 +1,6 @@
 {
   "config_version": 3,
+  "config_revision": 0,
   "wifi": {
     "ssid": "StajniaAugiasza",
     "password": "Lubieplacki4321"
@@ -95,10 +96,27 @@
         "max_deceleration_mps2": 0.0,
         "hold_position_deadband_m": 0.0,
         "hold_velocity_deadband_mps": 0.0,
+        "sync_enabled": false,
         "sync_kp": 0.0,
         "sync_kd": 0.0,
+        "sync_position_deadband_m": 0.0,
+        "sync_velocity_deadband_mps": 0.0,
         "sync_max_effort": 0.0,
         "max_effort": 1.0,
+        "loop_mode": "pitch_only",
+        "hold_enter_velocity_mps": 0.02,
+        "hold_exit_velocity_mps": 0.05,
+        "hold_pitch_error_deadband_deg": 1.0,
+        "hold_pitch_rate_deadband_dps": 8.0,
+        "hold_settle_time_ms": 150,
+        "motion_request_limit_enabled": true,
+        "motion_request_limit_pitch_start_deg": 4.0,
+        "motion_request_limit_pitch_full_deg": 8.0,
+        "motion_request_limit_pitch_release_deg": 3.0,
+        "motion_request_limit_effort_start": 0.75,
+        "motion_request_limit_effort_full": 0.95,
+        "motion_request_limit_effort_release": 0.65,
+        "motion_request_limit_min_scale": 0.2,
         "configured": false,
         "revision": 0
       }
@@ -189,7 +207,7 @@
   },
   "web": {
     "telemetry_buffer_size": 100,
-    "max_config_post_size": 4096,
+    "max_config_post_size": 8192,
     "web_logs_enabled": true,
     "log_buffer_lines": 250,
     "log_line_max_length": 256

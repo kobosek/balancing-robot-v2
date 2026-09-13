@@ -8,7 +8,7 @@
 #include "config/WebServerConfig.hpp"
 #include <deque>
 #include <mutex>
-#include <vector>
+#include <cstdint>
 
 // Forward declare dependencies
 class BaseEvent;
@@ -32,11 +32,22 @@ public:
 
 private:
     static constexpr const char* TAG = "TelemetryHandler";
+    static constexpr size_t MAX_BUFFER_SIZE = 500;
+    // Keep HTTP work bounded even when the ring has accumulated a full
+    // history.  Remaining samples stay queued for the next request.
+    static constexpr size_t MAX_RESPONSE_BATCH_SIZE = 32;
 
     // ConfigurationService& m_configService; // REMOVE
     std::deque<TelemetryDataPoint> m_telemetryBuffer;
     std::mutex m_telemetryMutex;
+    // The HTTP response is assembled from this bounded snapshot.  A separate
+    // lock keeps concurrent /data requests from sharing the snapshot storage.
+    TelemetryDataPoint m_responseBuffer[MAX_RESPONSE_BATCH_SIZE]{};
+    std::mutex m_responseMutex;
     size_t m_telemetry_buffer_max_size; // Loaded from config
+    uint32_t m_config_revision = 0;
+    bool m_has_config_revision = false;
+    uint32_t m_dropped_samples = 0;
 
     // Helper to apply config values
     void applyConfig(const WebServerConfig& config);

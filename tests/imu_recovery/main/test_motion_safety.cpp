@@ -45,6 +45,32 @@ TEST_CASE("disabled and non-finite effort commits zero to both motors", "[imu][m
     }
 }
 
+TEST_CASE("MotorService applies the measured PWM deadzone once at the actuator boundary",
+          "[control][imu][motor][deadzone]") {
+    motor_fake::reset();
+    MotorConfig config{};
+    config.duty_resolution = 10;
+    config.deadzone_duty = 500;
+    MotorService motor(config, EventBus::getInstance());
+    motor.handleEvent(MOTOR_OutputEnabledChanged(true, 1, 7));
+
+    TEST_ASSERT_EQUAL(ESP_OK, motor.setMotorEffort(0.5f, -0.5f, 1, 7));
+    TEST_ASSERT_EQUAL_UINT(2, motor_fake::count.load());
+    TEST_ASSERT_EQUAL_UINT32(761, motor_fake::writes[0].duty1);
+    TEST_ASSERT_EQUAL_UINT32(0, motor_fake::writes[0].duty2);
+    TEST_ASSERT_EQUAL_UINT32(0, motor_fake::writes[1].duty1);
+    TEST_ASSERT_EQUAL_UINT32(761, motor_fake::writes[1].duty2);
+
+    // Effort below the normalized zero threshold is a true stop; it must not
+    // turn into a PWM pulse merely because a deadzone is configured.
+    TEST_ASSERT_EQUAL(ESP_OK, motor.setMotorEffort(0.0005f, -0.0005f, 1, 7));
+    TEST_ASSERT_EQUAL_UINT(4, motor_fake::count.load());
+    TEST_ASSERT_EQUAL_UINT32(0, motor_fake::writes[2].duty1);
+    TEST_ASSERT_EQUAL_UINT32(0, motor_fake::writes[2].duty2);
+    TEST_ASSERT_EQUAL_UINT32(0, motor_fake::writes[3].duty1);
+    TEST_ASSERT_EQUAL_UINT32(0, motor_fake::writes[3].duty2);
+}
+
 namespace {
 struct RaceContext {
     MotorService* motor;

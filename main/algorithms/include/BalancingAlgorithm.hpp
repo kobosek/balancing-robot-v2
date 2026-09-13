@@ -17,6 +17,10 @@ class CONFIG_FullConfigUpdate;
 
 class BalancingAlgorithm : public EventHandler {
 public:
+    // Preferred constructor: apply one coherent configuration snapshot so the
+    // selected strategy and all of its revisions come from the same document.
+    BalancingAlgorithm(EventBus& eventBus, const ConfigData& initialConfig);
+
     // Constructor takes initial config structs
     BalancingAlgorithm(EventBus& eventBus,
                        const PIDConfig& initialAnglePid,
@@ -37,7 +41,18 @@ public:
                       const LongitudinalOdometryResult& odometry,
                       int64_t nowUs = 0,
                       int64_t motionTimeoutUs = 0,
-                      const LongitudinalMotionCommand& motion = {});
+                      const LongitudinalMotionCommand& motion = {},
+                      uint64_t controlArmId = 0);
+    BalanceControlResult updateDetailed(
+        float dt, float currentPitch_deg, float currentPitchRate_dps,
+        float currentYaw_deg, float currentYawRate_dps,
+        float currentSpeedLeft_dps, float currentSpeedRight_dps,
+        float targetPitchOffset_deg, float targetAngVel_dps,
+        const LongitudinalOdometryResult& odometry,
+        int64_t nowUs = 0,
+        int64_t motionTimeoutUs = 0,
+        const LongitudinalMotionCommand& motion = {},
+        uint64_t controlArmId = 0);
     void resetState();
 
     // EventHandler interface implementation
@@ -52,6 +67,8 @@ public:
     bool isYawControlEnabled() const;
     BalanceControlDiagnostics getDiagnostics() const;
     BalanceStrategyId getActiveStrategyId() const;
+    uint32_t getActiveStrategyRevision() const;
+    uint32_t getAppliedConfigRevision() const;
     // --- End Getters ---
 
 private:
@@ -62,6 +79,9 @@ private:
     BalanceStrategyId m_activeStrategyId = BalanceStrategyId::NESTED_PID;
     ControlRunMode m_controlMode = ControlRunMode::DISABLED;
     uint64_t m_controlArmId = 0;
+    uint32_t m_activeStrategyRevision = 0;
+    uint32_t m_appliedConfigRevision = 0;
+    bool m_hasConfigRevision = false;
 
     // Internal helpers to apply config from events
     void applyConfig(const ConfigData& config);

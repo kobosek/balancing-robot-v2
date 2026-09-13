@@ -12,9 +12,14 @@
 #include "config/RobotDimensionsConfig.hpp"
 #include "config/WebServerConfig.hpp"
 #include "config/PidTuningConfig.hpp"
+#include <cstdint>
 
 struct ConfigData {
     int config_version = 3;
+    // Monotonic revision of the complete persisted document. Strategy
+    // revisions remain scoped to their typed records; this field protects a
+    // full read/modify/write request from overwriting unrelated changes.
+    uint32_t config_revision = 0;
     WiFiConfig wifi;
     MainLoopConfig mainLoop;
     ControlConfig control;

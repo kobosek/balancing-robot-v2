@@ -4,6 +4,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "EventHandler.hpp"
+#include "ControlOperationGate.hpp"
 
 // Forward declare dependencies
 class IMUService;
@@ -23,7 +24,9 @@ public:
                     PidTuningService& pidTuningService,
                     GuidedCalibrationService& guidedCalibrationService,
                     ConfigurationService& configService,
-                    OTAService& otaService, IMUService& imuService);
+                    OTAService& otaService,
+                    IMUService& imuService,
+                    ControlOperationGate& operationGate);
     esp_err_t handleRequest(httpd_req_t *req);
 
     // EventHandler interface implementation
@@ -40,4 +43,5 @@ private:
     GuidedCalibrationService& m_guidedCalibrationService;
     ConfigurationService& m_configService;
     OTAService& m_otaService;
+    ControlOperationGate& m_operationGate;
 };

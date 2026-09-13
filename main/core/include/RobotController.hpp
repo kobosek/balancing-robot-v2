@@ -21,6 +21,7 @@ class ControlModeExecutor;
 class BaseEvent;
 class MOTION_TargetMovement;
 class MOTION_TargetLinearVelocity;
+class CONFIG_EncoderConfigUpdate;
 struct MotorEffort;
 struct TelemetryDataPoint;
 struct ControlModeResult;
@@ -35,10 +36,12 @@ public:
         ControlModeExecutor& controlModeExecutor,
         ControlEventDispatcher& controlEventDispatcher,
         const SystemBehaviorConfig& behavior,
-        const EncoderConfig& encoderConfig
+        const EncoderConfig& encoderConfig,
+        int controlIntervalMs = 5
     );
 
     void runControlStep(float dt);
+    int controlIntervalMs() const { return m_controlIntervalMs.load(std::memory_order_relaxed); }
 
     // EventHandler interface implementation
     void handleEvent(const BaseEvent& event) override;
@@ -57,6 +60,7 @@ private:
 
     std::mutex m_modeMutex;
     std::mutex m_commandMutex;
+    std::mutex m_odometryMutex;
     uint64_t m_armId = 0, m_lastFaultArm = 0, m_lastExecutedArm = 0;
     uint32_t m_generation = 0;
     uint64_t m_lastImuSequence = 0;
@@ -65,6 +69,7 @@ private:
     bool m_hasOdometryArm = false;
     std::atomic<int64_t> m_maxSampleAgeUs{20000};
     std::atomic<int64_t> m_motionCommandTimeoutUs{500000};
+    std::atomic<int> m_controlIntervalMs{5};
     // Updated by event handlers and read by the control task.
     std::atomic<float> m_latestTargetPitchOffset_deg{0.0f};
     std::atomic<float> m_latestTargetAngVel_dps{0.0f};
@@ -83,8 +88,12 @@ private:
                                               float yaw_rate_dps,
                                               float speedL_dps,
                                               float speedR_dps,
+                                              uint64_t commandSessionId,
+                                              uint32_t controlGeneration,
+                                              const LongitudinalOdometryResult& odometry,
                                               const ControlModeResult& modeResult) const;
     void handleTargetMovementCommand(const MOTION_TargetMovement& event);
     void handleTargetLinearVelocityCommand(const MOTION_TargetLinearVelocity& event);
     void handleControlRunModeChanged(const CONTROL_RunModeChanged& event);
+    void handleEncoderConfigUpdate(const CONFIG_EncoderConfigUpdate& event);
 };

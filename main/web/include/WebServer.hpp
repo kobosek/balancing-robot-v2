@@ -64,6 +64,7 @@ private:
     static esp_err_t data_get_handler(httpd_req_t* req);
     static esp_err_t get_config_handler(httpd_req_t* req);
     static esp_err_t set_config_handler(httpd_req_t* req);
+    static esp_err_t config_operation_handler(httpd_req_t* req);
     static esp_err_t command_handler(httpd_req_t* req);
     static esp_err_t get_state_handler(httpd_req_t* req);
     static esp_err_t get_ota_status_handler(httpd_req_t* req);

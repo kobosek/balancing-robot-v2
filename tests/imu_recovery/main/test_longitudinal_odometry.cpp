@@ -65,11 +65,53 @@ TEST_CASE("odometry consumes each sequence once and rejects time regressions", "
     const auto duplicate = odometry.update(makeFrame(2, 1005000, 200, -200), 1005000);
     TEST_ASSERT_EQUAL(LongitudinalOdometryUpdateStatus::DUPLICATE, duplicate.status);
     TEST_ASSERT_FLOAT_WITHIN(0.000001, accepted.positionM, duplicate.positionM);
+    TEST_ASSERT_EQUAL_UINT64(accepted.sequence, duplicate.sequence);
+    TEST_ASSERT_EQUAL_INT64(accepted.sampleTimestampUs, duplicate.sampleTimestampUs);
+    TEST_ASSERT_EQUAL_UINT64(2, duplicate.observedSequence);
+    TEST_ASSERT_EQUAL_INT64(1005000, duplicate.observedSampleTimestampUs);
+
+    // The same sequence may be observed again, but the cached sample must not
+    // be reused after its real timestamp has expired.  A later read of that
+    // exact frame can still be reused while it is fresh; the stale diagnostic
+    // result must not poison the cached accepted sample.
+    const auto staleDuplicate = odometry.update(
+        makeFrame(2, 1005000, 10, -10), 1025001);
+    TEST_ASSERT_EQUAL(LongitudinalOdometryUpdateStatus::DUPLICATE,
+                      staleDuplicate.status);
+    TEST_ASSERT_FALSE(staleDuplicate.odometryValid);
+    TEST_ASSERT_FALSE(staleDuplicate.positionValid);
+    TEST_ASSERT_FLOAT_WITHIN(0.000001, accepted.positionM,
+                             staleDuplicate.positionM);
+    const auto freshDuplicate = odometry.update(
+        makeFrame(2, 1005000, 10, -10), 1006000);
+    TEST_ASSERT_EQUAL(LongitudinalOdometryUpdateStatus::DUPLICATE,
+                      freshDuplicate.status);
+    TEST_ASSERT_TRUE(freshDuplicate.odometryValid);
+    TEST_ASSERT_TRUE(freshDuplicate.positionValid);
 
     const auto oldSequence = odometry.update(makeFrame(1, 1006000, 300, -300), 1006000);
     TEST_ASSERT_EQUAL(LongitudinalOdometryUpdateStatus::OUT_OF_ORDER, oldSequence.status);
+    TEST_ASSERT_EQUAL_UINT64(accepted.sequence, oldSequence.sequence);
+    TEST_ASSERT_EQUAL_INT64(accepted.sampleTimestampUs, oldSequence.sampleTimestampUs);
+    TEST_ASSERT_EQUAL_UINT64(1, oldSequence.observedSequence);
+    TEST_ASSERT_FALSE(oldSequence.positionValid);
+    TEST_ASSERT_FALSE(oldSequence.velocityValid);
+    TEST_ASSERT_TRUE(oldSequence.generation > accepted.generation);
     const auto oldTimestamp = odometry.update(makeFrame(3, 1004000, 300, -300), 1006000);
     TEST_ASSERT_EQUAL(LongitudinalOdometryUpdateStatus::OUT_OF_ORDER, oldTimestamp.status);
+    TEST_ASSERT_EQUAL_UINT64(accepted.sequence, oldTimestamp.sequence);
+    TEST_ASSERT_EQUAL_INT64(accepted.sampleTimestampUs, oldTimestamp.sampleTimestampUs);
+    TEST_ASSERT_EQUAL_UINT64(3, oldTimestamp.observedSequence);
+
+    // A later monotonic frame must establish a fresh local count base after
+    // the ordering fault; it must not turn the delayed count into a distance
+    // jump from the pre-fault history.
+    const auto recaptured = odometry.update(
+        makeFrame(4, 1007000, 400, -400), 1007000);
+    TEST_ASSERT_EQUAL(LongitudinalOdometryUpdateStatus::ACCEPTED,
+                      recaptured.status);
+    TEST_ASSERT_TRUE(recaptured.positionValid);
+    TEST_ASSERT_FLOAT_WITHIN(0.000001, 0.0, recaptured.positionM);
 }
 
 TEST_CASE("odometry rejects stale or skewed samples without moving the position", "[odometry][timing]") {
@@ -91,6 +133,32 @@ TEST_CASE("odometry rejects stale or skewed samples without moving the position"
     TEST_ASSERT_EQUAL(LongitudinalOdometryUpdateStatus::INVALID_FRAME, stale.status);
     TEST_ASSERT_FALSE(stale.sampleTimingValid);
     TEST_ASSERT_FLOAT_WITHIN(0.000001, before.positionM, stale.positionM);
+    TEST_ASSERT_TRUE(stale.generation > before.generation);
+    TEST_ASSERT_EQUAL_UINT64(before.sequence, stale.sequence);
+    TEST_ASSERT_EQUAL_INT64(before.sampleTimestampUs, stale.sampleTimestampUs);
+    TEST_ASSERT_EQUAL_UINT64(3, stale.observedSequence);
+
+    const auto recaptured = odometry.update(makeFrame(4, 1009000, 200, -200), 1009000);
+    TEST_ASSERT_EQUAL(LongitudinalOdometryUpdateStatus::ACCEPTED, recaptured.status);
+    TEST_ASSERT_TRUE(recaptured.positionValid);
+    TEST_ASSERT_FLOAT_WITHIN(0.000001, 0.0, recaptured.positionM);
+}
+
+TEST_CASE("odometry timestamp regression breaks continuity before the next valid frame", "[odometry][ordering][continuity]") {
+    LongitudinalOdometry odometry(testConfig());
+    const auto first = odometry.update(makeFrame(1, 1000000, 100, -100), 1000000);
+    const auto regressed = odometry.update(makeFrame(2, 999000, 120, -120), 1000000);
+
+    TEST_ASSERT_EQUAL(LongitudinalOdometryUpdateStatus::OUT_OF_ORDER, regressed.status);
+    TEST_ASSERT_FALSE(regressed.positionValid);
+    TEST_ASSERT_TRUE(regressed.generation > first.generation);
+    TEST_ASSERT_EQUAL_UINT64(first.sequence, regressed.sequence);
+    TEST_ASSERT_EQUAL_UINT64(2, regressed.observedSequence);
+
+    const auto next = odometry.update(makeFrame(3, 1005000, 130, -130), 1005000);
+    TEST_ASSERT_EQUAL(LongitudinalOdometryUpdateStatus::ACCEPTED, next.status);
+    TEST_ASSERT_TRUE(next.positionValid);
+    TEST_ASSERT_FLOAT_WITHIN(0.000001, 0.0, next.positionM);
 }
 
 TEST_CASE("continuity epoch invalidates the old base and recaptures without a position jump", "[odometry][continuity]") {
@@ -104,6 +172,13 @@ TEST_CASE("continuity epoch invalidates the old base and recaptures without a po
     TEST_ASSERT_FALSE(lost.continuityValid);
     TEST_ASSERT_TRUE(lost.generation > initialGeneration);
     TEST_ASSERT_FLOAT_WITHIN(0.000001, first.positionM, lost.positionM);
+    TEST_ASSERT_EQUAL_UINT64(first.sequence, lost.sequence);
+    TEST_ASSERT_EQUAL_INT64(first.sampleTimestampUs, lost.sampleTimestampUs);
+    TEST_ASSERT_EQUAL_UINT32(first.leftContinuityEpoch,
+                             lost.leftContinuityEpoch);
+    TEST_ASSERT_EQUAL_UINT32(first.rightContinuityEpoch,
+                             lost.rightContinuityEpoch);
+    TEST_ASSERT_EQUAL_UINT64(2, lost.odometrySequence);
 
     const auto recaptured = odometry.update(makeFrame(3, 1010000, 130, -130, 2, 1), 1010000);
     TEST_ASSERT_TRUE(recaptured.positionValid);

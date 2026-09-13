@@ -120,6 +120,8 @@ void CommandProcessor::applyConfig(const ControlConfig& controlConf, const Syste
             m_target_pitch_offset_deg = 0.0f;
             m_target_angular_velocity_dps = 0.0f;
             m_input_timed_out = true;
+            m_last_source_sequence = 0;
+            m_source_sequence_arm_id = 0;
         }
         restart_timer = m_timeout_timer && esp_timer_is_active(m_timeout_timer);
     }
@@ -150,6 +152,18 @@ void CommandProcessor::applyConfig(const ControlConfig& controlConf, const Syste
 
 // Handle config update event
 void CommandProcessor::handleConfigUpdate(const CONFIG_FullConfigUpdate& event) {
+    {
+        std::lock_guard<std::mutex> lock(m_target_mutex);
+        if (m_has_config_revision &&
+            event.configData.config_revision < m_config_revision) {
+            ESP_LOGW(TAG, "Ignoring stale command configuration revision %lu (current %lu)",
+                     static_cast<unsigned long>(event.configData.config_revision),
+                     static_cast<unsigned long>(m_config_revision));
+            return;
+        }
+        m_config_revision = event.configData.config_revision;
+        m_has_config_revision = true;
+    }
     // Process the full config update
     ESP_LOGI(TAG, "Processing config update.");
     
@@ -159,21 +173,44 @@ void CommandProcessor::handleConfigUpdate(const CONFIG_FullConfigUpdate& event) 
 
 void CommandProcessor::handleInputModeChange(const COMMAND_InputModeChanged& event) {
     bool was_accepting_input = false;
+    uint64_t previous_arm_id = 0;
     const bool accepting_input = event.acceptingInput;
+    uint64_t linear_sequence = 0;
+    int64_t linear_timestamp_us = 0;
     {
         std::lock_guard<std::mutex> lock(m_target_mutex);
+        if (event.armId < m_input_arm_id) {
+            ESP_LOGW(TAG, "Ignoring stale command-input session arm=%llu current=%llu",
+                     static_cast<unsigned long long>(event.armId),
+                     static_cast<unsigned long long>(m_input_arm_id));
+            return;
+        }
         was_accepting_input = m_accepting_input;
+        previous_arm_id = m_input_arm_id;
         m_accepting_input = accepting_input;
+        m_input_arm_id = event.armId;
+        if (previous_arm_id != event.armId || !accepting_input) {
+            m_last_source_sequence = 0;
+            m_source_sequence_arm_id = event.armId;
+        }
+        if (accepting_input &&
+            (!was_accepting_input || previous_arm_id != event.armId) &&
+            m_active_strategy == BalanceStrategyId::LONGITUDINAL_CASCADE) {
+            linear_sequence = reserveLinearCommandLocked();
+            linear_timestamp_us = esp_timer_get_time();
+        }
     }
+    const bool session_changed = previous_arm_id != event.armId;
 
     // --- Stop/Start Timer based on Balancing State ---
-    if (accepting_input && !was_accepting_input) {
+    if (accepting_input && (!was_accepting_input || session_changed)) {
         ESP_LOGD(TAG, "CP: Enabling command input, resetting targets, starting timeout timer.");
         {
             std::lock_guard<std::mutex> lock(m_target_mutex);
             m_target_pitch_offset_deg = 0.0f;
             m_target_angular_velocity_dps = 0.0f;
-            m_last_input_time_us = esp_timer_get_time();
+            m_last_input_time_us = linear_timestamp_us > 0
+                ? linear_timestamp_us : esp_timer_get_time();
             m_input_timed_out = true;
         }
         BalanceStrategyId active_strategy;
@@ -182,17 +219,20 @@ void CommandProcessor::handleInputModeChange(const COMMAND_InputModeChanged& eve
             active_strategy = m_active_strategy;
         }
         if (active_strategy == BalanceStrategyId::LONGITUDINAL_CASCADE) {
-            publishLinearVelocityCommand(0.0f, true);
+            publishLinearVelocityCommand(0.0f, true, event.armId,
+                                         linear_sequence, linear_timestamp_us);
         } else {
             publishTargetCommand(0.0f, 0.0f);
         }
         startTimeoutTimer();
 
-    } else if (!accepting_input && was_accepting_input) {
+    } else if (!accepting_input && (was_accepting_input || session_changed)) {
         ESP_LOGD(TAG, "CP: Disabling command input, stopping timeout timer, resetting targets.");
         stopTimeoutTimer();
         bool had_velocity = false;
         BalanceStrategyId active_strategy;
+        uint64_t stop_sequence = 0;
+        int64_t stop_timestamp_us = 0;
         {
             std::lock_guard<std::mutex> lock(m_target_mutex);
             active_strategy = m_active_strategy;
@@ -202,11 +242,16 @@ void CommandProcessor::handleInputModeChange(const COMMAND_InputModeChanged& eve
                  had_velocity = true;
             }
             m_input_timed_out = true;
+            if (active_strategy == BalanceStrategyId::LONGITUDINAL_CASCADE) {
+                stop_sequence = reserveLinearCommandLocked();
+                stop_timestamp_us = esp_timer_get_time();
+            }
         }
         if (active_strategy == BalanceStrategyId::LONGITUDINAL_CASCADE) {
             // Publish even when the numeric target is already zero: this is a
             // validity transition and must invalidate an old drive command.
-            publishLinearVelocityCommand(0.0f, true);
+            publishLinearVelocityCommand(0.0f, true, event.armId,
+                                         stop_sequence, stop_timestamp_us);
         } else if (had_velocity) {
             publishTargetCommand(0.0f, 0.0f);
         }
@@ -223,9 +268,23 @@ void CommandProcessor::handleJoystickInput(const UI_JoystickInput& event) {
     float max_angular_velocity_dps = 0.0f;
     BalanceStrategyId active_strategy = BalanceStrategyId::NESTED_PID;
     float max_linear_velocity_mps = 0.0f;
+    uint64_t input_arm_id = 0;
+    uint64_t linear_sequence = 0;
 
     { // Lock scope for updating timestamp, timeout flag, and copying config
         std::lock_guard<std::mutex> lock(m_target_mutex);
+        if (m_accepting_input &&
+            m_active_strategy == BalanceStrategyId::LONGITUDINAL_CASCADE &&
+            (event.sessionId != m_input_arm_id || event.sourceSequence == 0 ||
+             (m_source_sequence_arm_id == m_input_arm_id &&
+              event.sourceSequence <= m_last_source_sequence))) {
+            ESP_LOGW(TAG, "Ignoring longitudinal joystick packet session=%llu current=%llu sourceSeq=%llu lastSourceSeq=%llu",
+                     static_cast<unsigned long long>(event.sessionId),
+                     static_cast<unsigned long long>(m_input_arm_id),
+                     static_cast<unsigned long long>(event.sourceSequence),
+                     static_cast<unsigned long long>(m_last_source_sequence));
+            return;
+        }
         m_last_input_time_us = current_time;
         was_timed_out = m_input_timed_out;
         m_input_timed_out = false;
@@ -236,6 +295,16 @@ void CommandProcessor::handleJoystickInput(const UI_JoystickInput& event) {
         max_angular_velocity_dps = m_max_angular_velocity_dps;
         active_strategy = m_active_strategy;
         max_linear_velocity_mps = m_max_linear_velocity_mps;
+        input_arm_id = m_input_arm_id;
+        if (m_accepting_input &&
+            m_active_strategy == BalanceStrategyId::LONGITUDINAL_CASCADE) {
+            m_source_sequence_arm_id = m_input_arm_id;
+            m_last_source_sequence = event.sourceSequence;
+            // Allocate the sequence at the acceptance boundary. A timeout
+            // callback that publishes later then carries an older sequence
+            // and cannot override this packet in RobotController.
+            linear_sequence = reserveLinearCommandLocked();
+        }
     }
 
     if (!accepting_input) {
@@ -254,12 +323,18 @@ void CommandProcessor::handleJoystickInput(const UI_JoystickInput& event) {
     float desiredAngVelDps = max_angular_velocity_dps * (-mapped_x);
 
     if (active_strategy == BalanceStrategyId::LONGITUDINAL_CASCADE) {
+        if (std::fabs(mapped_x) > 1e-4f) {
+            ESP_LOGW(TAG, "Ignoring joystick turn axis for longitudinal strategy; use NestedPid for yaw control");
+        }
         const float desiredVelocityMps = max_linear_velocity_mps * (-mapped_y);
         // Unlike the legacy pitch/yaw command, every packet is published so
         // an unchanged joystick position refreshes command freshness.
         publishLinearVelocityCommand(
             desiredVelocityMps,
-            std::fabs(desiredVelocityMps) <= 1e-5f);
+            std::fabs(desiredVelocityMps) <= 1e-5f,
+            input_arm_id,
+            linear_sequence,
+            current_time);
         return;
     }
 
@@ -285,29 +360,46 @@ void CommandProcessor::handleJoystickInput(const UI_JoystickInput& event) {
 void CommandProcessor::periodicTimeoutCheck() {
     bool publish_zero = false;
     bool publish_linear_stop = false;
+    bool timeout_detected = false;
     BalanceStrategyId active_strategy = BalanceStrategyId::NESTED_PID;
+    uint64_t input_arm_id = 0;
+    uint64_t linear_sequence = 0;
+    int64_t timeout_timestamp_us = 0;
     {
         std::lock_guard<std::mutex> lock(m_target_mutex);
         if (!m_accepting_input) {
             return;
         }
-        // Use member variable for timeout
-        if (!m_input_timed_out && (esp_timer_get_time() - m_last_input_time_us) > m_input_timeout_us) {
-            ESP_LOGW(TAG, "CP: Joystick input timeout detected by periodic check! Setting targets to zero.");
+        // Capture the timeout decision and its sequence under the same lock
+        // used by joystick acceptance. This prevents a late timeout callback
+        // from publishing a newer sequence than a packet accepted after it.
+        timeout_timestamp_us = esp_timer_get_time();
+        if (!m_input_timed_out &&
+            (timeout_timestamp_us - m_last_input_time_us) > m_input_timeout_us) {
+            timeout_detected = true;
             if (std::fabs(m_target_pitch_offset_deg) > 1e-4f || std::fabs(m_target_angular_velocity_dps) > 1e-4f) {
                 m_target_pitch_offset_deg = 0.0f;
                 m_target_angular_velocity_dps = 0.0f;
                 publish_zero = true;
             }
             active_strategy = m_active_strategy;
+            input_arm_id = m_input_arm_id;
             publish_linear_stop = active_strategy == BalanceStrategyId::LONGITUDINAL_CASCADE;
+            if (publish_linear_stop) {
+                linear_sequence = reserveLinearCommandLocked();
+            }
             m_input_timed_out = true;
         }
     } // Mutex released
 
+    if (timeout_detected) {
+        ESP_LOGW(TAG, "CP: Joystick input timeout detected by periodic check! Setting targets to zero.");
+    }
+
     if (publish_linear_stop) {
         // The stop event is required even if the last numeric target was zero.
-        publishLinearVelocityCommand(0.0f, true);
+        publishLinearVelocityCommand(0.0f, true, input_arm_id,
+                                     linear_sequence, timeout_timestamp_us);
     } else if (publish_zero) {
         publishTargetCommand(0.0f, 0.0f);
     }
@@ -365,19 +457,36 @@ void CommandProcessor::publishTargetCommand(float pitchOffsetDeg, float angVelDp
     ESP_LOGD(TAG, "CP: Published Target CMD: PitchOffset=%.2f deg, AngVel=%.2f dps", pitchOffsetDeg, angVelDps);
 }
 
-void CommandProcessor::publishLinearVelocityCommand(float velocityMps, bool stop) {
-    uint64_t sequence = 0;
-    {
+void CommandProcessor::publishLinearVelocityCommand(float velocityMps, bool stop,
+                                                     uint64_t armId,
+                                                     uint64_t sequence,
+                                                     int64_t receivedTimestampUs) {
+    if (sequence == 0) {
         std::lock_guard<std::mutex> lock(m_target_mutex);
-        sequence = ++m_linear_command_sequence;
+        sequence = reserveLinearCommandLocked();
+    }
+    if (receivedTimestampUs <= 0) {
+        receivedTimestampUs = esp_timer_get_time();
     }
     MOTION_TargetLinearVelocity cmd(
         velocityMps,
         stop,
         sequence,
-        esp_timer_get_time());
+        receivedTimestampUs,
+        armId);
     m_eventBus.publish(cmd);
     ESP_LOGD(TAG, "CP: Published linear command: velocity=%.3f m/s stop=%d seq=%llu",
              velocityMps, stop ? 1 : 0,
              static_cast<unsigned long long>(sequence));
+}
+
+uint64_t CommandProcessor::reserveLinearCommandLocked()
+{
+    // Caller owns m_target_mutex. Assigning this at acceptance time gives
+    // RobotController an ordering independent of EventBus callback latency.
+    ++m_linear_command_sequence;
+    if (m_linear_command_sequence == 0) {
+        ++m_linear_command_sequence;
+    }
+    return m_linear_command_sequence;
 }

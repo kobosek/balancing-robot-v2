@@ -30,6 +30,17 @@ public:
                                                            float currentValue,
                                                            float currentRate,
                                                            float dt) const;
+    // Side-effect-free previews using a zeroed derivative/integral history.
+    // NestedPid uses these when it captures a new yaw heading so the capture
+    // reset is committed only after every controller in the step is valid.
+    control_math::PidStepResult previewAfterReset(float setpoint,
+                                                  float currentValue,
+                                                  float dt) const;
+    control_math::PidStepResult previewWithMeasurementRateAfterReset(
+        float setpoint,
+        float currentValue,
+        float currentRate,
+        float dt) const;
     void reset();
 
 private:

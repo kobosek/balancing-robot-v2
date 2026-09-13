@@ -74,6 +74,8 @@ private:
     MotorConfig m_motorConfig;
     bool m_startRequested = false;
     bool m_cancelRequested = false;
+    uint32_t m_configRevision = 0;
+    bool m_hasConfigRevision = false;
     float m_phaseElapsed_s = 0.0f;
     float m_phaseMaxAbsSpeed_dps = 0.0f;
     float m_phaseMaxSignedSpeed_dps = 0.0f;

@@ -7,6 +7,7 @@
 #include <memory>
 #include <new>
 #include <string>
+#include <cstdio>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -23,12 +24,43 @@ namespace {
 OTAApiHandler::OTAApiHandler(OTAService& otaService)
     : m_otaService(otaService) {}
 
+namespace {
+const char* operationPhaseToString(ControlOperationPhase phase)
+{
+    switch (phase) {
+        case ControlOperationPhase::RESERVED:  return "reserved";
+        case ControlOperationPhase::PREPARING: return "preparing";
+        case ControlOperationPhase::RUNNING:   return "running";
+        case ControlOperationPhase::WRITING:   return "writing";
+        case ControlOperationPhase::APPLYING:  return "applying";
+        case ControlOperationPhase::SUCCEEDED: return "succeeded";
+        case ControlOperationPhase::FAILED:    return "failed";
+        case ControlOperationPhase::ABORTED:   return "aborted";
+        case ControlOperationPhase::IDLE:
+        default:                                return "idle";
+    }
+}
+
+const char* operationKindToString(ControlOperationKind kind)
+{
+    switch (kind) {
+        case ControlOperationKind::MOTION:        return "motion";
+        case ControlOperationKind::CONFIGURATION: return "configuration";
+        case ControlOperationKind::OTA:           return "ota";
+        case ControlOperationKind::CALIBRATION:   return "calibration";
+        case ControlOperationKind::NONE:
+        default:                                  return "none";
+    }
+}
+}
+
 esp_err_t OTAApiHandler::handleStatusRequest(httpd_req_t* req) {
     return sendStatusJson(req);
 }
 
 esp_err_t OTAApiHandler::sendStatusJson(httpd_req_t* req) {
     const OTAStatus status = m_otaService.getStatus();
+    const ControlOperationStatus operation = m_otaService.getOperationStatus();
 
     auto cjson_deleter = [](cJSON* ptr){ if (ptr) cJSON_Delete(ptr); };
     auto char_deleter = [](char* ptr){ if (ptr) free(ptr); };
@@ -51,6 +83,25 @@ esp_err_t OTAApiHandler::sendStatusJson(httpd_req_t* req) {
     cJSON_AddStringToObject(root.get(), "app_version", status.appVersion.c_str());
     cJSON_AddStringToObject(root.get(), "active_target", status.activeTarget.c_str());
     cJSON_AddStringToObject(root.get(), "message", status.message.c_str());
+    char bundleId[24] = {};
+    std::snprintf(bundleId, sizeof(bundleId), "%llu",
+                  static_cast<unsigned long long>(status.bundleId));
+    cJSON_AddStringToObject(root.get(), "bundle_id", bundleId);
+    cJSON_AddStringToObject(root.get(), "bundle_stage", status.bundleStage.c_str());
+    cJSON_AddBoolToObject(root.get(), "bundle_recovery_pending",
+                          status.bundleRecoveryPending);
+    cJSON_AddBoolToObject(root.get(), "operation_known", operation.known);
+    cJSON_AddBoolToObject(root.get(), "operation_active", operation.active);
+    cJSON_AddStringToObject(root.get(), "operation_kind",
+                            operationKindToString(operation.kind));
+    char operationId[24] = {};
+    std::snprintf(operationId, sizeof(operationId), "%llu",
+                  static_cast<unsigned long long>(operation.operationId));
+    cJSON_AddStringToObject(root.get(), "operation_id", operationId);
+    cJSON_AddStringToObject(root.get(), "operation_phase",
+                            operationPhaseToString(operation.phase));
+    cJSON_AddNumberToObject(root.get(), "operation_result_code",
+                            operation.resultCode);
 
     std::unique_ptr<char, decltype(char_deleter)> json(cJSON_PrintUnformatted(root.get()), char_deleter);
     if (!json) {

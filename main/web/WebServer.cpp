@@ -24,6 +24,9 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <cerrno>
+#include <cmath>
+#include <limits>
 
 namespace {
 const char* findJsonFieldValue(const char* payload, const char* fieldName) {
@@ -69,6 +72,80 @@ bool parseJsonNumberField(const char* payload, const char* fieldName, float& out
 
     outValue = parsed;
     return true;
+}
+
+bool parseJsonUint64Item(const cJSON* item, uint64_t& outValue)
+{
+    if (!item) {
+        return false;
+    }
+    if (cJSON_IsString(item) && item->valuestring) {
+        const char* text = item->valuestring;
+        if (*text == '\0' || *text == '-') {
+            return false;
+        }
+        for (const char* cursor = text; *cursor != '\0'; ++cursor) {
+            if (*cursor < '0' || *cursor > '9') {
+                return false;
+            }
+        }
+        errno = 0;
+        char* end = nullptr;
+        const unsigned long long parsed = std::strtoull(text, &end, 10);
+        if (errno != 0 || end == text || *end != '\0' || parsed == 0) {
+            return false;
+        }
+        outValue = static_cast<uint64_t>(parsed);
+        return outValue != 0;
+    }
+    if (cJSON_IsNumber(item) && std::isfinite(item->valuedouble) &&
+        item->valuedouble >= 1.0 &&
+        item->valuedouble <= 9007199254740991.0 &&
+        std::floor(item->valuedouble) == item->valuedouble) {
+        outValue = static_cast<uint64_t>(item->valuedouble);
+        return outValue != 0;
+    }
+    return false;
+}
+
+bool parseOptionalJsonSessionId(const char* payload,
+                                uint64_t& sessionId)
+{
+    sessionId = 0;
+    cJSON* root = cJSON_Parse(payload);
+    if (!root) {
+        return false;
+    }
+    cJSON* item = cJSON_GetObjectItemCaseSensitive(root, "session_id");
+    if (!item) {
+        item = cJSON_GetObjectItemCaseSensitive(root, "sessionId");
+    }
+    const bool valid = !item || parseJsonUint64Item(item, sessionId);
+    cJSON_Delete(root);
+    if (!item) {
+        return true;
+    }
+    return valid;
+}
+
+bool parseOptionalJsonSourceSequence(const char* payload,
+                                     uint64_t& sourceSequence)
+{
+    sourceSequence = 0;
+    cJSON* root = cJSON_Parse(payload);
+    if (!root) {
+        return false;
+    }
+    cJSON* item = cJSON_GetObjectItemCaseSensitive(root, "source_sequence");
+    if (!item) {
+        item = cJSON_GetObjectItemCaseSensitive(root, "sourceSequence");
+    }
+    const bool valid = !item || parseJsonUint64Item(item, sourceSequence);
+    cJSON_Delete(root);
+    if (!item) {
+        return true;
+    }
+    return valid;
 }
 } // namespace
 
@@ -164,6 +241,10 @@ esp_err_t WebServer::init() {
         makeRoute("/data", HTTP_GET, data_get_handler, "data URI"),
         makeRoute("/api/config", HTTP_GET, get_config_handler, "get_config URI"),
         makeRoute("/api/config", HTTP_POST, set_config_handler, "set_config URI"),
+        makeRoute("/api/config/operation", HTTP_GET, config_operation_handler,
+                  "config_operation_get URI"),
+        makeRoute("/api/config/operation", HTTP_POST, config_operation_handler,
+                  "config_operation_post URI"),
         makeRoute("/api/command", HTTP_POST, command_handler, "command URI"),
         makeRoute("/api/state", HTTP_GET, get_state_handler, "get_state URI"),
         makeRoute("/api/ota", HTTP_GET, get_ota_status_handler, "get_ota_status URI"),
@@ -205,6 +286,11 @@ esp_err_t WebServer::set_config_handler(httpd_req_t *req) {
      httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
      if (!instance || !instance->m_configApiHandler) { ESP_LOGE(TAG, "Config API handler ctx invalid!"); return sendHttpError(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); }
     return instance->m_configApiHandler->handlePostRequest(req);
+}
+esp_err_t WebServer::config_operation_handler(httpd_req_t *req) {
+     httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
+     if (!instance || !instance->m_configApiHandler) { ESP_LOGE(TAG, "Config operation handler ctx invalid!"); return sendHttpError(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Ctx error"); }
+    return instance->m_configApiHandler->handleOperationRequest(req);
 }
 esp_err_t WebServer::command_handler(httpd_req_t *req) {
      httpd_handle_t server_handle = req->handle; WebServer* instance = static_cast<WebServer*>(httpd_get_global_user_ctx(server_handle));
@@ -307,9 +393,23 @@ esp_err_t WebServer::handleWebSocketFrame(httpd_req_t *req, httpd_ws_frame_t *ws
 
         joystick_x = std::max(-1.0f, std::min(1.0f, joystick_x));
         joystick_y = std::max(-1.0f, std::min(1.0f, joystick_y));
+        uint64_t sessionId = 0;
+        if (!parseOptionalJsonSessionId(payload, sessionId)) {
+            ESP_LOGE(TAG, "WS: Invalid joystick session_id");
+            return ESP_FAIL;
+        }
+        uint64_t sourceSequence = 0;
+        if (!parseOptionalJsonSourceSequence(payload, sourceSequence)) {
+            ESP_LOGE(TAG, "WS: Invalid joystick source_sequence");
+            return ESP_FAIL;
+        }
 
-        ESP_LOGV(TAG, "WS: Publishing JOYSTICK_INPUT_RECEIVED: X=%.3f, Y=%.3f", joystick_x, joystick_y);
-        UI_JoystickInput js_event(joystick_x, joystick_y);
+        ESP_LOGV(TAG, "WS: Publishing JOYSTICK_INPUT_RECEIVED: X=%.3f, Y=%.3f session=%llu sourceSeq=%llu",
+                 joystick_x, joystick_y,
+                 static_cast<unsigned long long>(sessionId),
+                 static_cast<unsigned long long>(sourceSequence));
+        UI_JoystickInput js_event(joystick_x, joystick_y, sessionId,
+                                  sourceSequence);
         m_eventBus.publish(js_event);
         return ESP_OK;
     }
@@ -355,9 +455,34 @@ esp_err_t WebServer::handleWebSocketFrame(httpd_req_t *req, httpd_ws_frame_t *ws
 
         joystick_x = std::max(-1.0f, std::min(1.0f, joystick_x));
         joystick_y = std::max(-1.0f, std::min(1.0f, joystick_y));
+        uint64_t sessionId = 0;
+        cJSON* sessionItem = cJSON_GetObjectItemCaseSensitive(root, "session_id");
+        if (!sessionItem) {
+            sessionItem = cJSON_GetObjectItemCaseSensitive(root, "sessionId");
+        }
+        if (sessionItem && !parseJsonUint64Item(sessionItem, sessionId)) {
+            ESP_LOGE(TAG, "WS: Invalid joystick session_id");
+            return ESP_FAIL;
+        }
+        cJSON* sourceSequenceItem = cJSON_GetObjectItemCaseSensitive(
+            root, "source_sequence");
+        if (!sourceSequenceItem) {
+            sourceSequenceItem = cJSON_GetObjectItemCaseSensitive(
+                root, "sourceSequence");
+        }
+        uint64_t sourceSequence = 0;
+        if (sourceSequenceItem &&
+            !parseJsonUint64Item(sourceSequenceItem, sourceSequence)) {
+            ESP_LOGE(TAG, "WS: Invalid joystick source_sequence");
+            return ESP_FAIL;
+        }
 
-        ESP_LOGV(TAG, "WS: Publishing JOYSTICK_INPUT_RECEIVED: X=%.3f, Y=%.3f", joystick_x, joystick_y);
-        UI_JoystickInput js_event(joystick_x, joystick_y);
+        ESP_LOGV(TAG, "WS: Publishing JOYSTICK_INPUT_RECEIVED: X=%.3f, Y=%.3f session=%llu sourceSeq=%llu",
+                 joystick_x, joystick_y,
+                 static_cast<unsigned long long>(sessionId),
+                 static_cast<unsigned long long>(sourceSequence));
+        UI_JoystickInput js_event(joystick_x, joystick_y, sessionId,
+                                  sourceSequence);
         m_eventBus.publish(js_event);
         ret = ESP_OK;
 

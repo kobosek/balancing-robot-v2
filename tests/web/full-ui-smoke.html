@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Full webUI smoke test</title>
+<body>
+<h1>Full webUI smoke test</h1>
+<pre id="smokeResults">Loading production page…</pre>
+<script type="module">
+let result = document.querySelector('#smokeResults');
+const lines = [];
+const record = (label, value = 'ok') => lines.push(`${label}: ${value}`);
+const originalError = console.error;
+const originalWarn = console.warn;
+const originalAlert = globalThis.alert;
+let failure = null;
+console.error = (...args) => { lines.push(`console.error: ${args.map(String).join(' ')}`); };
+console.warn = (...args) => { lines.push(`console.warn: ${args.map(String).join(' ')}`); };
+globalThis.alert = message => { lines.push(`alert: ${String(message)}`); };
+
+try {
+    const source = await fetch('/spiffs/index.html', { cache: 'no-cache' }).then(response => response.text());
+    const parsed = new DOMParser().parseFromString(source, 'text/html');
+    const resources = [...parsed.querySelectorAll('link[href], script[src]')]
+        .map(element => element.getAttribute('href') || element.getAttribute('src'))
+        .filter(Boolean);
+    const localResources = resources.filter(resource => !/^https?:\/\//i.test(resource));
+    const resourceResults = await Promise.all(localResources.map(async resource => {
+        const response = await fetch(new URL(resource, new URL('/spiffs/index.html', location.href)), { cache: 'no-cache' });
+        return { resource, ok: response.ok };
+    }));
+    const missingResources = resourceResults.filter(item => !item.ok).map(item => item.resource);
+    if (missingResources.length) throw new Error(`Missing production resources: ${missingResources.join(', ')}`);
+    record('production resources fetched', `${localResources.length}/${resources.length} local assets`);
+    document.body.innerHTML = parsed.body.innerHTML;
+    result = document.createElement('pre');
+    result.id = 'smokeResults';
+    document.body.appendChild(result);
+    record('production index fetched');
+
+    // The production page normally obtains NippleJS from its CDN.  The
+    // smoke server is deliberately offline; provide the smallest compatible
+    // adapter so the local application module graph can still boot fully.
+    globalThis.nipplejs = { create: () => ({ on: () => {}, destroy: () => {} }) };
+
+    const main = await import(`/spiffs/js/main.js?smoke=${Date.now()}`);
+    record('main module imported');
+    document.dispatchEvent(new Event('DOMContentLoaded'));
+    await new Promise(resolve => setTimeout(resolve, 700));
+    record('DOMContentLoaded initialization dispatched');
+
+    for (const id of ['balanceStrategySelect', 'applyBalanceStrategyBtn',
+        'longitudinalTelemetryStatus', 'telemetryGraph1', 'telemetryGraph2',
+        'telemetryGraph3', 'telemetryGraph4', 'telemetryGraph5']) {
+        if (!document.getElementById(id)) throw new Error(`Production element missing: ${id}`);
+    }
+
+    const state = await import('/spiffs/js/state.js');
+    for (const timer of Object.values(state.appState.timers)) {
+        if (timer !== null && typeof timer === 'number') clearInterval(timer);
+    }
+    // The static page intentionally has no live firmware endpoints, so fetch/
+    // WebSocket diagnostics are expected here. Only initialization failures
+    // indicate that the production module graph did not boot.
+    const initializationErrors = lines.filter(line =>
+        line.includes('Initialization failed') || line.includes('Application failed to initialize') ||
+        line.includes('UI Init Error') || line.includes('CRITICAL:'));
+    record('production initialization', initializationErrors.length === 0 ? 'ok' : initializationErrors.join(' | '));
+    result.textContent = lines.join('\n');
+    if (initializationErrors.length > 0) throw new Error(initializationErrors.join('\n'));
+    void main;
+} catch (error) {
+    failure = error;
+    record('FAIL', error.stack || error);
+    result.textContent = lines.join('\n');
+} finally {
+    console.error = originalError;
+    console.warn = originalWarn;
+    globalThis.alert = originalAlert;
+}
+if (failure) throw failure;
+</script>
+</body>
+</html>

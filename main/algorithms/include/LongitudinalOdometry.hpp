@@ -43,12 +43,29 @@ struct LongitudinalOdometryResult {
     bool positionValid = false;
     bool odometryValid = false;
 
+    // Metadata for the coherent sample represented by the numeric position
+    // and velocity fields.  For a rejected frame, or an accepted frame that
+    // only records a continuity loss, these remain tied to the last usable
+    // sample, so a status change cannot make copied data look freshly
+    // measured.
     uint64_t sequence = 0;
     uint64_t odometrySequence = 0;
+    // Current continuity generation.  When a rejected frame breaks
+    // continuity this can advance while the copied numeric fields remain
+    // marked invalid and retain the previous accepted sample for diagnostics.
     uint32_t generation = 0;
     uint32_t leftContinuityEpoch = 0;
     uint32_t rightContinuityEpoch = 0;
     int64_t sampleTimestampUs = 0;
+
+    // Metadata of the frame that produced `status`.  For ACCEPTED this is
+    // identical to the accepted-sample metadata above.  For DUPLICATE,
+    // OUT_OF_ORDER and INVALID_FRAME it preserves the rejected observation
+    // without changing the sample used by the numeric fields.
+    uint64_t observedSequence = 0;
+    uint32_t observedLeftContinuityEpoch = 0;
+    uint32_t observedRightContinuityEpoch = 0;
+    int64_t observedSampleTimestampUs = 0;
 
     double leftPositionM = 0.0;
     double rightPositionM = 0.0;

@@ -34,23 +34,38 @@ void ConfigChangePublisher::publishChanges(const ConfigData& oldConfig, const Co
     const auto& oldNested = oldConfig.control.strategies.nested_pid;
     const auto& newNested = newConfig.control.strategies.nested_pid;
     if (oldNested.angle != newNested.angle) {
-        CONFIG_PidConfigUpdate event("angle", newNested.angle);
+        CONFIG_PidConfigUpdate event("angle", newNested.angle,
+                                     BalanceStrategyId::NESTED_PID,
+                                     newConfig.config_revision,
+                                     newConfig.control.strategies.nested_pid.revision);
         m_eventBus.publish(event);
     }
     if (oldNested.speed_left != newNested.speed_left) {
-        CONFIG_PidConfigUpdate event("speed_left", newNested.speed_left);
+        CONFIG_PidConfigUpdate event("speed_left", newNested.speed_left,
+                                     BalanceStrategyId::NESTED_PID,
+                                     newConfig.config_revision,
+                                     newConfig.control.strategies.nested_pid.revision);
         m_eventBus.publish(event);
     }
     if (oldNested.speed_right != newNested.speed_right) {
-        CONFIG_PidConfigUpdate event("speed_right", newNested.speed_right);
+        CONFIG_PidConfigUpdate event("speed_right", newNested.speed_right,
+                                     BalanceStrategyId::NESTED_PID,
+                                     newConfig.config_revision,
+                                     newConfig.control.strategies.nested_pid.revision);
         m_eventBus.publish(event);
     }
     if (oldNested.yaw_angle != newNested.yaw_angle) {
-        CONFIG_PidConfigUpdate event("yaw_angle", newNested.yaw_angle);
+        CONFIG_PidConfigUpdate event("yaw_angle", newNested.yaw_angle,
+                                     BalanceStrategyId::NESTED_PID,
+                                     newConfig.config_revision,
+                                     newConfig.control.strategies.nested_pid.revision);
         m_eventBus.publish(event);
     }
     if (oldNested.yaw_rate != newNested.yaw_rate) {
-        CONFIG_PidConfigUpdate event("yaw_rate", newNested.yaw_rate);
+        CONFIG_PidConfigUpdate event("yaw_rate", newNested.yaw_rate,
+                                     BalanceStrategyId::NESTED_PID,
+                                     newConfig.config_revision,
+                                     newConfig.control.strategies.nested_pid.revision);
         m_eventBus.publish(event);
     }
     if (oldConfig.imu != newConfig.imu) {

@@ -1,3 +1,5 @@
+export const SUPPORTED_CONFIG_VERSION = 3;
+
 export const PID_FIELDS = [
     { label: 'Kp', suffix: 'kp', step: '0.1' },
     { label: 'Ki', suffix: 'ki', step: '0.01' },
@@ -48,9 +50,46 @@ export const GENERAL_CONFIG_FIELDS = [
     { label: 'AutoBal Hold(ms)', id: 'behavior_auto_balance_hold_duration_ms', step: '100', min: 1, max: 60000, section: 'behavior', key: 'auto_balance_hold_duration_ms' },
     { label: 'Batt Samples', id: 'behavior_battery_oversampling_count', step: '1', min: 1, max: 1024, section: 'behavior', key: 'battery_oversampling_count' },
     { label: 'Batt Int(ms)', id: 'behavior_battery_read_interval_ms', step: '100', min: 100, max: 60000, section: 'behavior', key: 'battery_read_interval_ms' },
-    { label: 'Telem Buf Size', id: 'web_telemetry_buffer_size', step: '10', min: 1, max: 10000, section: 'web', key: 'telemetry_buffer_size' },
+    { label: 'Telem Buf Size', id: 'web_telemetry_buffer_size', step: '10', min: 1, max: 500, section: 'web', key: 'telemetry_buffer_size' },
     { label: 'Max POST Size', id: 'web_max_config_post_size', step: '128', min: 512, max: 65536, section: 'web', key: 'max_config_post_size' },
     { label: 'Web Logs', id: 'web_web_logs_enabled', type: 'checkbox', section: 'web', key: 'web_logs_enabled' },
     { label: 'Log Lines', id: 'web_log_buffer_lines', step: '10', min: 1, max: 500, section: 'web', key: 'log_buffer_lines' },
     { label: 'Log Line Len', id: 'web_log_line_max_length', step: '16', min: 32, max: 512, section: 'web', key: 'log_line_max_length' }
+];
+
+export const LONGITUDINAL_CONFIG_FIELDS = [
+    { label: 'Configured', id: 'longitudinal_configured', type: 'checkbox', section: 'control', key: 'configured', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Loop mode', id: 'longitudinal_loop_mode', type: 'select', options: [
+        ['pitch_only', 'Pitch baseline only'], ['velocity', 'Velocity cascade'], ['position_hold', 'Position hold']
+    ], section: 'control', key: 'loop_mode', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Position Kp (1/s)', id: 'longitudinal_position_kp', step: '0.001', min: 0, max: 1000, section: 'control', key: 'position_kp', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Pitch trim (deg)', id: 'longitudinal_pitch_trim_deg', step: '0.01', min: -45, max: 45, section: 'control', key: 'pitch_trim_deg', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Max pitch offset (deg)', id: 'longitudinal_max_pitch_offset_deg', step: '0.01', min: 0, max: 45, section: 'control', key: 'max_pitch_offset_deg', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Max pitch rate (deg/s)', id: 'longitudinal_max_pitch_rate_dps', step: '0.1', min: 0, max: 720, section: 'control', key: 'max_pitch_rate_dps', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Max velocity (m/s)', id: 'longitudinal_max_velocity_mps', step: '0.001', min: 0, max: 5, section: 'control', key: 'max_velocity_mps', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Max HOLD velocity (m/s)', id: 'longitudinal_max_hold_velocity_mps', step: '0.001', min: 0, max: 5, section: 'control', key: 'max_hold_velocity_mps', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Acceleration (m/s²)', id: 'longitudinal_max_acceleration_mps2', step: '0.01', min: 0, max: 20, section: 'control', key: 'max_acceleration_mps2', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Deceleration (m/s²)', id: 'longitudinal_max_deceleration_mps2', step: '0.01', min: 0, max: 20, section: 'control', key: 'max_deceleration_mps2', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'HOLD position deadband (m)', id: 'longitudinal_hold_position_deadband_m', step: '0.0001', min: 0, max: 10, section: 'control', key: 'hold_position_deadband_m', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'HOLD velocity deadband (m/s)', id: 'longitudinal_hold_velocity_deadband_mps', step: '0.0001', min: 0, max: 5, section: 'control', key: 'hold_velocity_deadband_mps', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Sync enabled', id: 'longitudinal_sync_enabled', type: 'checkbox', section: 'control', key: 'sync_enabled', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Sync Kp (effort/m)', id: 'longitudinal_sync_kp', step: '0.001', min: -1000, max: 1000, section: 'control', key: 'sync_kp', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Sync Kd (effort/(m/s))', id: 'longitudinal_sync_kd', step: '0.001', min: -1000, max: 1000, section: 'control', key: 'sync_kd', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Sync position deadband (m)', id: 'longitudinal_sync_position_deadband_m', step: '0.0001', min: 0, max: 10, section: 'control', key: 'sync_position_deadband_m', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Sync velocity deadband (m/s)', id: 'longitudinal_sync_velocity_deadband_mps', step: '0.0001', min: 0, max: 5, section: 'control', key: 'sync_velocity_deadband_mps', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Sync max effort', id: 'longitudinal_sync_max_effort', step: '0.001', min: 0, max: 1, section: 'control', key: 'sync_max_effort', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Max effort', id: 'longitudinal_max_effort', step: '0.001', min: 0, max: 1, section: 'control', key: 'max_effort', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'HOLD enter velocity (m/s)', id: 'longitudinal_hold_enter_velocity_mps', step: '0.0001', min: 0, max: 5, section: 'control', key: 'hold_enter_velocity_mps', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'HOLD exit velocity (m/s)', id: 'longitudinal_hold_exit_velocity_mps', step: '0.0001', min: 0, max: 5, section: 'control', key: 'hold_exit_velocity_mps', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'HOLD pitch error deadband (deg)', id: 'longitudinal_hold_pitch_error_deadband_deg', step: '0.01', min: 0, max: 45, section: 'control', key: 'hold_pitch_error_deadband_deg', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'HOLD pitch rate deadband (deg/s)', id: 'longitudinal_hold_pitch_rate_deadband_dps', step: '0.1', min: 0, max: 720, section: 'control', key: 'hold_pitch_rate_deadband_dps', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'HOLD settle time (ms)', id: 'longitudinal_hold_settle_time_ms', step: '1', min: 0, max: 5000, section: 'control', key: 'hold_settle_time_ms', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Motion request limiter', id: 'longitudinal_motion_request_limit_enabled', type: 'checkbox', section: 'control', key: 'motion_request_limit_enabled', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Limiter pitch start (deg)', id: 'longitudinal_motion_request_limit_pitch_start_deg', step: '0.01', min: 0, max: 45, section: 'control', key: 'motion_request_limit_pitch_start_deg', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Limiter pitch full (deg)', id: 'longitudinal_motion_request_limit_pitch_full_deg', step: '0.01', min: 0, max: 45, section: 'control', key: 'motion_request_limit_pitch_full_deg', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Limiter pitch release (deg)', id: 'longitudinal_motion_request_limit_pitch_release_deg', step: '0.01', min: 0, max: 45, section: 'control', key: 'motion_request_limit_pitch_release_deg', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Limiter effort start', id: 'longitudinal_motion_request_limit_effort_start', step: '0.001', min: 0, max: 1, section: 'control', key: 'motion_request_limit_effort_start', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Limiter effort full', id: 'longitudinal_motion_request_limit_effort_full', step: '0.001', min: 0, max: 1, section: 'control', key: 'motion_request_limit_effort_full', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Limiter effort release', id: 'longitudinal_motion_request_limit_effort_release', step: '0.001', min: 0, max: 1, section: 'control', key: 'motion_request_limit_effort_release', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Limiter minimum scale', id: 'longitudinal_motion_request_limit_min_scale', step: '0.001', min: 0, max: 1, section: 'control', key: 'motion_request_limit_min_scale', path: ['strategies', 'longitudinal_cascade'] }
 ];

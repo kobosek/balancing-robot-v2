@@ -1,7 +1,6 @@
 #pragma once
 
 #include "BaseEvent.hpp"
-#include <cmath>
 #include <cstdint>
 
 // Validated longitudinal command.  It deliberately has a different event
@@ -11,28 +10,23 @@ public:
     DECLARE_EVENT_IDENTITY(MOTION_TargetLinearVelocity)
 
     const float targetVelocityMps;
-    // Compatibility spellings keep the unit explicit for callers outside the
-    // current application while the canonical field remains camelCase.
-    const float targetVelocity_mps;
-    const float targetLinearVelocityMps;
     const bool stop;
-    const bool drive;
     const uint64_t sequence;
     const int64_t receivedTimestampUs;
+    // The StateManager arm that authorized this command. A sequence number
+    // alone cannot protect a new control session from a delayed callback.
+    const uint64_t armId;
 
     MOTION_TargetLinearVelocity(float targetVelocityMps_,
                                 bool stop_,
                                 uint64_t sequence_ = 0,
-                                int64_t receivedTimestampUs_ = 0)
+                                int64_t receivedTimestampUs_ = 0,
+                                uint64_t armId_ = 0)
         : BaseEvent(),
           targetVelocityMps(targetVelocityMps_),
-          targetVelocity_mps(targetVelocityMps_),
-          targetLinearVelocityMps(targetVelocityMps_),
           stop(stop_),
-          drive(!stop_ && std::isfinite(targetVelocityMps_) &&
-                std::fabs(targetVelocityMps_) > 1e-5f),
           sequence(sequence_),
           receivedTimestampUs(receivedTimestampUs_ > 0 ?
-                              receivedTimestampUs_ : timestamp) {}
+                              receivedTimestampUs_ : timestamp),
+          armId(armId_) {}
 };
-

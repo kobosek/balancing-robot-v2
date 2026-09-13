@@ -10,6 +10,11 @@ void WheelVelocityController::setParameters(const PidParameters& parameters)
     m_pid.setParameters(parameters);
 }
 
+bool WheelVelocityController::trySetParameters(const PidParameters& parameters)
+{
+    return m_pid.trySetParameters(parameters);
+}
+
 WheelVelocityControlResult WheelVelocityController::makeResult(const PidStepResult& result)
 {
     return {
@@ -27,12 +32,29 @@ WheelVelocityControlResult WheelVelocityController::update(float targetSpeedDps,
     return makeResult(m_pid.compute(targetSpeedDps, measuredSpeedDps, dtSeconds));
 }
 
+WheelVelocityControlResult WheelVelocityController::preview(float targetSpeedDps,
+                                                             float measuredSpeedDps,
+                                                             float dtSeconds) const
+{
+    return makeResult(m_pid.preview(targetSpeedDps, measuredSpeedDps, dtSeconds));
+}
+
 WheelVelocityControlResult WheelVelocityController::updateWithMeasurementRate(float targetSpeedDps,
                                                                                 float measuredSpeedDps,
                                                                                 float measuredRateDps,
                                                                                 float dtSeconds)
 {
     return makeResult(m_pid.computeWithMeasurementRate(
+        targetSpeedDps, measuredSpeedDps, measuredRateDps, dtSeconds));
+}
+
+WheelVelocityControlResult WheelVelocityController::previewWithMeasurementRate(
+    float targetSpeedDps,
+    float measuredSpeedDps,
+    float measuredRateDps,
+    float dtSeconds) const
+{
+    return makeResult(m_pid.previewWithMeasurementRate(
         targetSpeedDps, measuredSpeedDps, measuredRateDps, dtSeconds));
 }
 

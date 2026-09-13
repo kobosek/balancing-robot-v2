@@ -21,10 +21,8 @@ esp_err_t PIDController::init(const PIDConfig& config) {
 
 // Update PID parameters from a config struct
 esp_err_t PIDController::updateParams(const PIDConfig& config) {
-     ESP_LOGD(TAG, "Updating PID parameters for key: %s", m_config_key.c_str());
-     m_params = config; // Store the whole struct
-
-    m_core.setParameters({
+    ESP_LOGD(TAG, "Updating PID parameters for key: %s", m_config_key.c_str());
+    const control_math::PidParameters parameters = {
         config.pid_kp,
         config.pid_ki,
         config.pid_kd,
@@ -32,7 +30,15 @@ esp_err_t PIDController::updateParams(const PIDConfig& config) {
         config.pid_output_max,
         config.pid_iterm_min,
         config.pid_iterm_max
-    });
+    };
+    control_math::PidCore candidate(parameters);
+    if (!candidate.parametersValid()) {
+        ESP_LOGW(TAG, "Rejected invalid PID parameters for key: %s", m_config_key.c_str());
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    m_params = config; // Store the whole struct only after validation.
+    m_core.setParameters(parameters);
 
     ESP_LOGD(TAG, "PID parameters set - Kp: %.4f, Ki: %.4f, Kd: %.4f, OutMin: %.2f, OutMax: %.2f, ITermMin: %.2f, ITermMax: %.2f",
              m_params.pid_kp, m_params.pid_ki, m_params.pid_kd, m_params.pid_output_min, m_params.pid_output_max, m_params.pid_iterm_min, m_params.pid_iterm_max);
@@ -103,6 +109,31 @@ control_math::PidStepResult PIDController::previewWithMeasurementRate(
     float dt) const
 {
     return m_core.previewWithMeasurementRate(
+        setpoint, currentValue, currentRate, dt);
+}
+
+control_math::PidStepResult PIDController::previewAfterReset(
+    float setpoint,
+    float currentValue,
+    float dt) const
+{
+    // PidCore is a small value type. Copying it avoids mutating the live
+    // controller or allocating a temporary PIDController/string on the
+    // control path.
+    auto candidate = m_core;
+    candidate.reset();
+    return candidate.preview(setpoint, currentValue, dt);
+}
+
+control_math::PidStepResult PIDController::previewWithMeasurementRateAfterReset(
+    float setpoint,
+    float currentValue,
+    float currentRate,
+    float dt) const
+{
+    auto candidate = m_core;
+    candidate.reset();
+    return candidate.previewWithMeasurementRate(
         setpoint, currentValue, currentRate, dt);
 }
 

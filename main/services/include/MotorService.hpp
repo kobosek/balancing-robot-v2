@@ -5,6 +5,7 @@
 #include "MX1616H_HWDriver.hpp"         // Found via INCLUDE_DIRS
 #include "EventHandler.hpp"             // For EventHandler base class
 #include "config/MotorConfig.hpp"
+#include "esp_timer.h"
 // #include "esp_log.h" // Moved to .cpp
 #include <memory>
 #include <mutex>
@@ -13,11 +14,13 @@
  // Forward declare event class
 class BaseEvent; // <<< Already defined
 class MOTOR_OutputEnabledChanged;
+class CONFIG_MotorConfigUpdate;
 
 class MotorService : public EventHandler {
 public:
-    MotorService(const MotorConfig& config, EventBus& bus);
-    ~MotorService() = default;
+    MotorService(const MotorConfig& config, EventBus& bus,
+                 int64_t watchdogTimeoutUs = 50000);
+    ~MotorService();
 
     // Declarations only
     esp_err_t init();
@@ -35,8 +38,9 @@ public:
 
 private:
     static constexpr const char* TAG = "MotorService";
-    const MotorConfig m_config;
+    MotorConfig m_config;
     EventBus& m_eventBus;
+    const int64_t m_watchdogTimeoutUs;
 
     // std::unique_ptr<IMotorHWDriver> m_hw_driver_left; // If using interface
     // std::unique_ptr<IMotorHWDriver> m_hw_driver_right;
@@ -48,10 +52,21 @@ private:
     uint64_t m_armId = 0, m_revokedArm = 0;
     uint32_t m_generation = 0;
     bool m_enabled = false; // Protected by m_outputMutex after initialization.
+    bool m_configurationValid = true;
     uint32_t m_pwm_max_duty = 0;
+    esp_timer_handle_t m_watchdogTimer = nullptr;
+    int64_t m_lastAcceptedCommitUs = 0;
 
     // Event handlers for specific event types
     void handleMotorOutputEnabledChanged(const MOTOR_OutputEnabledChanged& event);
+    void handleMotorConfigUpdate(const CONFIG_MotorConfigUpdate& event);
+    static void watchdogCallback(void* arg);
+    void handleWatchdog();
+    void stopWatchdogLocked();
+    void armWatchdog();
+    void createDriversLocked();
+    esp_err_t rebuildDriversLocked();
+    void calculateMaxDutyLocked();
     // Declaration only
     esp_err_t configureLEDCTimer();
     // Caller holds m_outputMutex; no event publication or sensor operations.

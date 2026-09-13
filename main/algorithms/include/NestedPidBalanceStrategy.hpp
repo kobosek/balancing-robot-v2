@@ -27,6 +27,10 @@ private:
     static constexpr const char* TAG = "NestedPidBalance";
 
     mutable std::mutex m_mutex;
+    NestedPidStrategyConfig m_config;
+    EncoderConfig m_encoder_config;
+    RobotDimensionsConfig m_dimensions_config;
+    bool m_has_config = false;
     PIDController m_anglePid;
     control_math::WheelVelocityController m_speedPidLeft;
     control_math::WheelVelocityController m_speedPidRight;

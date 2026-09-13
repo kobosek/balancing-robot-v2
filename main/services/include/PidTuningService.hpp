@@ -2,7 +2,7 @@
 
 #include "BalancingAlgorithm.hpp"
 #include "EventHandler.hpp"
-#include "PIDController.hpp"
+#include "control_math/WheelVelocityController.hpp"
 #include "PidTuningAnalysis.hpp"
 #include "PidTuningTypes.hpp"
 #include "config/PidTuningConfig.hpp"
@@ -28,6 +28,13 @@ struct PidTuningStatus {
     float progress = 0.0f;
     std::string message = "Idle";
     bool hasCandidate = false;
+    // A candidate is always for the NestedPid wheel controller.  Keep its
+    // ownership and source document revision visible so a stale preview is
+    // distinguishable from the currently active strategy/configuration.
+    BalanceStrategyId candidateStrategy = BalanceStrategyId::NESTED_PID;
+    bool candidateBaseRevisionValid = false;
+    uint32_t candidateBaseConfigRevision = 0;
+    bool saveInProgress = false;
     PIDConfig candidateLeft;
     PIDConfig candidateRight;
     PidTuningResponseMetrics leftMetrics;
@@ -76,9 +83,14 @@ private:
     PIDConfig m_originalRight;
     PIDConfig m_candidateLeft;
     PIDConfig m_candidateRight;
+    uint64_t m_baseConfigRevision = UINT64_MAX;
+    // Invalidates an in-flight Save if a new tuning run or Discard replaces
+    // the local candidate while storage I/O is in progress.
+    uint64_t m_candidateToken = 0;
+    bool m_saveInProgress = false;
 
-    PIDController m_validationPidLeft;
-    PIDController m_validationPidRight;
+    control_math::WheelVelocityController m_validationPidLeft;
+    control_math::WheelVelocityController m_validationPidRight;
 
     size_t m_stepIndex = 0;
     float m_phaseElapsed_s = 0.0f;
@@ -97,8 +109,7 @@ private:
                              float speedRight_dps,
                              bool& shouldPublishFinished,
                              PidTuningState& finishedState,
-                             std::string& finishedMessage,
-                             bool& shouldApplyPreview);
+                             std::string& finishedMessage);
 
     void handleStartCommand(const UI_StartPidTuning& event);
     void handleCancelCommand(const UI_CancelPidTuning& event);
@@ -130,7 +141,6 @@ private:
     void updateProgressLocked();
     void setMessageLocked(const std::string& message);
     void resetRuntimeLocked();
-    void applyPreview();
     void publishFinished(PidTuningState state, const std::string& message);
 
     static const char* phaseToString(PidTuningPhase phase);

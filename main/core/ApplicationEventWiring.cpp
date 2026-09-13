@@ -13,11 +13,14 @@
 #include "CONFIG_BehaviorConfigUpdate.hpp"
 #include "CONFIG_FullConfigUpdate.hpp"
 #include "CONFIG_ImuConfigUpdate.hpp"
+#include "CONFIG_EncoderConfigUpdate.hpp"
+#include "CONFIG_MotorConfigUpdate.hpp"
 #include "CONFIG_PidConfigUpdate.hpp"
 #include "COMMAND_InputModeChanged.hpp"
 #include "CONTROL_RunModeChanged.hpp"
 #include "CONTROL_ImuDataInvalid.hpp"
 #include "ConfigurationService.hpp"
+#include "EncoderService.hpp"
 #include "EventBus.hpp"
 #include "EventHandler.hpp"
 #include "GUIDED_CalibrationFinished.hpp"
@@ -81,7 +84,9 @@ esp_err_t ApplicationEventWiring::wire(const ApplicationContext& context) const
     eventBus.subscribe<IMU_OrientationData, IMU_AvailabilityChanged,
                        BALANCE_MonitorModeChanged,
                        CONFIG_BehaviorConfigUpdate>(asHandler(context.balanceMonitorHandle()));
-    eventBus.subscribe<MOTOR_OutputEnabledChanged>(asHandler(context.motorServiceHandle()));
+    eventBus.subscribe<MOTOR_OutputEnabledChanged,
+                       CONFIG_MotorConfigUpdate>(asHandler(context.motorServiceHandle()));
+    eventBus.subscribe<CONFIG_EncoderConfigUpdate>(asHandler(context.encoderServiceHandle()));
     eventBus.subscribe<UI_StartPidTuning,
                        UI_CancelPidTuning,
                        UI_SavePidTuning,
@@ -122,6 +127,8 @@ esp_err_t ApplicationEventWiring::wire(const ApplicationContext& context) const
                        IMU_AttachRequested,
                        IMU_SystemPolicyChanged, UI_Stop>(asHandler(context.imuServiceHandle()));
     eventBus.subscribe<MOTION_TargetMovement, MOTION_TargetLinearVelocity,
+                       CONFIG_EncoderConfigUpdate,
+                       CONFIG_FullConfigUpdate,
                        CONFIG_BehaviorConfigUpdate,
                        CONTROL_RunModeChanged>(asHandler(context.robotControllerHandle()));
     eventBus.subscribe<OTA_UpdatePolicyChanged>(asHandler(context.otaServiceHandle()));

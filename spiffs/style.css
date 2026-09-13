@@ -128,9 +128,7 @@ button:disabled { /* Style for disabled buttons */
 
 .status-config-section #configMenu {
     margin-top: 5px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
+    display: block;
 }
 .status-config-section #configMenu button {
     background-color: #6c757d;
@@ -138,6 +136,33 @@ button:disabled { /* Style for disabled buttons */
     flex-grow: 1;
 }
 .status-config-section #configMenu button:hover:not(:disabled) { background-color: #5a6268; }
+.config-menu-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.config-menu-actions button {
+    min-height: 42px;
+    margin: 0 !important;
+}
+.config-menu-actions button:first-child { background-color: #0d6efd !important; }
+.config-menu-actions button:nth-child(2) { background-color: #198754 !important; }
+.config-menu-actions button:nth-child(3) { background-color: #6c757d !important; }
+.config-menu-actions button:hover:not(:disabled) { opacity: 0.85; }
+.strategy-selector {
+    width: 100%;
+    margin: 10px 0;
+    padding: 10px;
+    border: 1px solid #ced4da;
+    border-radius: 5px;
+    background: #fff;
+    box-sizing: border-box;
+}
+.strategy-selector label { margin-right: 6px; font-weight: 600; }
+.strategy-selector select { padding: 7px; border: 1px solid #adb5bd; border-radius: 4px; }
+.strategy-selector button { margin-top: 6px !important; background-color: #0d6efd !important; }
+.config-help { color: #6c757d; font-size: 0.82rem; margin: 5px 0; }
 
 
 /* --- Command Section Specific Styles --- */
@@ -249,6 +274,86 @@ button:disabled { /* Style for disabled buttons */
     border-radius: 6px;
     background-color: #ffffff;
     /* Removed max-height and overflow-y */
+}
+.strategy-form-container {
+    padding: 16px;
+}
+.strategy-form-card {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.strategy-form-header {
+    padding-bottom: 4px;
+    border-bottom: 1px solid #e9ecef;
+}
+.strategy-form-header h3 {
+    margin: 0;
+    text-align: left;
+    color: #343a40;
+}
+.strategy-form-header .config-help {
+    margin-bottom: 0;
+}
+.config-subsection {
+    padding: 12px;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    background: #f8f9fa;
+}
+.config-subsection > h3 {
+    margin: 0 0 4px;
+    text-align: left;
+    color: #495057;
+}
+.config-subsection > .config-help {
+    margin-top: 0;
+}
+.config-subsection-body {
+    margin-top: 10px;
+}
+.config-pid-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+.config-pid-block {
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid #e1e5e9;
+    border-radius: 5px;
+    background: #ffffff;
+}
+.config-pid-block > h4 {
+    margin: 0 0 8px;
+    color: #495057;
+    font-size: 0.95rem;
+}
+.config-pid-form,
+.config-field-form {
+    min-width: 0;
+}
+.config-pid-form .form-group,
+.config-field-form .form-group {
+    justify-content: space-between;
+}
+.config-pid-form label,
+.config-field-form label {
+    width: auto;
+    max-width: calc(100% - 104px);
+    text-align: left;
+    margin-right: 8px;
+}
+.config-pid-form .form-group-checkbox label,
+.config-field-form .form-group-checkbox label {
+    max-width: none;
+}
+.config-pid-form .config-save-btn,
+.config-field-form .config-save-btn {
+    margin-top: 4px;
+}
+.config-subsection .pid-tuning-panel {
+    margin-bottom: 0;
 }
 .form-group {
     margin-bottom: 10px;
@@ -469,6 +574,15 @@ input[type="number"]:focus {
 .status-value > span {
     display: inline;
 }
+.status-config-section #acknowledgeConfigOperationBtn {
+    background-color: #fd7e14;
+    padding: 5px 9px;
+    margin: -2px 0 0 8px;
+    font-size: 0.75rem;
+}
+.status-config-section #acknowledgeConfigOperationBtn:hover:not(:disabled) {
+    background-color: #e96b05;
+}
 .battery-state {
     margin-left: 6px;
 }
@@ -569,4 +683,8 @@ input[type="number"]:focus {
     h2 { font-size: 1.1rem; }
     button { padding: 8px 12px; font-size: 0.85rem; }
     .status-item { font-size: 0.8rem; }
+    .config-menu-actions { grid-template-columns: 1fr; }
+    .config-pid-grid { grid-template-columns: 1fr; }
+    .config-pid-form label,
+    .config-field-form label { max-width: calc(100% - 96px); }
 }

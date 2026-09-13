@@ -18,15 +18,26 @@ public:
     explicit WheelVelocityController(const PidParameters& parameters = {});
 
     void setParameters(const PidParameters& parameters);
+    bool trySetParameters(const PidParameters& parameters);
     const PidParameters& parameters() const { return m_pid.parameters(); }
 
     WheelVelocityControlResult update(float targetSpeedDps,
                                       float measuredSpeedDps,
                                       float dtSeconds);
+    // Evaluate a candidate without changing the wheel PID state.  Strategy
+    // adapters can validate both wheels before committing either controller,
+    // keeping a rejected sample from partially advancing the cascade.
+    WheelVelocityControlResult preview(float targetSpeedDps,
+                                       float measuredSpeedDps,
+                                       float dtSeconds) const;
     WheelVelocityControlResult updateWithMeasurementRate(float targetSpeedDps,
                                                          float measuredSpeedDps,
                                                          float measuredRateDps,
                                                          float dtSeconds);
+    WheelVelocityControlResult previewWithMeasurementRate(float targetSpeedDps,
+                                                          float measuredSpeedDps,
+                                                          float measuredRateDps,
+                                                          float dtSeconds) const;
     float compute(float targetSpeedDps, float measuredSpeedDps, float dtSeconds) {
         return update(targetSpeedDps, measuredSpeedDps, dtSeconds).effort;
     }

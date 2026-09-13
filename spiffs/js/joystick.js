@@ -4,6 +4,47 @@ import { JOYSTICK_SEND_INTERVAL_MS } from './constants.js';
 
 let sendIntervalTimer = null;
 let sendJoystickPayload = null;
+let sourceSequenceSessionId = null;
+let sourceSequence = 0;
+const SOURCE_SEQUENCE_STORAGE_KEY = 'balancingRobot.joystickSourceSequence';
+
+function nextSourceSequence(sessionId) {
+    const normalizedSessionId = String(sessionId ?? '0');
+    if (sourceSequenceSessionId !== normalizedSessionId) {
+        sourceSequenceSessionId = normalizedSessionId;
+        sourceSequence = 0;
+        try {
+            if (typeof sessionStorage !== 'undefined') {
+                const stored = JSON.parse(sessionStorage.getItem(SOURCE_SEQUENCE_STORAGE_KEY) || 'null');
+                if (stored && stored.sessionId === normalizedSessionId &&
+                    Number.isSafeInteger(stored.sequence) && stored.sequence > 0) {
+                    sourceSequence = stored.sequence;
+                }
+            }
+        } catch (error) {
+            // A private browsing context may reject sessionStorage. The
+            // in-memory sequence still protects ordering for this page.
+        }
+    }
+
+    sourceSequence += 1;
+    if (sourceSequence > Number.MAX_SAFE_INTEGER) {
+        // This is practically unreachable during one arm. Keep the value
+        // valid rather than emitting a rounded JSON number.
+        sourceSequence = Number.MAX_SAFE_INTEGER;
+    }
+    try {
+        if (typeof sessionStorage !== 'undefined') {
+            sessionStorage.setItem(SOURCE_SEQUENCE_STORAGE_KEY, JSON.stringify({
+                sessionId: normalizedSessionId,
+                sequence: sourceSequence
+            }));
+        }
+    } catch (error) {
+        // Storage is an optimization for reloads; transport remains usable.
+    }
+    return String(sourceSequence);
+}
 
 export function setJoystickTransport(sender) {
     sendJoystickPayload = typeof sender === 'function' ? sender : null;
@@ -144,8 +185,14 @@ function sendJoystickDataIfNeeded() {
     const { currentData, lastSentData, isActive } = appState.joystick;
 
     // Ensure currentData has valid numbers before sending
-    const sendX = typeof currentData.x === 'number' ? currentData.x : 0;
-    const sendY = typeof currentData.y === 'number' ? currentData.y : 0;
+    const rawSendX = typeof currentData.x === 'number' ? currentData.x : 0;
+    const rawSendY = typeof currentData.y === 'number' ? currentData.y : 0;
+    // Longitudinal Cascade consumes the forward/backward request as a typed
+    // velocity command. Do not leak the joystick turn axis into its command
+    // producer; NestedPid keeps the existing yaw-rate behaviour.
+    const longitudinal = appState.currentSystemState?.active_balance_strategy !== 'nested_pid';
+    const sendX = longitudinal ? 0 : rawSendX;
+    const sendY = rawSendY;
     const lastX = typeof lastSentData.x === 'number' ? lastSentData.x : 0; // Use 0 if invalid
     const lastY = typeof lastSentData.y === 'number' ? lastSentData.y : 0; // Use 0 if invalid
 
@@ -169,7 +216,17 @@ function sendJoystickDataIfNeeded() {
     }
 
     if (shouldSend) {
-        const payload = { type: "joystick", x: sendX, y: sendY };
+        // Longitudinal command acceptance is tied to the arm/session
+        // advertised by /api/state. NestedPid ignores this metadata and keeps
+        // its existing joystick semantics.
+        const sessionId = appState.currentSystemState?.command_session_id || '0';
+        const payload = {
+            type: "joystick",
+            x: sendX,
+            y: sendY,
+            session_id: sessionId,
+            source_sequence: nextSourceSequence(sessionId)
+        };
         // console.log("[Joystick] Sending WS:", payload); // Can be noisy
         if (sendJoystickPayload && sendJoystickPayload(payload)) {
             // Update last sent only on successful send

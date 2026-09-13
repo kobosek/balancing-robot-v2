@@ -26,14 +26,23 @@ struct PidStepResult {
     float derivativeTerm = 0.0f;
     bool valid = false;
     bool saturated = false;
+    // Candidate integral change for this step.  It is zero when integration
+    // was disabled.  The longitudinal cascade uses this to decide whether a
+    // downstream limit would make the candidate wind the integral further.
+    float integralDelta = 0.0f;
 };
 
 class PidCore {
 public:
     explicit PidCore(const PidParameters& parameters = {});
 
+    // Invalid parameters are rejected without changing the active set or
+    // clearing its state. The void setter remains source-compatible; callers
+    // that need to report rejection can use the boolean form.
     void setParameters(const PidParameters& parameters);
+    bool trySetParameters(const PidParameters& parameters);
     const PidParameters& parameters() const { return m_parameters; }
+    bool parametersValid() const;
 
     // `integrate` is true for the legacy behaviour.  A cascade owner can
     // temporarily suppress the integral update when a downstream limit is
@@ -61,6 +70,8 @@ private:
     PidParameters m_parameters;
     float m_integral = 0.0f;
     float m_lastError = 0.0f;
+
+    static bool areParametersValid(const PidParameters& parameters);
 
     PidStepResult finish(float pTerm, float dTerm, float error, float dt,
                          bool integrate);
