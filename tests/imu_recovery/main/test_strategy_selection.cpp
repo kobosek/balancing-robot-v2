@@ -64,7 +64,17 @@ TEST_CASE("strategy selection is applied only while control is disabled", "[cont
 
     ConfigData longitudinal = initial;
     longitudinal.control.strategies.active = BalanceStrategyId::LONGITUDINAL_CASCADE;
+    longitudinal.config_revision = 1;
+    longitudinal.control.strategies.revision = 1;
     algorithm.handleEvent(CONFIG_FullConfigUpdate(longitudinal));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(BalanceStrategyId::LONGITUDINAL_CASCADE),
+                          static_cast<int>(algorithm.getActiveStrategyId()));
+
+    // Reusing a document revision for a different payload must not mutate the
+    // active strategy, even when the selected strategy revision is unchanged.
+    ConfigData conflicting = longitudinal;
+    conflicting.control.joystick_exponent = 9.0f;
+    algorithm.handleEvent(CONFIG_FullConfigUpdate(conflicting));
     TEST_ASSERT_EQUAL_INT(static_cast<int>(BalanceStrategyId::LONGITUDINAL_CASCADE),
                           static_cast<int>(algorithm.getActiveStrategyId()));
 
@@ -72,6 +82,8 @@ TEST_CASE("strategy selection is applied only while control is disabled", "[cont
         ControlRunMode::BALANCING, 1, true, 1, 1));
     ConfigData nested = longitudinal;
     nested.control.strategies.active = BalanceStrategyId::NESTED_PID;
+    nested.config_revision = 2;
+    nested.control.strategies.revision = 2;
     algorithm.handleEvent(CONFIG_FullConfigUpdate(nested));
     TEST_ASSERT_EQUAL_INT(static_cast<int>(BalanceStrategyId::LONGITUDINAL_CASCADE),
                           static_cast<int>(algorithm.getActiveStrategyId()));

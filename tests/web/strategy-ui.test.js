@@ -16,12 +16,15 @@ import {
     uiElements,
     updateStrategyUI,
     updateYawControlButtonUI,
-    updatePidTuningUI
+    updatePidTuningUI,
+    updateLongitudinalTelemetryUI
 } from '../../spiffs/js/ui.js';
 import { applySelectedBalanceStrategy } from '../../spiffs/js/configUI.js';
-import { loadPIDConfigSection, savePIDConfigSection } from '../../spiffs/js/configPersistence.js';
+import { loadPIDConfigSection, savePIDConfigSection, loadStrategyConfig,
+    saveStrategyConfig, rebaseAndSaveStrategyDraft } from '../../spiffs/js/configPersistence.js';
+import { createConfigForms } from '../../spiffs/js/configRenderer.js';
 import { buildStrategySelectionConfig, canApplyStrategy, capabilityForState } from '../../spiffs/js/strategyConfig.js';
-import { LONGITUDINAL_CONFIG_FIELDS, PID_FIELDS } from '../../spiffs/js/configSchema.js';
+import { LONGITUDINAL_CONFIG_FIELDS, NESTED_PID_CONFIG_FIELDS, PID_FIELDS } from '../../spiffs/js/configSchema.js';
 
 function response(body, ok = true, status = 200) {
     return {
@@ -36,6 +39,7 @@ function makeConfig(revision = 7) {
         config_version: 3,
         config_revision: revision,
         web: { max_config_post_size: 8192 },
+        behavior: { max_target_angular_velocity_dps: 60 },
         control: {
             balance_strategy: 'nested_pid',
             yaw_control_enabled: false,
@@ -46,6 +50,9 @@ function makeConfig(revision = 7) {
                 revision: 2,
                 nested_pid: {
                     revision: 2,
+                    max_target_pitch_offset_deg: 5,
+                    max_target_angular_velocity_dps: 60,
+                    yaw_control_enabled: false,
                     angle: {
                         kp: 3, ki: 0, kd: 0,
                         output_min: -720, output_max: 720,
@@ -76,13 +83,49 @@ function makeConfig(revision = 7) {
                     revision: 4,
                     configured: true,
                     loop_mode: 'pitch_only',
+                    position_kp: 0,
+                    pitch_trim_deg: 0,
+                    max_pitch_offset_deg: 8,
+                    max_pitch_rate_dps: 120,
+                    max_velocity_mps: 0.5,
+                    max_hold_velocity_mps: 0.2,
+                    max_acceleration_mps2: 1,
+                    max_deceleration_mps2: 1,
+                    hold_position_deadband_m: 0.01,
+                    hold_velocity_deadband_mps: 0.01,
+                    sync_enabled: false,
+                    sync_kp: 0,
+                    sync_kd: 0,
+                    sync_position_deadband_m: 0,
+                    sync_velocity_deadband_mps: 0,
+                    sync_max_effort: 0,
+                    max_effort: 1,
+                    left_encoder_forward_sign: 1,
+                    right_encoder_forward_sign: -1,
+                    left_output_sign: 1,
+                    right_output_sign: 1,
+                    velocity_to_pitch_sign: 1,
+                    pitch_to_effort_sign: 1,
+                    hold_enter_velocity_mps: 0.02,
+                    hold_exit_velocity_mps: 0.04,
+                    hold_pitch_error_deadband_deg: 1,
+                    hold_pitch_rate_deadband_dps: 15,
+                    hold_settle_time_ms: 100,
+                    motion_request_limit_enabled: false,
+                    motion_request_limit_pitch_start_deg: 4,
+                    motion_request_limit_pitch_full_deg: 8,
+                    motion_request_limit_pitch_release_deg: 3,
+                    motion_request_limit_effort_start: 0.6,
+                    motion_request_limit_effort_full: 0.9,
+                    motion_request_limit_effort_release: 0.5,
+                    motion_request_limit_min_scale: 0.2,
                     pitch: {
-                        kp: 0.4, ki: 0, kd: 0.02,
+                        kp: 0.4, ki: 0.2, kd: 0.02,
                         output_min: -1, output_max: 1,
                         iterm_min: -1, iterm_max: 1
                     },
                     velocity: {
-                        kp: 0.3, ki: 0.1, kd: 0,
+                        kp: 0.3, ki: 0.1, kd: 0.3,
                         output_min: -1, output_max: 1,
                         iterm_min: -1, iterm_max: 1
                     }
@@ -113,7 +156,11 @@ function installFixture() {
         <button id="tuneRightPidBtn"></button>
         <button id="cancelRightPidTuningBtn"></button>
         <button id="saveRightPidTuningBtn"></button>
-        <button id="discardRightPidTuningBtn"></button>`;
+        <button id="discardRightPidTuningBtn"></button>
+        <div id="longitudinalTelemetryStatus"></div>
+        <div id="nestedPidConfigFormContainer"></div>
+        <div id="longitudinalConfigFormContainer"></div>
+        <div id="generalConfigFormContainer"></div>`;
     for (const id of [
         'balanceStrategySelect', 'applyBalanceStrategyBtn', 'strategySelectionStatus',
         'activeBalanceStrategyValue', 'configuredBalanceStrategyValue',
@@ -121,7 +168,10 @@ function installFixture() {
         'toggleYawControlBtn', 'yawControlStatus',
         'tuneLeftPidBtn', 'cancelLeftPidTuningBtn', 'saveLeftPidTuningBtn',
         'discardLeftPidTuningBtn', 'tuneRightPidBtn', 'cancelRightPidTuningBtn',
-        'saveRightPidTuningBtn', 'discardRightPidTuningBtn'
+        'saveRightPidTuningBtn', 'discardRightPidTuningBtn',
+        'longitudinalTelemetryStatus',
+        'nestedPidConfigFormContainer', 'longitudinalConfigFormContainer',
+        'generalConfigFormContainer'
     ]) uiElements[id] = document.getElementById(id);
 }
 
@@ -177,13 +227,103 @@ export async function runTests() {
     const oldHtml = document.body.innerHTML;
     const originalConfig = appState.configDataCache;
     const originalState = appState.currentSystemState;
-    const draftKeys = ['balancingRobot.configDraft.pid_angle'];
+    const draftKeys = ['balancingRobot.configDraft.pid_angle',
+        'balancingRobot.configDraft.nested_pid',
+        'balancingRobot.configDraft.longitudinal_cascade'];
     const operationKey = 'balancingRobot.configOperations.v1';
     globalThis.alert = () => {};
 
     try {
         installFixture();
         setIdleState();
+
+        // Each strategy is one revision-bound editor.  PID sections remain
+        // visual groups inside the card, while the card owns the only
+        // production Save action and the explicit conflict actions.
+        createConfigForms();
+        const nestedStrategyForm = document.querySelector('[data-strategy-form="nested_pid"]');
+        const longitudinalStrategyForm = document.querySelector('[data-strategy-form="longitudinal_cascade"]');
+        check(nestedStrategyForm?.querySelectorAll('.config-save-btn').length === 1,
+            'NestedPid card does not have exactly one Save action');
+        check(longitudinalStrategyForm?.querySelectorAll('.config-save-btn').length === 1,
+            'longitudinal card does not have exactly one Save action');
+        check(nestedStrategyForm?.querySelectorAll('[data-pid-section] .config-save-btn').length === 0 &&
+            longitudinalStrategyForm?.querySelectorAll('[data-pid-section] .config-save-btn').length === 0,
+            'a child PID section still owns a second Save action');
+        check(longitudinalStrategyForm?.querySelector('#longitudinal_pid_pitch_ki')?.disabled === true &&
+            longitudinalStrategyForm?.querySelector('#longitudinal_pid_velocity_kd')?.disabled === true,
+            'longitudinal PD/PI fixed terms are editable');
+        await loadStrategyConfig(longitudinalStrategyForm);
+        check(longitudinalStrategyForm.querySelector('#longitudinal_pid_pitch_ki')?.value === '0' &&
+            longitudinalStrategyForm.querySelector('#longitudinal_pid_velocity_kd')?.value === '0',
+            'longitudinal fixed PID terms were restored from the server payload');
+        check(longitudinalStrategyForm.querySelector('#longitudinal_pid_pitch_ki')?.disabled === true &&
+            longitudinalStrategyForm.querySelector('#longitudinal_pid_velocity_kd')?.disabled === true,
+            'longitudinal fixed PID terms remain disabled after loading');
+
+        // A strategy Save carries its settings and all PID sections from one
+        // loaded document, preserving the other strategy and compatibility
+        // mirrors in the payload.
+        let strategyPost = null;
+        globalThis.fetch = async (url, options = {}) => {
+            if (url === '/api/config' && options.method === 'POST') {
+                strategyPost = JSON.parse(options.body);
+                return response({ config_revision: 13, strategies_revision: 5,
+                    nested_pid_revision: 5, longitudinal_cascade_revision: 4 });
+            }
+            if (url === '/api/config') return response(makeConfig(12));
+            return response({});
+        };
+        await loadStrategyConfig(nestedStrategyForm);
+        nestedStrategyForm.querySelector('#nested_max_target_pitch_offset_deg').value = '7';
+        nestedStrategyForm.querySelector('#pid_speed_left_kp').value = '0.7';
+        nestedStrategyForm.querySelector('#nested_max_target_pitch_offset_deg')
+            .dispatchEvent(new Event('input', { bubbles: true }));
+        await saveStrategyConfig('nested_pid', nestedStrategyForm,
+            NESTED_PID_CONFIG_FIELDS,
+            ['pid_angle', 'pid_speed_left', 'pid_speed_right',
+                'pid_yaw_angle', 'pid_yaw_rate']);
+        check(strategyPost?.control?.strategies?.nested_pid?.max_target_pitch_offset_deg === 7,
+            'strategy Save omitted NestedPid settings');
+        check(strategyPost?.control?.strategies?.nested_pid?.speed_left?.kp === 0.7,
+            'strategy Save omitted a nested PID edit');
+        check(strategyPost?.behavior?.max_target_angular_velocity_dps ===
+            strategyPost?.control?.strategies?.nested_pid?.max_target_angular_velocity_dps,
+            'strategy Save left the yaw compatibility mirror divergent');
+        check(strategyPost?.control?.strategies?.longitudinal_cascade?.left_encoder_forward_sign === 1,
+            'strategy Save dropped the other strategy record');
+        check(nestedStrategyForm.querySelector('[data-draft-status]')?.dataset.state === 'clean',
+            'successful strategy Save left a dirty draft status');
+
+        // A newer document leaves the local strategy draft visible with the
+        // two explicit conflict actions.  Rebase is an operator action: it
+        // adopts the latest server revision only after preserving the local
+        // values, then reuses the same one-card Save transaction.
+        nestedStrategyForm.querySelector('#nested_max_target_pitch_offset_deg').value = '8';
+        nestedStrategyForm.querySelector('#nested_max_target_pitch_offset_deg')
+            .dispatchEvent(new Event('input', { bubbles: true }));
+        globalThis.fetch = async (url, options = {}) => {
+            if (url === '/api/config' && options.method === 'POST') {
+                strategyPost = JSON.parse(options.body);
+                return response({ config_revision: 16, strategies_revision: 6,
+                    nested_pid_revision: 6, longitudinal_cascade_revision: 4 });
+            }
+            if (url === '/api/config') return response(makeConfig(15));
+            return response({});
+        };
+        await loadStrategyConfig(nestedStrategyForm);
+        check(nestedStrategyForm.dataset.draftConflict === 'true' &&
+            nestedStrategyForm.querySelector('[data-draft-status]')?.dataset.state === 'conflict',
+            'newer strategy revision did not expose a draft conflict');
+        check(nestedStrategyForm.querySelector('[data-draft-action="retry"]')?.hidden === false &&
+            nestedStrategyForm.querySelector('[data-draft-action="discard"]')?.hidden === false,
+            'strategy conflict actions were not exposed');
+        await rebaseAndSaveStrategyDraft(nestedStrategyForm);
+        check(strategyPost?.config_revision === 15 &&
+            strategyPost?.control?.strategies?.nested_pid?.max_target_pitch_offset_deg === 8,
+            'explicit strategy rebase did not preserve the local value');
+        check(nestedStrategyForm.querySelector('[data-draft-status]')?.dataset.state === 'clean',
+            'rebased strategy draft was not cleared after Save');
 
         // The selector accepts only advertised strategy IDs and keeps both
         // complete strategy records when producing the full v3 document.
@@ -378,6 +518,16 @@ export async function runTests() {
         // The v4 metadata contract and the full selection document fit the
         // configured HTTP limit while preserving both strategy records.
         check(decodeTelemetryPoint(makeV4Point(), 4)?.strategyName === 'nested_pid', 'browser harness v4 decoder failed');
+        const faultPoint = makeV4Point();
+        faultPoint[19] = 1;
+        faultPoint[73] = 4;
+        faultPoint[74] = true;
+        const decodedFault = decodeTelemetryPoint(faultPoint.concat([
+            true, true, 0, 4, true, '5', 20, false
+        ]), 4);
+        updateLongitudinalTelemetryUI(decodedFault);
+        check(uiElements.longitudinalTelemetryStatus.textContent.includes('fault (odometry)'),
+            'telemetry UI did not expose the structured odometry fault reason');
         check(JSON.stringify(makeConfig()).length < makeConfig().web.max_config_post_size,
             'full v3 configuration exceeds the configured POST headroom');
 

@@ -13,7 +13,9 @@ constexpr double DEG_TO_RAD = PI / 180.0;
 LongitudinalOdometryConfig longitudinalOdometryConfigFromEncoder(
     const EncoderConfig& encoderConfig,
     int64_t maxSampleAgeUs,
-    int64_t maxWheelTimestampSkewUs)
+    int64_t maxWheelTimestampSkewUs,
+    int8_t leftForwardSign,
+    int8_t rightForwardSign)
 {
     LongitudinalOdometryConfig config;
     config.leftWheelRadiusM = static_cast<double>(encoderConfig.wheel_diameter_mm) / 2000.0;
@@ -29,6 +31,8 @@ LongitudinalOdometryConfig longitudinalOdometryConfigFromEncoder(
         config.metersPerCountLeft = circumference / countsPerWheelRevolution;
         config.metersPerCountRight = config.metersPerCountLeft;
     }
+    config.leftForwardSign = leftForwardSign < 0 ? -1 : 1;
+    config.rightForwardSign = rightForwardSign < 0 ? -1 : 1;
     config.maxSampleAgeUs = std::max<int64_t>(0, maxSampleAgeUs);
     config.maxWheelTimestampSkewUs = std::max<int64_t>(0, maxWheelTimestampSkewUs);
     return config;

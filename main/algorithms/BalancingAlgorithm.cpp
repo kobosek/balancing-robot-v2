@@ -5,7 +5,6 @@
 #include "LongitudinalCascadeBalanceStrategy.hpp"
 #include "NestedPidBalanceStrategy.hpp"
 #include "CONFIG_FullConfigUpdate.hpp"
-#include "CONFIG_PidConfigUpdate.hpp"
 #include "BaseEvent.hpp"
 #include "esp_check.h"
 #include <cmath>
@@ -78,8 +77,6 @@ esp_err_t BalancingAlgorithm::init() {
 void BalancingAlgorithm::handleEvent(const BaseEvent& event) {
     if (event.is<CONFIG_FullConfigUpdate>()) {
         handleConfigUpdate(event.as<CONFIG_FullConfigUpdate>());
-    } else if (event.is<CONFIG_PidConfigUpdate>()) {
-        handlePIDConfigUpdate(event.as<CONFIG_PidConfigUpdate>());
     } else if (event.is<CONTROL_RunModeChanged>()) {
         handleRunModeChanged(event.as<CONTROL_RunModeChanged>());
     } else {
@@ -172,6 +169,16 @@ void BalancingAlgorithm::applyConfig(const ConfigData& config) {
                  static_cast<unsigned long>(m_appliedConfigRevision));
         return;
     }
+    if (m_hasConfigRevision && config.config_revision == m_appliedConfigRevision) {
+        if (m_hasAppliedConfigSnapshot && config != m_appliedConfigSnapshot) {
+            ESP_LOGW(TAG, "Ignoring conflicting full config payload at revision %lu",
+                     static_cast<unsigned long>(config.config_revision));
+        }
+        // An identical event is a harmless retry; a conflicting event must
+        // not mutate an already-applied strategy at the same document
+        // revision.
+        return;
+    }
     const BalanceStrategyId requestedStrategy = config.control.strategies.active;
     const uint32_t requestedStrategyRevision = requestedStrategy == BalanceStrategyId::NESTED_PID
         ? config.control.strategies.nested_pid.revision
@@ -208,6 +215,8 @@ void BalancingAlgorithm::applyConfig(const ConfigData& config) {
         : config.control.strategies.longitudinal_cascade.revision;
     m_appliedConfigRevision = config.config_revision;
     m_hasConfigRevision = true;
+    m_appliedConfigSnapshot = config;
+    m_hasAppliedConfigSnapshot = true;
 }
 
 std::unique_ptr<IBalanceControlStrategy> BalancingAlgorithm::createStrategy(BalanceStrategyId id) const {
@@ -225,28 +234,6 @@ std::unique_ptr<IBalanceControlStrategy> BalancingAlgorithm::createStrategy(Bala
 void BalancingAlgorithm::handleConfigUpdate(const CONFIG_FullConfigUpdate& event) {
      ESP_LOGD(TAG, "Handling general config update event."); // Use DEBUG level
      applyConfig(event.configData); // Apply the full config payload
-}
-
-// Handle granular PID config update event
-void BalancingAlgorithm::handlePIDConfigUpdate(const CONFIG_PidConfigUpdate& event) {
-    std::lock_guard<std::mutex> lock(m_strategyMutex);
-    if (!m_strategy || event.strategyId != m_activeStrategyId) {
-        return;
-    }
-    if (m_hasConfigRevision &&
-        (event.configRevision < m_appliedConfigRevision ||
-         (event.configRevision == 0 && m_appliedConfigRevision > 0) ||
-         event.strategyRevision < m_activeStrategyRevision)) {
-        ESP_LOGW(TAG, "Ignoring stale granular PID update '%s'", event.pidName.c_str());
-        return;
-    }
-    m_strategy->updatePidConfig(event.pidName, event.config);
-    if (!m_hasConfigRevision || event.configRevision > m_appliedConfigRevision) {
-        m_appliedConfigRevision = event.configRevision;
-    }
-    if (event.strategyRevision > m_activeStrategyRevision) {
-        m_activeStrategyRevision = event.strategyRevision;
-    }
 }
 
 void BalancingAlgorithm::handleRunModeChanged(const CONTROL_RunModeChanged& event) {

@@ -31,4 +31,26 @@ struct ConfigData {
     SystemBehaviorConfig behavior;
     RobotDimensionsConfig dimensions;
     WebServerConfig web;
+
+    // A complete snapshot comparison is used by runtime consumers to make a
+    // duplicate full-config event idempotent while rejecting a different
+    // payload that reuses an already-applied document revision.
+    bool operator!=(const ConfigData& other) const
+    {
+        return config_version != other.config_version ||
+               config_revision != other.config_revision ||
+               wifi != other.wifi ||
+               mainLoop != other.mainLoop ||
+               control != other.control ||
+               imu != other.imu ||
+               encoder != other.encoder ||
+               motor != other.motor ||
+               battery != other.battery ||
+               pid_tuning != other.pid_tuning ||
+               behavior != other.behavior ||
+               dimensions != other.dimensions ||
+               web != other.web;
+    }
+
+    bool operator==(const ConfigData& other) const { return !(*this != other); }
 };

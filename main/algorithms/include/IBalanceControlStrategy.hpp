@@ -2,7 +2,6 @@
 
 #include "BalanceControlTypes.hpp"
 #include "ConfigData.hpp"
-#include "config/PIDConfig.hpp"
 #include <string>
 
 class IBalanceControlStrategy {
@@ -13,7 +12,6 @@ public:
     virtual MotorEffort update(const BalanceControlInput& input) = 0;
     virtual void reset() = 0;
     virtual void applyConfig(const ConfigData& config) = 0;
-    virtual void updatePidConfig(const std::string& pidName, const PIDConfig& config) = 0;
     virtual float getLastSpeedSetpointLeftDPS() const = 0;
     virtual float getLastSpeedSetpointRightDPS() const = 0;
     virtual float getLastTargetYawDeg() const = 0;

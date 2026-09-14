@@ -56,6 +56,26 @@ TEST_CASE("longitudinal position uses signed counts and ignores speed filter alp
     TEST_ASSERT_TRUE(std::fabs(result.leftVelocityMps - result.rightVelocityMps) > 0.001f);
 }
 
+TEST_CASE("odometry direction signs normalize either encoder wiring", "[odometry][directions]") {
+    auto config = testConfig();
+    config.leftForwardSign = -1;
+    config.rightForwardSign = 1;
+    LongitudinalOdometry odometry(config);
+    TEST_ASSERT_TRUE(odometry.update(makeFrame(1, 1000000, 0, 0), 1000000).positionValid);
+
+    const auto result = odometry.update(
+        makeFrame(2, 1005000, -280, 280, 1, 1, -80.0f, 10.0f), 1005000);
+    const double expectedDistance = 280.0 * config.metersPerCountLeft;
+    TEST_ASSERT_TRUE(result.positionValid);
+    TEST_ASSERT_FLOAT_WITHIN(0.000001, expectedDistance, result.positionM);
+    TEST_ASSERT_FLOAT_WITHIN(0.000001, expectedDistance, result.leftPositionM);
+    TEST_ASSERT_FLOAT_WITHIN(0.000001, expectedDistance, result.rightPositionM);
+    TEST_ASSERT_FLOAT_WITHIN(0.000001, 0.0, result.distanceDifferenceM);
+    TEST_ASSERT_TRUE(result.velocityValid);
+    TEST_ASSERT_TRUE(result.leftVelocityMps > 0.0f);
+    TEST_ASSERT_TRUE(result.rightVelocityMps > 0.0f);
+}
+
 TEST_CASE("odometry consumes each sequence once and rejects time regressions", "[odometry][ordering]") {
     LongitudinalOdometry odometry(testConfig());
     TEST_ASSERT_EQUAL(LongitudinalOdometryUpdateStatus::ACCEPTED,

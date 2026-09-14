@@ -67,7 +67,14 @@ esp_err_t JsonConfigParser::serialize(const ConfigData& config, std::string& out
     ADD_SECTION("encoder", json_config_sections::serializeEncoder(config.encoder));
     ADD_SECTION("motor", json_config_sections::serializeMotor(config.motor));
     ADD_SECTION("battery", json_config_sections::serializeBattery(config.battery));
-    ADD_SECTION("behavior", json_config_sections::serializeBehavior(config.behavior));
+    // `behavior.max_target_angular_velocity_dps` is a legacy compatibility
+    // mirror. Always emit the NestedPid canonical value so a full document
+    // cannot contain two different yaw command limits after a strategy-local
+    // edit.
+    SystemBehaviorConfig behavior = config.behavior;
+    behavior.max_target_angular_velocity_dps =
+        config.control.strategies.nested_pid.max_target_angular_velocity_dps;
+    ADD_SECTION("behavior", json_config_sections::serializeBehavior(behavior));
     ADD_SECTION("dimensions", json_config_sections::serializeDimensions(config.dimensions));
     ADD_SECTION("web", json_config_sections::serializeWeb(config.web));
 
@@ -152,6 +159,14 @@ esp_err_t JsonConfigParser::deserialize(const std::string& input, ConfigData& co
 
     // --- Control ---
     cJSON *control_section = cJSON_GetObjectItem(root, "control");
+    const cJSON* strategies_section = control_section
+        ? cJSON_GetObjectItem(control_section, "strategies") : nullptr;
+    const cJSON* nested_pid_section = strategies_section
+        ? cJSON_GetObjectItem(strategies_section, "nested_pid") : nullptr;
+    const bool hasCanonicalNestedYawLimit = nested_pid_section &&
+        cJSON_GetObjectItem(nested_pid_section,
+                            "max_target_angular_velocity_dps");
+    const cJSON* legacyYawLimitItem = nullptr;
     if (control_section) {
         if (!json_config_sections::deserializeControl(control_section, tempConfig.control)) control_success = false;
     } else { ESP_LOGW(TAG, "'control' section missing."); control_success = false; }
@@ -182,9 +197,38 @@ esp_err_t JsonConfigParser::deserialize(const std::string& input, ConfigData& co
 
     // --- System Behavior ---
     cJSON *behavior_section = cJSON_GetObjectItem(root, "behavior");
+    legacyYawLimitItem = behavior_section
+        ? cJSON_GetObjectItem(behavior_section,
+                              "max_target_angular_velocity_dps") : nullptr;
     if (behavior_section) {
         if (!json_config_sections::deserializeBehavior(behavior_section, tempConfig.behavior)) behavior_success = false;
     } else { ESP_LOGW(TAG, "'behavior' section missing."); behavior_success = false; }
+    if (legacyYawLimitItem &&
+        (!cJSON_IsNumber(legacyYawLimitItem) ||
+         !std::isfinite(legacyYawLimitItem->valuedouble))) {
+        ESP_LOGE(TAG, "Invalid legacy behavior yaw command limit");
+        behavior_success = false;
+    }
+    if (control_success && behavior_success && hasCanonicalNestedYawLimit &&
+        legacyYawLimitItem &&
+        std::fabs(static_cast<float>(legacyYawLimitItem->valuedouble) -
+                  tempConfig.control.strategies.nested_pid.max_target_angular_velocity_dps) >
+            1e-5f) {
+        ESP_LOGE(TAG, "Conflicting NestedPid yaw command limits in canonical and legacy fields");
+        control_success = false;
+    }
+    if (control_success && behavior_success) {
+        auto& nested = tempConfig.control.strategies.nested_pid;
+        // v3 documents written before the canonical yaw limit used the
+        // behavior field. Migrate it in memory, then keep the old field as a
+        // synchronized mirror for clients that still read it.
+        if (!hasCanonicalNestedYawLimit) {
+            nested.max_target_angular_velocity_dps =
+                tempConfig.behavior.max_target_angular_velocity_dps;
+        }
+        tempConfig.behavior.max_target_angular_velocity_dps =
+            nested.max_target_angular_velocity_dps;
+    }
     // --- Robot Dimensions ---
     cJSON *dimensions_section = cJSON_GetObjectItem(root, "dimensions");
     if (dimensions_section) {

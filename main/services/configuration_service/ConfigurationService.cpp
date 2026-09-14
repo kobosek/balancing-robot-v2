@@ -1142,6 +1142,17 @@ esp_err_t ConfigurationService::updateConfigFromJson(const std::string& json, st
             oldConfig.config_revision;
         const bool repairRevisionAdvances = unknownRecoveryRepair &&
             tempConfig.config_revision > oldConfig.config_revision;
+        const auto& oldDirections = oldConfig.control.strategies.longitudinal_cascade;
+        const auto& newDirections = tempConfig.control.strategies.longitudinal_cascade;
+        const bool longitudinalDirectionsChanged =
+            oldDirections.left_encoder_forward_sign !=
+                newDirections.left_encoder_forward_sign ||
+            oldDirections.right_encoder_forward_sign !=
+                newDirections.right_encoder_forward_sign ||
+            oldDirections.left_output_sign != newDirections.left_output_sign ||
+            oldDirections.right_output_sign != newDirections.right_output_sign ||
+            oldDirections.velocity_to_pitch_sign != newDirections.velocity_to_pitch_sign ||
+            oldDirections.pitch_to_effort_sign != newDirections.pitch_to_effort_sign;
         // An unknown recovery has no trustworthy base document.  Accept only
         // an explicit, complete repair whose revision advances the last RAM
         // snapshot; accepting an equal revision would let a rejected repair
@@ -1157,6 +1168,10 @@ esp_err_t ConfigurationService::updateConfigFromJson(const std::string& json, st
                    tempConfig.control.strategies.active != oldConfig.control.strategies.active) {
             if (error) *error = "Strategy changes require an inactive control mode";
             ESP_LOGW(TAG, "Rejected strategy change while control mode is active");
+            ret = ESP_ERR_INVALID_STATE;
+        } else if (m_controlActive && longitudinalDirectionsChanged) {
+            if (error) *error = "Longitudinal direction changes require an inactive control mode";
+            ESP_LOGW(TAG, "Rejected longitudinal direction change while control mode is active");
             ret = ESP_ERR_INVALID_STATE;
         } else if (!unknownRecoveryRepair &&
                    tempConfig.control.strategies.revision != oldConfig.control.strategies.revision) {

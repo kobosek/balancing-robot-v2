@@ -57,6 +57,10 @@ TEST_CASE("version three keeps strategy sets separate and rejects incomplete act
     source.control.strategies.longitudinal_cascade.sync_kd = 0.2f;
     source.control.strategies.longitudinal_cascade.sync_position_deadband_m = 0.003f;
     source.control.strategies.longitudinal_cascade.sync_velocity_deadband_mps = 0.012f;
+    source.control.strategies.longitudinal_cascade.velocity_to_pitch_sign = -1;
+    source.control.strategies.longitudinal_cascade.pitch_to_effort_sign = -1;
+    source.control.strategies.nested_pid.max_target_angular_velocity_dps = 123.0f;
+    source.behavior.max_target_angular_velocity_dps = 123.0f;
     source.control.strategies.longitudinal_cascade.motion_request_limit_enabled = false;
     source.control.strategies.longitudinal_cascade.motion_request_limit_pitch_start_deg = 5.0f;
     source.control.strategies.longitudinal_cascade.motion_request_limit_pitch_full_deg = 9.0f;
@@ -99,6 +103,14 @@ TEST_CASE("version three keeps strategy sets separate and rejects incomplete act
                             roundTrip.control.strategies.longitudinal_cascade.sync_position_deadband_m);
     TEST_ASSERT_EQUAL_FLOAT(0.012f,
                             roundTrip.control.strategies.longitudinal_cascade.sync_velocity_deadband_mps);
+    TEST_ASSERT_EQUAL_INT(-1,
+                          roundTrip.control.strategies.longitudinal_cascade.velocity_to_pitch_sign);
+    TEST_ASSERT_EQUAL_INT(-1,
+                          roundTrip.control.strategies.longitudinal_cascade.pitch_to_effort_sign);
+    TEST_ASSERT_EQUAL_FLOAT(123.0f,
+                            roundTrip.control.strategies.nested_pid.max_target_angular_velocity_dps);
+    TEST_ASSERT_EQUAL_FLOAT(123.0f,
+                            roundTrip.behavior.max_target_angular_velocity_dps);
     TEST_ASSERT_EQUAL_UINT32(17, roundTrip.config_revision);
     TEST_ASSERT_EQUAL_INT(0, static_cast<int>(roundTrip.control.strategies.active));
 
@@ -117,6 +129,29 @@ TEST_CASE("version three keeps strategy sets separate and rejects incomplete act
     cJSON_free(unavailable);
     cJSON_Delete(root);
 }
+TEST_CASE("legacy behavior yaw limit migrates to the NestedPid strategy record", "[config][strategy]") {
+    JsonConfigParser parser;
+    ConfigData source;
+    source.wifi.ssid = "test-network";
+    std::string json;
+    TEST_ASSERT_EQUAL(ESP_OK, parser.serialize(source, json));
+    cJSON* root = cJSON_Parse(json.c_str());
+    cJSON* control = cJSON_GetObjectItem(root, "control");
+    cJSON* strategies = cJSON_GetObjectItem(control, "strategies");
+    cJSON* nested = cJSON_GetObjectItem(strategies, "nested_pid");
+    cJSON_DeleteItemFromObject(nested, "max_target_angular_velocity_dps");
+    cJSON* behavior = cJSON_GetObjectItem(root, "behavior");
+    cJSON_ReplaceItemInObject(behavior, "max_target_angular_velocity_dps",
+                              cJSON_CreateNumber(87.0));
+    char* legacy = cJSON_PrintUnformatted(root);
+    ConfigData migrated;
+    TEST_ASSERT_EQUAL(ESP_OK, parser.deserialize(legacy, migrated));
+    TEST_ASSERT_EQUAL_FLOAT(87.0f,
+                            migrated.control.strategies.nested_pid.max_target_angular_velocity_dps);
+    TEST_ASSERT_EQUAL_FLOAT(87.0f, migrated.behavior.max_target_angular_velocity_dps);
+    cJSON_free(legacy);
+    cJSON_Delete(root);
+}
 TEST_CASE("canonical nested strategy fields reject conflicting compatibility aliases", "[config][strategy]") {
     JsonConfigParser parser;
     ConfigData source;
@@ -130,6 +165,50 @@ TEST_CASE("canonical nested strategy fields reject conflicting compatibility ali
     ConfigData output;
     TEST_ASSERT_NOT_EQUAL(ESP_OK, parser.deserialize(conflicting, output));
     cJSON_free(conflicting);
+    cJSON_Delete(root);
+
+    TEST_ASSERT_EQUAL(ESP_OK, parser.serialize(source, json));
+    root = cJSON_Parse(json.c_str());
+    cJSON* behavior = cJSON_GetObjectItem(root, "behavior");
+    cJSON_ReplaceItemInObject(behavior, "max_target_angular_velocity_dps",
+                              cJSON_CreateNumber(99.0));
+    conflicting = cJSON_PrintUnformatted(root);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, parser.deserialize(conflicting, output));
+    cJSON_free(conflicting);
+    cJSON_Delete(root);
+}
+
+TEST_CASE("direction fields round-trip and reject non-unit signs", "[config][strategy]") {
+    JsonConfigParser parser;
+    ConfigData source;
+    source.wifi.ssid = "test-network";
+    auto& longitudinal = source.control.strategies.longitudinal_cascade;
+    longitudinal.left_encoder_forward_sign = -1;
+    longitudinal.right_encoder_forward_sign = 1;
+    longitudinal.left_output_sign = -1;
+    longitudinal.right_output_sign = -1;
+    longitudinal.velocity_to_pitch_sign = -1;
+    longitudinal.pitch_to_effort_sign = -1;
+    std::string json;
+    TEST_ASSERT_EQUAL(ESP_OK, parser.serialize(source, json));
+    ConfigData roundTrip;
+    TEST_ASSERT_EQUAL(ESP_OK, parser.deserialize(json, roundTrip));
+    TEST_ASSERT_EQUAL_INT(-1, roundTrip.control.strategies.longitudinal_cascade.left_encoder_forward_sign);
+    TEST_ASSERT_EQUAL_INT(1, roundTrip.control.strategies.longitudinal_cascade.right_encoder_forward_sign);
+    TEST_ASSERT_EQUAL_INT(-1, roundTrip.control.strategies.longitudinal_cascade.left_output_sign);
+    TEST_ASSERT_EQUAL_INT(-1, roundTrip.control.strategies.longitudinal_cascade.right_output_sign);
+    TEST_ASSERT_EQUAL_INT(-1, roundTrip.control.strategies.longitudinal_cascade.velocity_to_pitch_sign);
+    TEST_ASSERT_EQUAL_INT(-1, roundTrip.control.strategies.longitudinal_cascade.pitch_to_effort_sign);
+
+    cJSON* root = cJSON_Parse(json.c_str());
+    cJSON* control = cJSON_GetObjectItem(root, "control");
+    cJSON* strategies = cJSON_GetObjectItem(control, "strategies");
+    cJSON* longitudinalObject = cJSON_GetObjectItem(strategies, "longitudinal_cascade");
+    cJSON_ReplaceItemInObject(longitudinalObject, "left_output_sign", cJSON_CreateNumber(0.0));
+    char* invalid = cJSON_PrintUnformatted(root);
+    ConfigData output;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, parser.deserialize(invalid, output));
+    cJSON_free(invalid);
     cJSON_Delete(root);
 }
 TEST_CASE("v3 files without loop mode keep the safe baseline or recover a complete velocity setup", "[config][strategy]") {

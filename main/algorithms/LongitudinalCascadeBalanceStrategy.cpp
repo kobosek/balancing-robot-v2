@@ -41,6 +41,11 @@ double removeDeadband(double value, double deadband)
     }
     return std::copysign(magnitude - deadband, value);
 }
+
+float directionSign(int8_t sign)
+{
+    return sign < 0 ? -1.0f : 1.0f;
+}
 }
 
 LongitudinalCascadeBalanceStrategy::LongitudinalCascadeBalanceStrategy()
@@ -59,12 +64,18 @@ MotorEffort LongitudinalCascadeBalanceStrategy::update(const BalanceControlInput
     m_last_diagnostics.phase = m_config.configured
         ? BalanceControlPhase::PITCH_BASELINE
         : BalanceControlPhase::INACTIVE;
+    m_last_diagnostics.faultReason = m_config.configured
+        ? BalanceControlFaultReason::NONE
+        : BalanceControlFaultReason::NOT_CONFIGURED;
     m_last_diagnostics.odometryGeneration = input.odometry.generation;
     m_last_diagnostics.odometrySequence = input.odometry.odometrySequence;
     if (!m_config.configured || !std::isfinite(input.dt) || input.dt <= 0.0f ||
         input.dt > MAX_CONTROL_DT_SECONDS ||
         !std::isfinite(input.currentPitch_deg) ||
         !std::isfinite(input.currentPitchRate_dps)) {
+        m_last_diagnostics.faultReason = !m_config.configured
+            ? BalanceControlFaultReason::NOT_CONFIGURED
+            : BalanceControlFaultReason::INVALID_INPUT;
         return {};
     }
 
@@ -77,6 +88,7 @@ MotorEffort LongitudinalCascadeBalanceStrategy::update(const BalanceControlInput
             return updateMotion(input);
         default:
             m_last_diagnostics.phase = BalanceControlPhase::FAULT;
+            m_last_diagnostics.faultReason = BalanceControlFaultReason::UNKNOWN_MODE;
             return {};
     }
 }
@@ -84,10 +96,6 @@ MotorEffort LongitudinalCascadeBalanceStrategy::update(const BalanceControlInput
 MotorEffort LongitudinalCascadeBalanceStrategy::updatePitchBaseline(
     const BalanceControlInput& input)
 {
-    if (!std::isfinite(input.targetPitchOffset_deg)) {
-        return {};
-    }
-
     if (m_motion_arm_initialized || m_motion_session_initialized ||
         m_motion_phase == BalanceControlPhase::DRIVE ||
         m_motion_phase == BalanceControlPhase::BRAKE ||
@@ -96,8 +104,10 @@ MotorEffort LongitudinalCascadeBalanceStrategy::updatePitchBaseline(
         resetMotionState();
     }
 
-    const float requestedPitch = clampTargetPitch(
-        m_config.pitch_trim_deg + input.targetPitchOffset_deg);
+    // Longitudinal pitch-only mode is a stationary balance baseline.  Its
+    // pitch trim is strategy-owned; the NestedPid joystick pitch offset must
+    // never leak into this strategy through the legacy input field.
+    const float requestedPitch = clampTargetPitch(m_config.pitch_trim_deg);
     // Keep the slew state transactional as well: a finite sample can still
     // produce an invalid PID intermediate (for example after a bad runtime
     // parameter update), and that sample must not leave a new target behind.
@@ -121,6 +131,7 @@ MotorEffort LongitudinalCascadeBalanceStrategy::updatePitchBaseline(
         input.currentPitchRate_dps,
         input.dt);
     if (!pitchPreview.valid) {
+        m_last_diagnostics.faultReason = BalanceControlFaultReason::INVALID_PID;
         return {};
     }
     m_targetPitch_deg = targetPitch;
@@ -134,9 +145,11 @@ MotorEffort LongitudinalCascadeBalanceStrategy::updatePitchBaseline(
         m_pitchPid.reset();
         m_targetPitch_deg = m_config.pitch_trim_deg;
         m_target_pitch_initialized = false;
+        m_last_diagnostics.faultReason = BalanceControlFaultReason::INVALID_PID;
         return {};
     }
-    const float balanceRequested = pitchStep.output;
+    const float balanceRequested = directionSign(m_config.pitch_to_effort_sign) *
+        pitchStep.output;
 
     // Position, velocity and wheel synchronization are intentionally zero in
     // stage D. Their state must not accumulate in this pitch-only baseline.
@@ -145,6 +158,7 @@ MotorEffort LongitudinalCascadeBalanceStrategy::updatePitchBaseline(
         0.0f,
         m_config.max_effort,
         m_config.sync_max_effort);
+    const MotorEffort output = applyOutputDirection(mixed);
 
     m_last_target_pitch_deg = targetPitch;
     m_last_speed_setpoint_left_dps = 0.0f;
@@ -155,8 +169,7 @@ MotorEffort LongitudinalCascadeBalanceStrategy::updatePitchBaseline(
     m_last_diagnostics.valid = true;
     m_last_diagnostics.targetPitchValid = true;
     m_last_diagnostics.phase = BalanceControlPhase::PITCH_BASELINE;
-    m_last_diagnostics.targetPitchClamped = requestedPitch !=
-        (m_config.pitch_trim_deg + input.targetPitchOffset_deg);
+    m_last_diagnostics.targetPitchClamped = false;
     m_last_diagnostics.targetPitchRateLimited = targetPitch != requestedPitch;
     m_last_diagnostics.balanceSaturated = pitchStep.saturated || mixed.balanceSaturated;
     m_last_diagnostics.pitchPidSaturated = pitchStep.saturated;
@@ -164,23 +177,24 @@ MotorEffort LongitudinalCascadeBalanceStrategy::updatePitchBaseline(
         mixed.syncLimited || mixed.wheelLimited;
     m_last_diagnostics.syncLimited = mixed.syncLimited;
     m_last_diagnostics.targetPitch_deg = targetPitch;
-    m_last_diagnostics.requestedBalanceEffort = pitchStep.unclampedOutput;
+    m_last_diagnostics.requestedBalanceEffort = directionSign(
+        m_config.pitch_to_effort_sign) * pitchStep.unclampedOutput;
     m_last_diagnostics.balanceEffort = mixed.balanceEffort;
     m_last_diagnostics.requestedSyncEffort = 0.0f;
     m_last_diagnostics.syncEffort = mixed.syncEffort;
-    m_last_diagnostics.leftEffort = mixed.left;
-    m_last_diagnostics.rightEffort = mixed.right;
+    m_last_diagnostics.leftEffort = output.left;
+    m_last_diagnostics.rightEffort = output.right;
     m_last_balance_effort = mixed.balanceEffort;
-    m_last_left_effort = mixed.left;
-    m_last_right_effort = mixed.right;
+    m_last_left_effort = output.left;
+    m_last_right_effort = output.right;
 
-    return {mixed.left, mixed.right};
+    return output;
 }
 
 MotorEffort LongitudinalCascadeBalanceStrategy::updateMotion(
     const BalanceControlInput& input)
 {
-    const auto failMotion = [&]() -> MotorEffort {
+    const auto failMotion = [&](BalanceControlFaultReason reason) -> MotorEffort {
         // A longitudinal fault must not leave a profiled target or an
         // integral alive for a later control step. RobotController still
         // latches the fault and requires a new arm before motor output can
@@ -190,6 +204,7 @@ MotorEffort LongitudinalCascadeBalanceStrategy::updateMotion(
         resetMotionState();
         m_motion_phase = BalanceControlPhase::FAULT;
         m_last_diagnostics.phase = m_motion_phase;
+        m_last_diagnostics.faultReason = reason;
         m_last_diagnostics.positionLoopEnabled = false;
         m_last_diagnostics.velocityLoopEnabled = false;
         m_last_diagnostics.synchronizationEnabled = false;
@@ -231,7 +246,7 @@ MotorEffort LongitudinalCascadeBalanceStrategy::updateMotion(
         !std::isfinite(input.currentSpeedRight_dps)) {
         m_velocity_anti_windup = false;
         m_last_diagnostics.velocityFeedbackValid = false;
-        return failMotion();
+        return failMotion(BalanceControlFaultReason::INVALID_ODOMETRY);
     }
 
     if (m_odometry_generation_initialized &&
@@ -239,7 +254,7 @@ MotorEffort LongitudinalCascadeBalanceStrategy::updateMotion(
         // A newly recaptured odometry base must not inherit a position or
         // differential-distance target from the previous continuity epoch.
         m_velocity_anti_windup = false;
-        return failMotion();
+        return failMotion(BalanceControlFaultReason::ODOMETRY_GENERATION);
     }
     if (!m_odometry_generation_initialized) {
         m_odometry_generation = input.odometry.generation;
@@ -281,13 +296,17 @@ MotorEffort LongitudinalCascadeBalanceStrategy::updateMotion(
         ? input.motion.targetVelocityMps : 0.0f;
     const bool commandFinite = !input.motion.valid || std::isfinite(commandVelocity);
     if (!commandFinite) {
-        return failMotion();
+        return failMotion(BalanceControlFaultReason::INVALID_COMMAND);
     }
     const float boundedCommand = commandFinite
         ? clampSymmetric(commandVelocity, m_config.max_velocity_mps)
         : 0.0f;
     const bool commandActive = commandFresh && !input.motion.stop &&
         commandFinite && std::fabs(boundedCommand) > 1e-5f;
+    // Select the source before applying the recovery limiter. A fresh
+    // external command owns the profile for this sample, even when the
+    // limiter scales it to zero; a position-return request may be considered
+    // only while no fresh command is present.
     const float requestScale = commandActive
         ? computeMotionRequestScale(input) : 1.0f;
     const float profiledCommand = commandActive
@@ -355,7 +374,7 @@ MotorEffort LongitudinalCascadeBalanceStrategy::updateMotion(
     if (!std::isfinite(holdVelocityRequestD) ||
         holdVelocityRequestD > static_cast<double>(FLT_MAX) ||
         holdVelocityRequestD < -static_cast<double>(FLT_MAX)) {
-        return failMotion();
+        return failMotion(BalanceControlFaultReason::INVALID_INPUT);
     }
     const float holdVelocityRequest = static_cast<float>(holdVelocityRequestD);
     const float holdVelocityTargetBeforeRequestLimit = positionCorrectionAllowed
@@ -364,22 +383,23 @@ MotorEffort LongitudinalCascadeBalanceStrategy::updateMotion(
     // The E2 request limiter also gates a position-return request.  A HOLD
     // correction must not regain a large external velocity command's headroom
     // while the robot is already close to its pitch or effort boundary.
-    const float positionRequestScale = positionCorrectionAllowed && !commandActive
+    const bool positionSourceSelected = positionCorrectionAllowed && !commandActive;
+    const float positionRequestScale = positionSourceSelected
         ? computeMotionRequestScale(input) : 1.0f;
-    const float holdVelocityTarget = holdVelocityTargetBeforeRequestLimit *
-        positionRequestScale;
-    const bool positionProfileRequested = positionCorrectionAllowed &&
+    const float holdVelocityTarget = positionSourceSelected
+        ? holdVelocityTargetBeforeRequestLimit * positionRequestScale : 0.0f;
+    const bool positionProfileRequested = positionSourceSelected &&
         std::fabs(holdVelocityTarget) > 1e-5f;
-    const float profileCommand = driveRequested ? profiledCommand
+    const float profileCommand = commandActive ? profiledCommand
         : (positionProfileRequested ? holdVelocityTarget : 0.0f);
-    const bool profileDriveRequested = driveRequested ||
-        positionProfileRequested;
+    const bool profileDriveRequested = commandActive
+        ? driveRequested : positionProfileRequested;
 
     const float previousProfileVelocity = m_motionProfile.targetVelocityMps();
     const auto profileResult = m_motionProfile.update(
         profileCommand, profileDriveRequested, input.dt);
     if (!profileResult.valid) {
-        return failMotion();
+        return failMotion(BalanceControlFaultReason::INVALID_PROFILE);
     }
     const bool wheelsStoppedForEntry =
         velocityOutsideDeadband(input.odometry.leftVelocityMps,
@@ -499,7 +519,7 @@ MotorEffort LongitudinalCascadeBalanceStrategy::updateMotion(
     if (!std::isfinite(syncRequestedD) ||
         syncRequestedD > static_cast<double>(FLT_MAX) ||
         syncRequestedD < -static_cast<double>(FLT_MAX)) {
-        return failMotion();
+        return failMotion(BalanceControlFaultReason::INVALID_INPUT);
     }
     const float syncRequested = static_cast<float>(syncRequestedD);
 
@@ -509,10 +529,18 @@ MotorEffort LongitudinalCascadeBalanceStrategy::updateMotion(
         input.odometry.velocityMps,
         input.dt);
     if (!velocityPreview.valid) {
-        return failMotion();
+        return failMotion(BalanceControlFaultReason::INVALID_PID);
     }
 
-    const float previewCorrection = velocityPreview.output;
+    const float velocitySign = directionSign(m_config.velocity_to_pitch_sign);
+    const float pitchSign = directionSign(m_config.pitch_to_effort_sign);
+    // Convert the velocity loop result into the configured physical pitch
+    // direction before applying pitch limits.  The PID itself remains in its
+    // native error/output units, so changing the installation convention does
+    // not alter the PID gains or NestedPid behavior.
+    const float previewCorrection = velocitySign * velocityPreview.output;
+    const float previewUnclampedCorrection = velocitySign *
+        velocityPreview.unclampedOutput;
     const float previewBoundedCorrection = clampSymmetric(
         previewCorrection, m_config.max_pitch_offset_deg);
     const float previewPitch = clampTargetPitch(
@@ -540,38 +568,45 @@ MotorEffort LongitudinalCascadeBalanceStrategy::updateMotion(
         input.currentPitchRate_dps,
         input.dt);
     if (!pitchPreview.valid) {
-        return failMotion();
+        return failMotion(BalanceControlFaultReason::INVALID_PID);
     }
+    const float pitchPreviewEffort = pitchSign * pitchPreview.output;
+    const float pitchPreviewUnclampedEffort = pitchSign *
+        pitchPreview.unclampedOutput;
     const auto mixerPreview = mixEfforts(
-        pitchPreview.output,
+        pitchPreviewEffort,
         syncRequested,
         m_config.max_effort,
         m_config.sync_max_effort);
     // Anti-windup follows the candidate trapezoidal integral change, rather
     // than the instantaneous error.  This matters when the error changes
     // sign while the candidate integral is still moving toward a limit.
-    const bool integralPushesPositive = velocityPreview.integralDelta > 1e-5f;
-    const bool integralPushesNegative = velocityPreview.integralDelta < -1e-5f;
+    const float physicalIntegralDelta = velocitySign *
+        velocityPreview.integralDelta;
+    const bool integralPushesPositive = physicalIntegralDelta > 1e-5f;
+    const bool integralPushesNegative = physicalIntegralDelta < -1e-5f;
     const bool correctionLimitBlocks =
-        (integralPushesPositive && previewCorrection > previewBoundedCorrection + 1e-5f) ||
-        (integralPushesNegative && previewCorrection < previewBoundedCorrection - 1e-5f);
+        (integralPushesPositive && previewUnclampedCorrection >
+            previewBoundedCorrection + 1e-5f) ||
+        (integralPushesNegative && previewUnclampedCorrection <
+            previewBoundedCorrection - 1e-5f);
     const bool pitchSlewBlocks =
         (integralPushesPositive && previewOffset > reachableOffset + 1e-5f) ||
         (integralPushesNegative && previewOffset < reachableOffset - 1e-5f);
     const bool pidLimitBlocks =
-        (integralPushesPositive && velocityPreview.unclampedOutput >
-            velocityPreview.output + 1e-5f) ||
-        (integralPushesNegative && velocityPreview.unclampedOutput <
-            velocityPreview.output - 1e-5f);
+        (integralPushesPositive && previewUnclampedCorrection >
+            previewCorrection + 1e-5f) ||
+        (integralPushesNegative && previewUnclampedCorrection <
+            previewCorrection - 1e-5f);
     const bool pitchOutputLimitBlocks =
-        (integralPushesPositive && pitchPreview.unclampedOutput >
-            pitchPreview.output + 1e-5f) ||
-        (integralPushesNegative && pitchPreview.unclampedOutput <
-            pitchPreview.output - 1e-5f);
+        (integralPushesPositive && pitchPreviewUnclampedEffort >
+            pitchPreviewEffort + 1e-5f) ||
+        (integralPushesNegative && pitchPreviewUnclampedEffort <
+            pitchPreviewEffort - 1e-5f);
     const bool mixerLimitBlocks =
-        (integralPushesPositive && pitchPreview.output >
+        (integralPushesPositive && pitchPreviewEffort >
             mixerPreview.balanceEffort + 1e-5f) ||
-        (integralPushesNegative && pitchPreview.output <
+        (integralPushesNegative && pitchPreviewEffort <
             mixerPreview.balanceEffort - 1e-5f);
     const bool suppressIntegral = correctionLimitBlocks || pitchSlewBlocks ||
         pidLimitBlocks || pitchOutputLimitBlocks || mixerLimitBlocks;
@@ -582,17 +617,17 @@ MotorEffort LongitudinalCascadeBalanceStrategy::updateMotion(
         input.dt,
         !suppressIntegral);
     if (!velocityStep.valid) {
-        return failMotion();
+        return failMotion(BalanceControlFaultReason::INVALID_PID);
     }
 
-    const float requestedCorrection = velocityStep.output;
+    const float requestedCorrection = velocitySign * velocityStep.output;
     const float boundedCorrection = clampSymmetric(
         requestedCorrection, m_config.max_pitch_offset_deg);
     const float requestedPitch = clampTargetPitch(
         m_config.pitch_trim_deg + boundedCorrection);
     const float targetPitch = slewTargetPitch(requestedPitch, input.dt);
     m_velocity_anti_windup = suppressIntegral &&
-        std::fabs(velocityPreview.integralDelta) > 1e-5f;
+        std::fabs(physicalIntegralDelta) > 1e-5f;
 
     const auto pitchStep = m_pitchPid.computeWithMeasurementRateDetailed(
         targetPitch,
@@ -600,14 +635,16 @@ MotorEffort LongitudinalCascadeBalanceStrategy::updateMotion(
         input.currentPitchRate_dps,
         input.dt);
     if (!pitchStep.valid) {
-        return failMotion();
+        return failMotion(BalanceControlFaultReason::INVALID_PID);
     }
 
+    const float balanceRequested = pitchSign * pitchStep.output;
     const LongitudinalMixerResult mixed = mixEfforts(
-        pitchStep.output,
+        balanceRequested,
         syncRequested,
         m_config.max_effort,
         m_config.sync_max_effort);
+    const MotorEffort output = applyOutputDirection(mixed);
 
     m_last_target_pitch_deg = targetPitch;
     m_last_target_velocity_mps = targetVelocity;
@@ -667,17 +704,18 @@ MotorEffort LongitudinalCascadeBalanceStrategy::updateMotion(
     m_last_diagnostics.mixerSaturated = mixed.balanceSaturated ||
         mixed.syncLimited || mixed.wheelLimited;
     m_last_diagnostics.syncLimited = mixed.syncLimited;
-    m_last_diagnostics.requestedBalanceEffort = pitchStep.unclampedOutput;
+    m_last_diagnostics.requestedBalanceEffort = pitchSign *
+        pitchStep.unclampedOutput;
     m_last_diagnostics.balanceEffort = mixed.balanceEffort;
     m_last_diagnostics.requestedSyncEffort = syncRequested;
     m_last_diagnostics.syncEffort = mixed.syncEffort;
-    m_last_diagnostics.leftEffort = mixed.left;
-    m_last_diagnostics.rightEffort = mixed.right;
+    m_last_diagnostics.leftEffort = output.left;
+    m_last_diagnostics.rightEffort = output.right;
     m_last_balance_effort = mixed.balanceEffort;
-    m_last_left_effort = mixed.left;
-    m_last_right_effort = mixed.right;
+    m_last_left_effort = output.left;
+    m_last_right_effort = output.right;
 
-    return {mixed.left, mixed.right};
+    return output;
 }
 
 void LongitudinalCascadeBalanceStrategy::reset()
@@ -755,6 +793,18 @@ float LongitudinalCascadeBalanceStrategy::computeMotionRequestScale(
                     limit.motion_request_limit_effort_full));
 }
 
+MotorEffort LongitudinalCascadeBalanceStrategy::applyOutputDirection(
+    const LongitudinalMixerResult& mixed) const
+{
+    // The mixer operates in a common wheel-forward domain.  Only this
+    // adapter translates that domain to the two MotorService channels; the
+    // actuator deadzone remains exclusively in MotorService.
+    return {
+        directionSign(m_config.left_output_sign) * mixed.left,
+        directionSign(m_config.right_output_sign) * mixed.right
+    };
+}
+
 void LongitudinalCascadeBalanceStrategy::applyConfig(const ConfigData& config)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -788,6 +838,12 @@ void LongitudinalCascadeBalanceStrategy::applyConfig(const ConfigData& config)
         previous.sync_position_deadband_m != next.sync_position_deadband_m ||
         previous.sync_velocity_deadband_mps != next.sync_velocity_deadband_mps ||
         previous.sync_max_effort != next.sync_max_effort ||
+        previous.left_encoder_forward_sign != next.left_encoder_forward_sign ||
+        previous.right_encoder_forward_sign != next.right_encoder_forward_sign ||
+        previous.left_output_sign != next.left_output_sign ||
+        previous.right_output_sign != next.right_output_sign ||
+        previous.velocity_to_pitch_sign != next.velocity_to_pitch_sign ||
+        previous.pitch_to_effort_sign != next.pitch_to_effort_sign ||
         previous.motion_request_limit_enabled != next.motion_request_limit_enabled ||
         previous.motion_request_limit_pitch_start_deg != next.motion_request_limit_pitch_start_deg ||
         previous.motion_request_limit_pitch_full_deg != next.motion_request_limit_pitch_full_deg ||
@@ -831,19 +887,6 @@ void LongitudinalCascadeBalanceStrategy::applyConfig(const ConfigData& config)
         m_last_diagnostics.phase = m_config.configured
             ? BalanceControlPhase::PITCH_BASELINE
             : BalanceControlPhase::INACTIVE;
-    }
-}
-
-void LongitudinalCascadeBalanceStrategy::updatePidConfig(const std::string& pidName,
-                                                         const PIDConfig& config)
-{
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (pidName == "pitch") {
-        m_config.pitch = config;
-        m_pitchPid.updateParams(config);
-    } else if (pidName == "velocity") {
-        m_config.velocity = config;
-        m_velocityPid.updateParams(config);
     }
 }
 

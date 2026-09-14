@@ -53,7 +53,7 @@ private:
     float m_joystick_deadzone;                  // Declaration Order: 12 (From SystemBehaviorConfig)
     uint64_t m_input_timeout_us;                // Declaration Order: 13 (From SystemBehaviorConfig)
     uint64_t m_timeout_check_interval_us;       // Declaration Order: 14 (From SystemBehaviorConfig)
-    float m_max_angular_velocity_dps;           // Declaration Order: 15 (From SystemBehaviorConfig)
+    float m_max_angular_velocity_dps;           // Declaration Order: 15 (NestedPid strategy)
     BalanceStrategyId m_active_strategy = BalanceStrategyId::NESTED_PID;
     float m_max_linear_velocity_mps = 0.0f;
     uint64_t m_linear_command_sequence = 0;
@@ -70,7 +70,8 @@ private:
 
     // --- Internal Helpers ---
     void periodicTimeoutCheck();
-    void publishTargetCommand(float pitchOffsetDeg, float angVelDps);
+    void publishTargetCommand(float pitchOffsetDeg, float angVelDps,
+                               uint64_t armId);
     void publishLinearVelocityCommand(float velocityMps, bool stop,
                                       uint64_t armId,
                                       uint64_t sequence = 0,

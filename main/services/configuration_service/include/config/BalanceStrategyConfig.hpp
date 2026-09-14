@@ -72,6 +72,9 @@ struct NestedPidStrategyConfig {
     PIDConfig yaw_angle = {2.0f, 0.0f, 0.05f, -60.0f, 60.0f, -20.0f, 20.0f};
     PIDConfig yaw_rate;
     float max_target_pitch_offset_deg = 5.0f;
+    // Canonical yaw-rate command limit for NestedPid.  The legacy behavior
+    // mirror is retained in SystemBehaviorConfig for migration only.
+    float max_target_angular_velocity_dps = 60.0f;
     bool yaw_control_enabled = false;
     uint32_t revision = 0;
 
@@ -83,6 +86,7 @@ struct NestedPidStrategyConfig {
                yaw_angle != other.yaw_angle ||
                yaw_rate != other.yaw_rate ||
                max_target_pitch_offset_deg != other.max_target_pitch_offset_deg ||
+               max_target_angular_velocity_dps != other.max_target_angular_velocity_dps ||
                yaw_control_enabled != other.yaw_control_enabled ||
                revision != other.revision;
     }
@@ -122,6 +126,15 @@ struct LongitudinalCascadeStrategyConfig {
     float sync_velocity_deadband_mps = 0.0f;
     float sync_max_effort = 0.0f;
     float max_effort = 1.0f;
+    // Signs are strategy-local transforms.  EncoderService and NestedPid
+    // retain their existing conventions; these values define the
+    // longitudinal wheel-forward convention and the two cascade directions.
+    int8_t left_encoder_forward_sign = 1;
+    int8_t right_encoder_forward_sign = -1;
+    int8_t left_output_sign = 1;
+    int8_t right_output_sign = 1;
+    int8_t velocity_to_pitch_sign = 1;
+    int8_t pitch_to_effort_sign = 1;
     LongitudinalLoopMode loop_mode = LongitudinalLoopMode::PITCH_ONLY;
     // The profile reaching zero is only the beginning of braking.  These
     // independent thresholds describe the measured conditions required to
@@ -167,6 +180,12 @@ struct LongitudinalCascadeStrategyConfig {
                sync_velocity_deadband_mps != other.sync_velocity_deadband_mps ||
                sync_max_effort != other.sync_max_effort ||
                max_effort != other.max_effort ||
+               left_encoder_forward_sign != other.left_encoder_forward_sign ||
+               right_encoder_forward_sign != other.right_encoder_forward_sign ||
+               left_output_sign != other.left_output_sign ||
+               right_output_sign != other.right_output_sign ||
+               velocity_to_pitch_sign != other.velocity_to_pitch_sign ||
+               pitch_to_effort_sign != other.pitch_to_effort_sign ||
                loop_mode != other.loop_mode ||
                hold_enter_velocity_mps != other.hold_enter_velocity_mps ||
                hold_exit_velocity_mps != other.hold_exit_velocity_mps ||

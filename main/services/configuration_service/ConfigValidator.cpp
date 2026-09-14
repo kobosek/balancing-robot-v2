@@ -253,8 +253,16 @@ bool ConfigValidator::validate(const ConfigData& config, std::string& error) con
 
     const auto& nested = config.control.strategies.nested_pid;
     if (config.control.max_target_pitch_offset_deg != nested.max_target_pitch_offset_deg ||
-        config.control.yaw_control_enabled != nested.yaw_control_enabled) {
+        config.control.yaw_control_enabled != nested.yaw_control_enabled ||
+        config.behavior.max_target_angular_velocity_dps !=
+            nested.max_target_angular_velocity_dps) {
         error = "control compatibility fields do not match control.strategies.nested_pid";
+        return false;
+    }
+    if (!std::isfinite(nested.max_target_angular_velocity_dps) ||
+        nested.max_target_angular_velocity_dps <= 0.0f ||
+        nested.max_target_angular_velocity_dps > 1000.0f) {
+        error = "control.strategies.nested_pid.max_target_angular_velocity_dps (>0, <=1k)";
         return false;
     }
     if (!validate_pid(nested.angle, "control.strategies.nested_pid.angle") ||
@@ -304,6 +312,21 @@ bool ConfigValidator::validate(const ConfigData& config, std::string& error) con
             error = "control.strategies.longitudinal_cascade contains a non-finite value";
             return false;
         }
+    }
+    if ((longitudinal.left_encoder_forward_sign != -1 &&
+         longitudinal.left_encoder_forward_sign != 1) ||
+        (longitudinal.right_encoder_forward_sign != -1 &&
+         longitudinal.right_encoder_forward_sign != 1) ||
+        (longitudinal.left_output_sign != -1 &&
+         longitudinal.left_output_sign != 1) ||
+        (longitudinal.right_output_sign != -1 &&
+         longitudinal.right_output_sign != 1) ||
+        (longitudinal.velocity_to_pitch_sign != -1 &&
+         longitudinal.velocity_to_pitch_sign != 1) ||
+        (longitudinal.pitch_to_effort_sign != -1 &&
+         longitudinal.pitch_to_effort_sign != 1)) {
+        error = "longitudinal_cascade direction signs must be -1 or 1";
+        return false;
     }
     if (longitudinal.max_effort < 0.0f || longitudinal.max_effort > 1.0f ||
         longitudinal.sync_max_effort < 0.0f || longitudinal.sync_max_effort > 1.0f) {
@@ -488,10 +511,6 @@ bool ConfigValidator::validate(const ConfigData& config, std::string& error) con
     }
     if (config.behavior.joystick_check_interval_ms < 1 || config.behavior.joystick_check_interval_ms > 10000) {
         error = "behavior.joystick_check_interval_ms [1,10k]";
-        return false;
-    }
-    if (config.behavior.max_target_angular_velocity_dps <= 0.0f || config.behavior.max_target_angular_velocity_dps > 1000.0f) {
-        error = "behavior.max_target_angular_velocity_dps (>0, <=1k)";
         return false;
     }
     if (config.behavior.fall_pitch_threshold_deg < 10.0f || config.behavior.fall_pitch_threshold_deg > 90.0f) {

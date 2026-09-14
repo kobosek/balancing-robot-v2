@@ -1,0 +1,39 @@
+#pragma once
+
+// The host runner keeps the production Unity assertion engine but replaces
+// ESP-IDF's TEST_CASE registration with a small local registry.  The runner
+// expands @IDF_UNITY_HEADER@ to the active ESP-IDF installation before
+// compiling this wrapper, so no developer-specific path is stored in the
+// repository.
+#include "@IDF_UNITY_HEADER@"
+
+#include <vector>
+
+struct AuditTest {
+    const char* file;
+    const char* name;
+    int line;
+    UnityTestFunction run;
+};
+
+inline std::vector<AuditTest>& auditTests()
+{
+    static std::vector<AuditTest> tests;
+    return tests;
+}
+
+inline bool registerAuditTest(const char* file, const char* name, int line,
+                              UnityTestFunction run)
+{
+    auditTests().push_back({file, name, line, run});
+    return true;
+}
+
+#define AUDIT_JOIN0(a, b) a##b
+#define AUDIT_JOIN(a, b) AUDIT_JOIN0(a, b)
+#define TEST_CASE(name, tags) \
+    static void AUDIT_JOIN(auditTest_, __LINE__)(); \
+    static const bool AUDIT_JOIN(auditRegistered_, __LINE__) = \
+        registerAuditTest(__FILE__, name, __LINE__, \
+                          AUDIT_JOIN(auditTest_, __LINE__)); \
+    static void AUDIT_JOIN(auditTest_, __LINE__)()

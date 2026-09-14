@@ -24,7 +24,6 @@ public:
     MotorEffort update(const BalanceControlInput& input) override;
     void reset() override;
     void applyConfig(const ConfigData& config) override;
-    void updatePidConfig(const std::string& pidName, const PIDConfig& config) override;
 
     float getLastSpeedSetpointLeftDPS() const override;
     float getLastSpeedSetpointRightDPS() const override;
@@ -90,6 +89,7 @@ private:
     float clampTargetPitch(float targetPitch_deg) const;
     float slewTargetPitch(float targetPitch_deg, float dtSeconds);
     float computeMotionRequestScale(const BalanceControlInput& input);
+    MotorEffort applyOutputDirection(const LongitudinalMixerResult& mixed) const;
     MotorEffort updatePitchBaseline(const BalanceControlInput& input);
     MotorEffort updateMotion(const BalanceControlInput& input);
     void resetMotionState();

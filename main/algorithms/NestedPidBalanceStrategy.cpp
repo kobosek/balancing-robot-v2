@@ -341,41 +341,6 @@ void NestedPidBalanceStrategy::applyConfig(const ConfigData& config)
     }
 }
 
-void NestedPidBalanceStrategy::updatePidConfig(const std::string& pidName, const PIDConfig& config)
-{
-    std::lock_guard<std::mutex> lock(m_mutex);
-    ESP_LOGD(TAG, "Handling PID config update for '%s'", pidName.c_str());
-
-    if (pidName == "angle") {
-        m_anglePid.updateParams(config);
-        m_config.angle = config;
-        m_angle_pid_output_min = config.getOutputMin();
-        m_angle_pid_output_max = config.getOutputMax();
-    } else if (pidName == "speed_left") {
-        m_speedPidLeft.setParameters({
-            config.pid_kp, config.pid_ki, config.pid_kd,
-            config.pid_output_min, config.pid_output_max,
-            config.pid_iterm_min, config.pid_iterm_max
-        });
-        m_config.speed_left = config;
-    } else if (pidName == "speed_right") {
-        m_speedPidRight.setParameters({
-            config.pid_kp, config.pid_ki, config.pid_kd,
-            config.pid_output_min, config.pid_output_max,
-            config.pid_iterm_min, config.pid_iterm_max
-        });
-        m_config.speed_right = config;
-    } else if (pidName == "yaw_angle") {
-        m_yawAnglePid.updateParams(config);
-        m_config.yaw_angle = config;
-    } else if (pidName == "yaw_rate") {
-        m_yawRatePid.updateParams(config);
-        m_config.yaw_rate = config;
-    } else {
-        ESP_LOGW(TAG, "Received PID config update for unknown controller: %s", pidName.c_str());
-    }
-}
-
 float NestedPidBalanceStrategy::getLastSpeedSetpointLeftDPS() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);

@@ -15,7 +15,6 @@
 #include "CONFIG_ImuConfigUpdate.hpp"
 #include "CONFIG_EncoderConfigUpdate.hpp"
 #include "CONFIG_MotorConfigUpdate.hpp"
-#include "CONFIG_PidConfigUpdate.hpp"
 #include "COMMAND_InputModeChanged.hpp"
 #include "CONTROL_RunModeChanged.hpp"
 #include "CONTROL_ImuDataInvalid.hpp"
@@ -79,7 +78,9 @@ esp_err_t ApplicationEventWiring::wire(const ApplicationContext& context) const
     eventBus.subscribe<COMMAND_InputModeChanged,
                        UI_JoystickInput,
                        CONFIG_FullConfigUpdate>(asHandler(context.commandProcessorHandle()));
-    eventBus.subscribe<CONFIG_FullConfigUpdate, CONFIG_PidConfigUpdate,
+    // Balance strategies consume one complete, revision-bound snapshot.  A
+    // granular PID event must not form a second production update path.
+    eventBus.subscribe<CONFIG_FullConfigUpdate,
                        CONTROL_RunModeChanged>(asHandler(context.balancingAlgorithmHandle()));
     eventBus.subscribe<IMU_OrientationData, IMU_AvailabilityChanged,
                        BALANCE_MonitorModeChanged,

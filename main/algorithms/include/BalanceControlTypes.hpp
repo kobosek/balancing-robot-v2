@@ -23,6 +23,22 @@ enum class BalanceControlPhase : uint8_t {
     FAULT
 };
 
+// Strategy-neutral reason for an invalid evaluation.  This stays in the
+// in-memory control contract; the existing telemetry phase/fault fields keep
+// their wire format.  RobotController can therefore distinguish an
+// odometry continuity failure from a generic changed-during-step fault.
+enum class BalanceControlFaultReason : uint8_t {
+    NONE = 0,
+    NOT_CONFIGURED,
+    INVALID_INPUT,
+    INVALID_ODOMETRY,
+    ODOMETRY_GENERATION,
+    INVALID_COMMAND,
+    INVALID_PROFILE,
+    INVALID_PID,
+    UNKNOWN_MODE
+};
+
 // The command is produced by CommandProcessor and consumed as one coherent
 // snapshot by RobotController.  `fresh` is refreshed for every received
 // joystick packet, even when its numeric value did not change.
@@ -46,6 +62,7 @@ struct BalanceControlDiagnostics {
     // the diagnostics safe to carry through the web/telemetry boundary.
     int8_t loopMode = -1;
     BalanceControlPhase phase = BalanceControlPhase::INACTIVE;
+    BalanceControlFaultReason faultReason = BalanceControlFaultReason::NONE;
     bool valid = false;
     bool targetPitchValid = false;
     bool targetPitchClamped = false;

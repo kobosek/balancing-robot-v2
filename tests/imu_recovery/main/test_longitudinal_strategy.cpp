@@ -70,7 +70,7 @@ LongitudinalOdometryResult validOdometry(float positionM = 0.0f,
 }
 }
 
-TEST_CASE("longitudinal pitch baseline applies trim, pitch limits and effort limit", "[control][longitudinal]")
+TEST_CASE("longitudinal pitch baseline uses trim and ignores legacy pitch targets", "[control][longitudinal]")
 {
     LongitudinalCascadeBalanceStrategy strategy;
     strategy.applyConfig(makeConfig());
@@ -83,7 +83,7 @@ TEST_CASE("longitudinal pitch baseline applies trim, pitch limits and effort lim
 
     TEST_ASSERT_FLOAT_WITHIN(0.000001f, 0.6f, effort.left);
     TEST_ASSERT_FLOAT_WITHIN(0.000001f, effort.left, effort.right);
-    TEST_ASSERT_FLOAT_WITHIN(0.000001f, 1.5f, strategy.getLastTargetPitchDeg());
+    TEST_ASSERT_FLOAT_WITHIN(0.000001f, 0.5f, strategy.getLastTargetPitchDeg());
     TEST_ASSERT_FALSE(strategy.isYawControlEnabled());
     const auto diagnostics = strategy.getDiagnostics();
     TEST_ASSERT_TRUE(diagnostics.valid);
@@ -91,14 +91,14 @@ TEST_CASE("longitudinal pitch baseline applies trim, pitch limits and effort lim
                           static_cast<int>(diagnostics.strategyId));
     TEST_ASSERT_EQUAL_INT(static_cast<int>(BalanceControlPhase::PITCH_BASELINE),
                           static_cast<int>(diagnostics.phase));
-    TEST_ASSERT_TRUE(diagnostics.targetPitchClamped);
-    TEST_ASSERT_TRUE(diagnostics.targetPitchRateLimited);
+    TEST_ASSERT_FALSE(diagnostics.targetPitchClamped);
+    TEST_ASSERT_FALSE(diagnostics.targetPitchRateLimited);
     TEST_ASSERT_TRUE(diagnostics.balanceSaturated);
     TEST_ASSERT_FALSE(diagnostics.positionLoopEnabled);
     TEST_ASSERT_FALSE(diagnostics.velocityLoopEnabled);
 }
 
-TEST_CASE("longitudinal target pitch is slew limited from trim", "[control][longitudinal]")
+TEST_CASE("longitudinal target pitch remains at strategy trim", "[control][longitudinal]")
 {
     LongitudinalCascadeBalanceStrategy strategy;
     strategy.applyConfig(makeConfig());
@@ -107,10 +107,43 @@ TEST_CASE("longitudinal target pitch is slew limited from trim", "[control][long
     input.dt = 0.1f;
     input.targetPitchOffset_deg = 2.0f;
     strategy.update(input);
-    TEST_ASSERT_FLOAT_WITHIN(0.000001f, 1.5f, strategy.getLastTargetPitchDeg());
+    TEST_ASSERT_FLOAT_WITHIN(0.000001f, 0.5f, strategy.getLastTargetPitchDeg());
 
     strategy.update(input);
-    TEST_ASSERT_FLOAT_WITHIN(0.000001f, 2.5f, strategy.getLastTargetPitchDeg());
+    TEST_ASSERT_FLOAT_WITHIN(0.000001f, 0.5f, strategy.getLastTargetPitchDeg());
+}
+
+TEST_CASE("longitudinal direction adapters map cascade and motor signs independently",
+          "[control][longitudinal][directions]")
+{
+    LongitudinalCascadeBalanceStrategy strategy;
+    ConfigData config = makeMotionConfig();
+    auto& longitudinal = config.control.strategies.longitudinal_cascade;
+    longitudinal.velocity_to_pitch_sign = -1;
+    longitudinal.pitch_to_effort_sign = -1;
+    longitudinal.left_output_sign = -1;
+    longitudinal.right_output_sign = 1;
+    strategy.applyConfig(config);
+
+    BalanceControlInput input = {};
+    input.dt = 0.1f;
+    input.currentPitch_deg = longitudinal.pitch_trim_deg;
+    input.odometry = validOdometry();
+    input.motion.valid = true;
+    input.motion.fresh = true;
+    input.motion.stop = false;
+    input.motion.targetVelocityMps = 0.5f;
+    const auto effort = strategy.update(input);
+    const auto diagnostics = strategy.getDiagnostics();
+
+    TEST_ASSERT_TRUE(diagnostics.valid);
+    TEST_ASSERT_TRUE(diagnostics.targetVelocityMps > 0.0f);
+    TEST_ASSERT_TRUE(diagnostics.velocityCorrection_deg < 0.0f);
+    TEST_ASSERT_TRUE(diagnostics.targetPitch_deg < longitudinal.pitch_trim_deg);
+    TEST_ASSERT_TRUE(diagnostics.requestedBalanceEffort > 0.0f);
+    TEST_ASSERT_FLOAT_WITHIN(0.000001f, -effort.left, effort.right);
+    TEST_ASSERT_FLOAT_WITHIN(0.000001f, effort.left, diagnostics.leftEffort);
+    TEST_ASSERT_FLOAT_WITHIN(0.000001f, effort.right, diagnostics.rightEffort);
 }
 
 TEST_CASE("longitudinal mixer preserves balance mean and reserves headroom for sync", "[control][longitudinal]")
@@ -319,6 +352,55 @@ TEST_CASE("longitudinal request limiter reduces speed near pitch limit and relea
     input.currentPitch_deg = longitudinal.pitch_trim_deg + 0.1f;
     strategy.update(input);
     TEST_ASSERT_FALSE(strategy.getDiagnostics().motionRequestLimited);
+}
+
+TEST_CASE("a limited fresh drive cannot be replaced by position hold", "[control][longitudinal][limiter]")
+{
+    LongitudinalCascadeBalanceStrategy strategy;
+    ConfigData config = makePositionHoldConfig();
+    auto& longitudinal = config.control.strategies.longitudinal_cascade;
+    longitudinal.motion_request_limit_enabled = true;
+    longitudinal.motion_request_limit_pitch_start_deg = 10.0f;
+    longitudinal.motion_request_limit_pitch_full_deg = 20.0f;
+    longitudinal.motion_request_limit_pitch_release_deg = 5.0f;
+    longitudinal.motion_request_limit_effort_start = 0.001f;
+    longitudinal.motion_request_limit_effort_full = 0.002f;
+    longitudinal.motion_request_limit_effort_release = 0.0f;
+    longitudinal.motion_request_limit_min_scale = 0.0f;
+    strategy.applyConfig(config);
+
+    BalanceControlInput input = {};
+    input.dt = 0.1f;
+    input.controlArmId = 1;
+    input.motion.armId = 1;
+    input.nowUs = 1000000;
+    input.motionTimeoutUs = 500000;
+    input.motion.receivedTimestampUs = 1000000;
+    input.odometry = validOdometry();
+    input.motion.valid = true;
+    input.motion.fresh = true;
+    input.motion.stop = true;
+    input.motion.targetVelocityMps = 0.0f;
+    strategy.update(input);
+    strategy.update(input);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(BalanceControlPhase::HOLD),
+                          static_cast<int>(strategy.getDiagnostics().phase));
+
+    // Arm the position return once. Its output is deliberately large enough
+    // to latch the effort limiter on the next sample.
+    input.odometry.positionM = 0.3;
+    strategy.update(input);
+    TEST_ASSERT_TRUE(strategy.getDiagnostics().positionHoldActive);
+
+    input.motion.stop = false;
+    input.motion.targetVelocityMps = 0.2f;
+    strategy.update(input);
+    const auto diagnostics = strategy.getDiagnostics();
+    TEST_ASSERT_TRUE(diagnostics.motionRequestLimited);
+    TEST_ASSERT_TRUE(diagnostics.motionCommandFresh);
+    TEST_ASSERT_FLOAT_WITHIN(0.000001f, 0.0f,
+                             diagnostics.holdVelocityTargetMps);
+    TEST_ASSERT_TRUE(diagnostics.targetVelocityMps >= -0.000001f);
 }
 
 TEST_CASE("position hold captures once and returns through the velocity profile", "[control][longitudinal][position]")
@@ -547,6 +629,33 @@ TEST_CASE("longitudinal continuity generation cannot reuse an old hold target", 
                           static_cast<int>(recaptured.phase));
     TEST_ASSERT_FLOAT_WITHIN(0.000001f, 0.0f,
                              static_cast<float>(strategy.getLastHoldPositionM()));
+}
+
+TEST_CASE("longitudinal diagnostics identify odometry and command faults",
+          "[control][longitudinal][fault]")
+{
+    LongitudinalCascadeBalanceStrategy strategy;
+    strategy.applyConfig(makeMotionConfig());
+
+    BalanceControlInput input = {};
+    input.dt = 0.1f;
+    input.odometry = validOdometry();
+    input.motion.valid = true;
+    input.motion.fresh = true;
+    input.motion.stop = false;
+    input.motion.targetVelocityMps = 0.2f;
+    strategy.update(input);
+
+    input.odometry.odometryValid = false;
+    strategy.update(input);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(BalanceControlFaultReason::INVALID_ODOMETRY),
+                          static_cast<int>(strategy.getDiagnostics().faultReason));
+
+    input.odometry = validOdometry();
+    input.motion.targetVelocityMps = NAN;
+    strategy.update(input);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(BalanceControlFaultReason::INVALID_COMMAND),
+                          static_cast<int>(strategy.getDiagnostics().faultReason));
 }
 
 TEST_CASE("wheel synchronization recaptures direction after a profiled reversal", "[control][longitudinal][sync]")

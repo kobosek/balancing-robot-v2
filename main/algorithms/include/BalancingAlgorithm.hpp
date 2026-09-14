@@ -12,7 +12,6 @@
 #include <mutex>
 
 // Forward declarations for event classes
-class CONFIG_PidConfigUpdate;
 class CONFIG_FullConfigUpdate;
 
 class BalancingAlgorithm : public EventHandler {
@@ -82,11 +81,12 @@ private:
     uint32_t m_activeStrategyRevision = 0;
     uint32_t m_appliedConfigRevision = 0;
     bool m_hasConfigRevision = false;
+    ConfigData m_appliedConfigSnapshot;
+    bool m_hasAppliedConfigSnapshot = false;
 
     // Internal helpers to apply config from events
     void applyConfig(const ConfigData& config);
     std::unique_ptr<IBalanceControlStrategy> createStrategy(BalanceStrategyId id) const;
     void handleConfigUpdate(const CONFIG_FullConfigUpdate& event);
-    void handlePIDConfigUpdate(const CONFIG_PidConfigUpdate& event);
     void handleRunModeChanged(const CONTROL_RunModeChanged& event);
 };

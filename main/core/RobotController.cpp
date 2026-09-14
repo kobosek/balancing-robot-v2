@@ -35,6 +35,26 @@ uint8_t telemetryFaultReason(const char* cause)
     return 7;
 }
 
+const char* controlFaultCause(BalanceControlFaultReason reason)
+{
+    switch (reason) {
+        case BalanceControlFaultReason::INVALID_ODOMETRY:
+        case BalanceControlFaultReason::ODOMETRY_GENERATION:
+            return "invalid-odometry";
+        case BalanceControlFaultReason::INVALID_COMMAND:
+        case BalanceControlFaultReason::INVALID_INPUT:
+            return "invalid-input";
+        case BalanceControlFaultReason::INVALID_PROFILE:
+        case BalanceControlFaultReason::INVALID_PID:
+        case BalanceControlFaultReason::NOT_CONFIGURED:
+        case BalanceControlFaultReason::UNKNOWN_MODE:
+            return "invalid-control";
+        case BalanceControlFaultReason::NONE:
+        default:
+            return nullptr;
+    }
+}
+
 }
 
 RobotController::RobotController(
@@ -46,7 +66,8 @@ RobotController::RobotController(
     ControlEventDispatcher& controlEventDispatcher,
     const SystemBehaviorConfig& behavior,
     const EncoderConfig& encoderConfig,
-    int controlIntervalMs
+    int controlIntervalMs,
+    const LongitudinalCascadeStrategyConfig& longitudinalConfig
 ) :
     m_estimator(estimator),
     m_encoderService(encoderService),
@@ -59,11 +80,22 @@ RobotController::RobotController(
     m_controlMode(ControlRunMode::DISABLED),
     m_telemetryStateCode(0),
     m_telemetryEnabled(false),
-    m_longitudinalOdometry(encoderConfig, behavior.imu_max_sample_age_ms * 1000LL)
+    m_longitudinalOdometry(longitudinalOdometryConfigFromEncoder(
+        encoderConfig,
+        behavior.imu_max_sample_age_ms * 1000LL,
+        2000,
+        longitudinalConfig.left_encoder_forward_sign,
+        longitudinalConfig.right_encoder_forward_sign)),
+    m_odometryEncoderConfig(encoderConfig),
+    m_longitudinalLeftEncoderForwardSign(
+        longitudinalConfig.left_encoder_forward_sign < 0 ? -1 : 1),
+    m_longitudinalRightEncoderForwardSign(
+        longitudinalConfig.right_encoder_forward_sign < 0 ? -1 : 1)
 {
     m_maxSampleAgeUs = behavior.imu_max_sample_age_ms * 1000LL;
     m_motionCommandTimeoutUs = behavior.joystick_timeout_ms * 1000LL;
     m_controlIntervalMs = std::max(1, std::min(1000, controlIntervalMs));
+    m_configuredBalanceStrategy = m_controlModeExecutor.activeBalanceStrategyId();
     ESP_LOGI(TAG, "RobotController constructed.");
 }
 
@@ -80,8 +112,67 @@ void RobotController::handleEvent(const BaseEvent& event) {
         m_controlIntervalMs.store(
             std::max(1, std::min(1000, config.mainLoop.interval_ms)),
             std::memory_order_relaxed);
+        const auto& longitudinal = config.control.strategies.longitudinal_cascade;
+        {
+            std::lock_guard<std::mutex> odometryLock(m_odometryMutex);
+            const int8_t leftSign = longitudinal.left_encoder_forward_sign < 0 ? -1 : 1;
+            const int8_t rightSign = longitudinal.right_encoder_forward_sign < 0 ? -1 : 1;
+            if (m_odometryEncoderConfig != config.encoder ||
+                m_longitudinalLeftEncoderForwardSign != leftSign ||
+                m_longitudinalRightEncoderForwardSign != rightSign) {
+                m_longitudinalLeftEncoderForwardSign = leftSign;
+                m_longitudinalRightEncoderForwardSign = rightSign;
+                m_odometryEncoderConfig = config.encoder;
+                m_longitudinalOdometry.configure(
+                    longitudinalOdometryConfigFromEncoder(
+                        config.encoder,
+                        m_maxSampleAgeUs.load(std::memory_order_relaxed),
+                        2000,
+                        leftSign,
+                        rightSign));
+                m_hasOdometryArm = false;
+            }
+        }
+        bool strategyChanged = false;
+        {
+            std::lock_guard<std::mutex> modeLock(m_modeMutex);
+            strategyChanged = m_configuredBalanceStrategy !=
+                config.control.strategies.active;
+            m_configuredBalanceStrategy = config.control.strategies.active;
+            if (strategyChanged) {
+                // A strategy switch is a command-session boundary even when
+                // it occurs while already DISABLED. Preserve the sequence
+                // floor, but discard the payload so it cannot be reused when
+                // the old strategy is selected again.
+                std::lock_guard<std::mutex> commandLock(m_commandMutex);
+                const uint64_t latestSequence = m_latestMotionCommand.sequence;
+                const uint64_t previousFloor =
+                    m_motionCommandFloor.load(std::memory_order_relaxed);
+                m_motionCommandFloor.store(std::max(previousFloor,
+                                                     latestSequence),
+                                           std::memory_order_release);
+                m_latestMotionCommand = {};
+            }
+        }
+        if (config.control.strategies.active != BalanceStrategyId::NESTED_PID) {
+            // A delayed legacy pitch/yaw callback must not become a latent
+            // target when the longitudinal strategy is selected.  Clear the
+            // compatibility atomics at the same configuration boundary that
+            // changes their consumer.
+            m_latestTargetPitchOffset_deg.store(0.0f, std::memory_order_relaxed);
+            m_latestTargetAngVel_dps.store(0.0f, std::memory_order_relaxed);
+        }
     } else if (event.is<MOTION_TargetMovement>()) {
-        handleTargetMovementCommand(event.as<MOTION_TargetMovement>());
+        BalanceStrategyId configuredStrategy;
+        {
+            std::lock_guard<std::mutex> modeLock(m_modeMutex);
+            configuredStrategy = m_configuredBalanceStrategy;
+        }
+        if (configuredStrategy == BalanceStrategyId::NESTED_PID) {
+            handleTargetMovementCommand(event.as<MOTION_TargetMovement>());
+        } else {
+            ESP_LOGW(TAG, "Ignoring legacy pitch/yaw command while longitudinal strategy is active");
+        }
     } else if (event.is<MOTION_TargetLinearVelocity>()) {
         handleTargetLinearVelocityCommand(event.as<MOTION_TargetLinearVelocity>());
     } else if (event.is<CONTROL_RunModeChanged>()) {
@@ -100,12 +191,30 @@ void RobotController::handleEncoderConfigUpdate(
     // consumed by EncoderService.  Reconfigure atomically and invalidate the
     // old position base; the next coherent frame establishes a new one.
     m_longitudinalOdometry.configure(longitudinalOdometryConfigFromEncoder(
-        event.config, m_maxSampleAgeUs.load(std::memory_order_relaxed)));
+        event.config, m_maxSampleAgeUs.load(std::memory_order_relaxed), 2000,
+        m_longitudinalLeftEncoderForwardSign,
+        m_longitudinalRightEncoderForwardSign));
+    m_odometryEncoderConfig = event.config;
     m_hasOdometryArm = false;
 }
 
 
 void RobotController::handleTargetMovementCommand(const MOTION_TargetMovement& event) {
+    uint64_t currentArm = 0;
+    BalanceStrategyId configuredStrategy = BalanceStrategyId::NESTED_PID;
+    {
+        std::lock_guard<std::mutex> modeLock(m_modeMutex);
+        currentArm = m_armId;
+        configuredStrategy = m_configuredBalanceStrategy;
+    }
+    if (configuredStrategy != BalanceStrategyId::NESTED_PID ||
+        event.armId != currentArm) {
+        ESP_LOGW(TAG, "Ignoring legacy pitch/yaw command from arm=%llu current=%llu strategy=%s",
+                 static_cast<unsigned long long>(event.armId),
+                 static_cast<unsigned long long>(currentArm),
+                 balanceStrategyIdToString(configuredStrategy));
+        return;
+    }
     m_latestTargetPitchOffset_deg.store(event.targetPitchOffset_deg, std::memory_order_relaxed);
     m_latestTargetAngVel_dps.store(event.targetAngularVelocity_dps, std::memory_order_relaxed);
     ESP_LOGV(TAG, "RC Handler: Updated targets: PitchOffset=%.2f, AngVel=%.2f", event.targetPitchOffset_deg, event.targetAngularVelocity_dps);
@@ -124,10 +233,14 @@ void RobotController::handleTargetLinearVelocityCommand(
     int64_t nowUs = 0;
     bool invalidTimestamp = false;
     bool invalidVelocity = false;
+    BalanceStrategyId configuredStrategy = BalanceStrategyId::NESTED_PID;
     {
         std::lock_guard<std::mutex> modeLock(m_modeMutex);
         currentArm = m_armId;
-        if (event.sequence == 0 || event.armId != currentArm) {
+        configuredStrategy = m_configuredBalanceStrategy;
+        if (configuredStrategy != BalanceStrategyId::LONGITUDINAL_CASCADE) {
+            warning = "wrong-strategy";
+        } else if (event.sequence == 0 || event.armId != currentArm) {
             warning = "wrong-session";
         } else {
             floor = m_motionCommandFloor.load(std::memory_order_acquire);
@@ -173,6 +286,9 @@ void RobotController::handleTargetLinearVelocityCommand(
         ESP_LOGV(TAG, "RC Handler: Updated linear target: %.3f m/s stop=%d seq=%llu",
                  event.targetVelocityMps, event.stop ? 1 : 0,
                  static_cast<unsigned long long>(event.sequence));
+    } else if (std::strcmp(warning, "wrong-strategy") == 0) {
+        ESP_LOGW(TAG, "Ignoring linear command while configured strategy is %s",
+                 balanceStrategyIdToString(configuredStrategy));
     } else if (std::strcmp(warning, "wrong-session") == 0) {
         ESP_LOGW(TAG, "Ignoring linear command from wrong session: arm=%llu current=%llu seq=%llu",
                  static_cast<unsigned long long>(event.armId),
@@ -361,12 +477,19 @@ void RobotController::runControlStep(float dt) {
         if (arm != m_lastExecutedArm) { m_controlModeExecutor.reset(); m_lastExecutedArm = arm; }
         modeResult = m_controlModeExecutor.execute(modeInput);
         const auto latest = m_estimator->getOrientation();
-        const bool longitudinalOdometryInvalid = active &&
-            modeResult.diagnostics.strategyId == BalanceStrategyId::LONGITUDINAL_CASCADE &&
-            modeResult.diagnostics.velocityLoopEnabled && !odometry.odometryValid;
+        const auto controlFailure = modeResult.diagnostics.faultReason;
+        const bool longitudinalStrategy = active &&
+            modeResult.diagnostics.strategyId == BalanceStrategyId::LONGITUDINAL_CASCADE;
+        const bool longitudinalOdometryInvalid = longitudinalStrategy &&
+            (controlFailure == BalanceControlFaultReason::INVALID_ODOMETRY ||
+             controlFailure == BalanceControlFaultReason::ODOMETRY_GENERATION ||
+             (modeResult.diagnostics.velocityLoopEnabled && !odometry.odometryValid));
         if (active && (!modeResult.valid || longitudinalOdometryInvalid || !inputsValid() || !latest.valid || latest.generation != generation ||
             !std::isfinite(modeResult.effort.left) || !std::isfinite(modeResult.effort.right))) {
-            fault(longitudinalOdometryInvalid ? "invalid-odometry" : "changed-during-step");
+            const char* strategyFault = controlFaultCause(controlFailure);
+            fault(strategyFault ? strategyFault :
+                (longitudinalOdometryInvalid ? "invalid-odometry" :
+                 "changed-during-step"));
             modeResult.valid = false;
             modeResult.effort = {};
         } else {

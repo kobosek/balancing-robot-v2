@@ -71,8 +71,18 @@ ControlModeResult ControlModeExecutor::executeBalancing(const ControlModeInput& 
     result.strategyRevision = control.configurationRevision;
     result.configRevision = control.configRevision;
     result.valid = control.valid;
-    result.telemetryTargetPitchOffset_deg = input.targetPitchOffset_deg;
-    result.telemetryTargetAngularVelocity_dps = input.targetAngularVelocity_dps;
+    // Keep the wire snapshot aligned with the active strategy. NestedPid
+    // retains the legacy joystick pitch/yaw targets; longitudinal exposes its
+    // strategy-owned pitch target and never presents a stale yaw request as
+    // an active command.
+    if (control.strategyId == BalanceStrategyId::LONGITUDINAL_CASCADE) {
+        result.telemetryTargetPitchOffset_deg = control.diagnostics.targetPitchValid
+            ? control.diagnostics.targetPitch_deg : 0.0f;
+        result.telemetryTargetAngularVelocity_dps = 0.0f;
+    } else {
+        result.telemetryTargetPitchOffset_deg = input.targetPitchOffset_deg;
+        result.telemetryTargetAngularVelocity_dps = input.targetAngularVelocity_dps;
+    }
     result.telemetryTargetYaw_deg = control.targetYaw_deg;
     result.telemetryDesiredYawRate_dps = control.desiredYawRate_dps;
     result.speedSetpointLeft_dps = control.speedSetpointLeft_dps;

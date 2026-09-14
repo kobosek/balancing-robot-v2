@@ -30,7 +30,9 @@ struct LongitudinalOdometryConfig {
 LongitudinalOdometryConfig longitudinalOdometryConfigFromEncoder(
     const EncoderConfig& encoderConfig,
     int64_t maxSampleAgeUs = 20000,
-    int64_t maxWheelTimestampSkewUs = 2000);
+    int64_t maxWheelTimestampSkewUs = 2000,
+    int8_t leftForwardSign = 1,
+    int8_t rightForwardSign = -1);
 
 struct LongitudinalOdometryResult {
     LongitudinalOdometryUpdateStatus status = LongitudinalOdometryUpdateStatus::UNINITIALIZED;

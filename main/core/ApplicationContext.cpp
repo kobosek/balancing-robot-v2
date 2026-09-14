@@ -257,7 +257,8 @@ esp_err_t ApplicationContext::initializeControlSubsystem()
         *m_controlEventDispatcher,
         behaviorConf,
         encoderConf,
-        loopConf.interval_ms
+        loopConf.interval_ms,
+        initialConfig.control.strategies.longitudinal_cascade
     );
     ESP_RETURN_ON_FALSE(m_robotController != nullptr, ESP_ERR_NO_MEM, TAG, "Failed to allocate robot controller");
     ESP_LOGI(TAG, "RobotController initialized");

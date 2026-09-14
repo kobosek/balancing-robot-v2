@@ -14,7 +14,6 @@ public:
     MotorEffort update(const BalanceControlInput& input) override;
     void reset() override;
     void applyConfig(const ConfigData& config) override;
-    void updatePidConfig(const std::string& pidName, const PIDConfig& config) override;
 
     float getLastSpeedSetpointLeftDPS() const override;
     float getLastSpeedSetpointRightDPS() const override;

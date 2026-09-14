@@ -96,12 +96,13 @@ void CommandProcessor::handleEvent(const BaseEvent& event) {
 void CommandProcessor::applyConfig(const ControlConfig& controlConf, const SystemBehaviorConfig& behaviorConf) {
     bool restart_timer = false;
     bool strategy_changed = false;
+    const auto& nestedConfig = controlConf.strategies.nested_pid;
     float joystick_exponent = controlConf.joystick_exponent;
-    float max_target_pitch_offset_deg = controlConf.max_target_pitch_offset_deg;
+    float max_target_pitch_offset_deg = nestedConfig.max_target_pitch_offset_deg;
     float joystick_deadzone = behaviorConf.joystick_deadzone;
     uint64_t input_timeout_us = behaviorConf.joystick_timeout_ms * 1000ULL;
     uint64_t timeout_check_interval_us = behaviorConf.joystick_check_interval_ms * 1000ULL;
-    float max_angular_velocity_dps = behaviorConf.max_target_angular_velocity_dps;
+    float max_angular_velocity_dps = nestedConfig.max_target_angular_velocity_dps;
     const BalanceStrategyId active_strategy = controlConf.strategies.active;
     const float max_linear_velocity_mps =
         controlConf.strategies.longitudinal_cascade.max_velocity_mps;
@@ -222,7 +223,7 @@ void CommandProcessor::handleInputModeChange(const COMMAND_InputModeChanged& eve
             publishLinearVelocityCommand(0.0f, true, event.armId,
                                          linear_sequence, linear_timestamp_us);
         } else {
-            publishTargetCommand(0.0f, 0.0f);
+            publishTargetCommand(0.0f, 0.0f, event.armId);
         }
         startTimeoutTimer();
 
@@ -253,7 +254,7 @@ void CommandProcessor::handleInputModeChange(const COMMAND_InputModeChanged& eve
             publishLinearVelocityCommand(0.0f, true, event.armId,
                                          stop_sequence, stop_timestamp_us);
         } else if (had_velocity) {
-            publishTargetCommand(0.0f, 0.0f);
+            publishTargetCommand(0.0f, 0.0f, event.armId);
         }
     }
 }
@@ -353,7 +354,7 @@ void CommandProcessor::handleJoystickInput(const UI_JoystickInput& event) {
     } // Mutex released
 
     if (needs_publish) {
-        publishTargetCommand(desiredPitchOffset_deg, desiredAngVelDps);
+        publishTargetCommand(desiredPitchOffset_deg, desiredAngVelDps, input_arm_id);
     }
 }
 
@@ -401,7 +402,7 @@ void CommandProcessor::periodicTimeoutCheck() {
         publishLinearVelocityCommand(0.0f, true, input_arm_id,
                                      linear_sequence, timeout_timestamp_us);
     } else if (publish_zero) {
-        publishTargetCommand(0.0f, 0.0f);
+        publishTargetCommand(0.0f, 0.0f, input_arm_id);
     }
 }
 
@@ -451,8 +452,9 @@ esp_err_t CommandProcessor::stopTimeoutTimer() {
 }
 
 // Helper to publish the final target command
-void CommandProcessor::publishTargetCommand(float pitchOffsetDeg, float angVelDps) {
-    MOTION_TargetMovement cmd(pitchOffsetDeg, angVelDps);
+void CommandProcessor::publishTargetCommand(float pitchOffsetDeg, float angVelDps,
+                                             uint64_t armId) {
+    MOTION_TargetMovement cmd(pitchOffsetDeg, angVelDps, armId);
     m_eventBus.publish(cmd);
     ESP_LOGD(TAG, "CP: Published Target CMD: PitchOffset=%.2f deg, AngVel=%.2f dps", pitchOffsetDeg, angVelDps);
 }

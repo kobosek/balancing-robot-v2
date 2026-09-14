@@ -245,6 +245,8 @@ cJSON* serializeBalanceStrategies(const BalanceStrategiesConfig& config) {
     }
     cJSON_AddNumberToObject(nested, "max_target_pitch_offset_deg",
                             config.nested_pid.max_target_pitch_offset_deg);
+    cJSON_AddNumberToObject(nested, "max_target_angular_velocity_dps",
+                            config.nested_pid.max_target_angular_velocity_dps);
     cJSON_AddBoolToObject(nested, "yaw_control_enabled",
                           config.nested_pid.yaw_control_enabled);
     cJSON_AddNumberToObject(nested, "revision", config.nested_pid.revision);
@@ -272,6 +274,18 @@ cJSON* serializeBalanceStrategies(const BalanceStrategiesConfig& config) {
                    config.longitudinal_cascade.sync_velocity_deadband_mps) ||
         !addNumber(longitudinal, "sync_max_effort", config.longitudinal_cascade.sync_max_effort) ||
         !addNumber(longitudinal, "max_effort", config.longitudinal_cascade.max_effort) ||
+        !addNumber(longitudinal, "left_encoder_forward_sign",
+                   static_cast<float>(config.longitudinal_cascade.left_encoder_forward_sign)) ||
+        !addNumber(longitudinal, "right_encoder_forward_sign",
+                   static_cast<float>(config.longitudinal_cascade.right_encoder_forward_sign)) ||
+        !addNumber(longitudinal, "left_output_sign",
+                   static_cast<float>(config.longitudinal_cascade.left_output_sign)) ||
+        !addNumber(longitudinal, "right_output_sign",
+                   static_cast<float>(config.longitudinal_cascade.right_output_sign)) ||
+        !addNumber(longitudinal, "velocity_to_pitch_sign",
+                   static_cast<float>(config.longitudinal_cascade.velocity_to_pitch_sign)) ||
+        !addNumber(longitudinal, "pitch_to_effort_sign",
+                   static_cast<float>(config.longitudinal_cascade.pitch_to_effort_sign)) ||
         !addNumber(longitudinal, "hold_enter_velocity_mps",
                    config.longitudinal_cascade.hold_enter_velocity_mps) ||
         !addNumber(longitudinal, "hold_exit_velocity_mps",
@@ -372,6 +386,8 @@ bool deserializeBalanceStrategies(cJSON* obj, BalanceStrategiesConfig& config) {
     }
     parseNumber(nested, "max_target_pitch_offset_deg",
                 config.nested_pid.max_target_pitch_offset_deg, true);
+    parseNumber(nested, "max_target_angular_velocity_dps",
+                config.nested_pid.max_target_angular_velocity_dps, false);
     cJSON* yaw = cJSON_GetObjectItem(nested, "yaw_control_enabled");
     if (yaw && cJSON_IsBool(yaw)) config.nested_pid.yaw_control_enabled = cJSON_IsTrue(yaw);
     else ok = false;
@@ -399,6 +415,44 @@ bool deserializeBalanceStrategies(cJSON* obj, BalanceStrategiesConfig& config) {
                 config.longitudinal_cascade.sync_velocity_deadband_mps, false);
     parseNumber(longitudinal, "sync_max_effort", config.longitudinal_cascade.sync_max_effort, true);
     parseNumber(longitudinal, "max_effort", config.longitudinal_cascade.max_effort, true);
+    float leftEncoderForwardSign = static_cast<float>(
+        config.longitudinal_cascade.left_encoder_forward_sign);
+    float rightEncoderForwardSign = static_cast<float>(
+        config.longitudinal_cascade.right_encoder_forward_sign);
+    float leftOutputSign = static_cast<float>(
+        config.longitudinal_cascade.left_output_sign);
+    float rightOutputSign = static_cast<float>(
+        config.longitudinal_cascade.right_output_sign);
+    float velocityToPitchSign = static_cast<float>(
+        config.longitudinal_cascade.velocity_to_pitch_sign);
+    float pitchToEffortSign = static_cast<float>(
+        config.longitudinal_cascade.pitch_to_effort_sign);
+    parseNumber(longitudinal, "left_encoder_forward_sign", leftEncoderForwardSign, false);
+    parseNumber(longitudinal, "right_encoder_forward_sign", rightEncoderForwardSign, false);
+    parseNumber(longitudinal, "left_output_sign", leftOutputSign, false);
+    parseNumber(longitudinal, "right_output_sign", rightOutputSign, false);
+    parseNumber(longitudinal, "velocity_to_pitch_sign", velocityToPitchSign, false);
+    parseNumber(longitudinal, "pitch_to_effort_sign", pitchToEffortSign, false);
+    const auto parseSign = [&](const char* key, float value, int8_t& target) {
+        if (std::isfinite(value) && std::floor(value) == value &&
+            (value == -1.0f || value == 1.0f)) {
+            target = static_cast<int8_t>(value);
+        } else if (cJSON_GetObjectItem(longitudinal, key)) {
+            ok = false;
+        }
+    };
+    parseSign("left_encoder_forward_sign", leftEncoderForwardSign,
+              config.longitudinal_cascade.left_encoder_forward_sign);
+    parseSign("right_encoder_forward_sign", rightEncoderForwardSign,
+              config.longitudinal_cascade.right_encoder_forward_sign);
+    parseSign("left_output_sign", leftOutputSign,
+              config.longitudinal_cascade.left_output_sign);
+    parseSign("right_output_sign", rightOutputSign,
+              config.longitudinal_cascade.right_output_sign);
+    parseSign("velocity_to_pitch_sign", velocityToPitchSign,
+              config.longitudinal_cascade.velocity_to_pitch_sign);
+    parseSign("pitch_to_effort_sign", pitchToEffortSign,
+              config.longitudinal_cascade.pitch_to_effort_sign);
     // These optional fields were added incrementally by E2 and F. Existing
     // v3 files remain readable and receive safe defaults from
     // LongitudinalCascadeStrategyConfig.

@@ -133,6 +133,43 @@ TEST_CASE("configuration updates cannot race a motion reservation",
     TEST_ASSERT_TRUE(gate.release(motion));
 }
 
+TEST_CASE("longitudinal direction changes require disabled control",
+          "[config][strategy][directions]")
+{
+    JsonConfigParser parser;
+    MemoryStorage storage;
+    makeValidConfig(parser, storage);
+    ControlOperationGate gate;
+    ConfigurationService service(storage, parser, EventBus::getInstance(),
+                                 "config.json", &gate);
+    TEST_ASSERT_EQUAL(ESP_OK, service.init());
+
+    ConfigData candidate = service.getConfigData();
+    candidate.control.strategies.longitudinal_cascade.right_encoder_forward_sign = 1;
+    const std::string request = withOperationId(parser, candidate, 111);
+
+    service.handleEvent(CONTROL_RunModeChanged(
+        ControlRunMode::BALANCING, 2, true, 1, 1));
+    std::string error;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE,
+                      service.updateConfigFromJson(request, &error));
+    TEST_ASSERT_EQUAL_INT(-1,
+                          service.getConfigData().control.strategies
+                              .longitudinal_cascade.right_encoder_forward_sign);
+    TEST_ASSERT_EQUAL_UINT32(0, service.getConfigData().config_revision);
+
+    // The same direction edit is valid after the state owner has published a
+    // matching disabled session. It still uses a fresh operation identity.
+    service.handleEvent(CONTROL_RunModeChanged(
+        ControlRunMode::DISABLED, 1, false, 1, 2));
+    TEST_ASSERT_EQUAL(ESP_OK, service.updateConfigFromJson(
+        withOperationId(parser, candidate, 112), &error));
+    TEST_ASSERT_EQUAL_INT(1,
+                          service.getConfigData().control.strategies
+                              .longitudinal_cascade.right_encoder_forward_sign);
+    TEST_ASSERT_EQUAL_UINT32(1, service.getConfigData().config_revision);
+}
+
 TEST_CASE("missing config on an existing medium enters recovery",
           "[config][operation][recovery]")
 {

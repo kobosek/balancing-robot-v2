@@ -37,7 +37,8 @@ public:
         ControlEventDispatcher& controlEventDispatcher,
         const SystemBehaviorConfig& behavior,
         const EncoderConfig& encoderConfig,
-        int controlIntervalMs = 5
+        int controlIntervalMs = 5,
+        const LongitudinalCascadeStrategyConfig& longitudinalConfig = {}
     );
 
     void runControlStep(float dt);
@@ -79,6 +80,10 @@ private:
     std::atomic<int> m_telemetryStateCode{0};
     std::atomic<bool> m_telemetryEnabled{false};
     LongitudinalOdometry m_longitudinalOdometry;
+    EncoderConfig m_odometryEncoderConfig;
+    int8_t m_longitudinalLeftEncoderForwardSign = 1;
+    int8_t m_longitudinalRightEncoderForwardSign = -1;
+    BalanceStrategyId m_configuredBalanceStrategy = BalanceStrategyId::NESTED_PID;
 
     void stopControlLoop();
     TelemetryDataPoint buildTelemetrySnapshot(int64_t timestamp_us,
