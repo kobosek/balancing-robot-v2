@@ -3,7 +3,7 @@ import { fetchConfigApi, fetchStateApi, fetchConfigOperationStatusApi,
     createConfigOperationId, postConfigApi, pendingConfigOperation,
     persistConfigOperation, resolveConfigOperation } from './api.js';
 import { createConfigForms as renderConfigForms } from './configRenderer.js';
-import { loadGeneralConfig, loadPIDConfigSection } from './configPersistence.js';
+import { loadGeneralConfig, loadPIDConfigSection, loadStrategyConfig } from './configPersistence.js';
 import { appState } from './state.js';
 import { buildStrategySelectionConfig, canApplyStrategy, capabilityForState } from './strategyConfig.js';
 import { updateStrategyUI } from './ui.js';
@@ -47,15 +47,20 @@ export async function showConfigForm(sectionKey, container) {
     }
     hideAllConfigForms();
     container.style.display = 'block';
-    const strategyForms = Array.from(container.querySelectorAll('[data-strategy-section]'));
+    const completeStrategyForms = Array.from(container.querySelectorAll('[data-strategy-form]'));
+    const strategyForms = completeStrategyForms.length > 0
+        ? completeStrategyForms
+        : Array.from(container.querySelectorAll('[data-strategy-section]'));
     const pidForms = Array.from(container.querySelectorAll('[data-pid-section]'));
     if (strategyForms.length === 0 && pidForms.length === 0) {
         console.error(`Form div not found within container for section ${sectionKey}.`);
         return;
     }
     await Promise.all([
-        ...strategyForms.map(formDiv => loadGeneralConfig(formDiv)),
-        ...pidForms.map(formDiv => loadPIDConfigSection(formDiv.dataset.pidSection, formDiv))
+        ...strategyForms.map(formDiv => completeStrategyForms.length > 0
+            ? loadStrategyConfig(formDiv) : loadGeneralConfig(formDiv)),
+        ...(completeStrategyForms.length > 0 ? [] :
+            pidForms.map(formDiv => loadPIDConfigSection(formDiv.dataset.pidSection, formDiv)))
     ]);
 }
 

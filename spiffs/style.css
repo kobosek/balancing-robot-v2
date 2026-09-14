@@ -295,6 +295,35 @@ button:disabled { /* Style for disabled buttons */
 .strategy-form-header .config-help {
     margin-bottom: 0;
 }
+.config-draft-status,
+.config-draft-comparison {
+    font-size: 0.8rem;
+    color: #495057;
+    text-align: left;
+}
+.config-draft-status[data-state="conflict"] {
+    color: #842029;
+    font-weight: 600;
+}
+.config-draft-status[data-state="dirty"] {
+    color: #664d03;
+}
+.config-draft-comparison {
+    padding: 8px 10px;
+    border-left: 3px solid #dc3545;
+    background: #fff3cd;
+}
+.config-draft-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.config-draft-actions button {
+    margin: 0;
+    flex: 1 1 180px;
+}
+.config-draft-retry { background-color: #198754; }
+.config-draft-discard { background-color: #6c757d; }
 .config-subsection {
     padding: 12px;
     border: 1px solid #dee2e6;

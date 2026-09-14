@@ -107,7 +107,7 @@ export function updateStrategyUI() {
     }
     const draftNames = selected === 'longitudinal_cascade'
         ? ['longitudinal_cascade', 'longitudinal_pid_pitch', 'longitudinal_pid_velocity']
-        : ['pid_angle', 'pid_speed_left', 'pid_speed_right', 'pid_yaw_angle', 'pid_yaw_rate'];
+        : ['nested_pid', 'pid_angle', 'pid_speed_left', 'pid_speed_right', 'pid_yaw_angle', 'pid_yaw_rate'];
     let hasDraft = false;
     try {
         hasDraft = !!globalThis.sessionStorage && draftNames.some(name =>
@@ -357,9 +357,22 @@ export function updateLongitudinalTelemetryUI(latestPointMap) {
     const phase = phaseNames[latestPointMap.phase] || 'UNKNOWN';
     const value = (key, digits = 3) => Number.isFinite(latestPointMap[key]) ? Number(latestPointMap[key]).toFixed(digits) : 'N/A';
     const flags = [];
+    const faultNames = {
+        1: 'encoder',
+        2: 'input',
+        3: 'arm',
+        4: 'odometry',
+        5: 'step',
+        6: 'motor commit',
+        7: 'control'
+    };
+    const faultReason = Number(latestPointMap.faultReason);
     if (latestPointMap.motionRequestLimited) flags.push('request limited');
     if (latestPointMap.velocityAntiWindup) flags.push('anti-windup');
     if (latestPointMap.syncLimited) flags.push('sync limited');
-    if (latestPointMap.phaseReason === 5) flags.push('fault');
+    if (latestPointMap.phaseReason === 5 || latestPointMap.faultLatched ||
+        (Number.isInteger(faultReason) && faultReason > 0)) {
+        flags.push(`fault (${faultNames[faultReason] || 'unknown'})`);
+    }
     element.textContent = `${phase} · v ${value('measuredVelocityMps')} / ${value('targetVelocityMps')} m/s · s ${value('positionM')} / ${value('holdPositionM')} m${flags.length ? ' · ' + flags.join(', ') : ''} · dropped ${appState.telemetryDroppedSamples || 0} · pending ${appState.telemetryPendingSamples || 0}`;
 }

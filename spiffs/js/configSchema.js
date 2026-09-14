@@ -22,8 +22,6 @@ export const GENERAL_CONFIG_FIELDS = [
     { label: 'IMU Gyro Y Off', id: 'imu_gyro_offset_y', step: '0.001', section: 'imu', key: 'gyro_offset_y' },
     { label: 'IMU Gyro Z Off', id: 'imu_gyro_offset_z', step: '0.001', section: 'imu', key: 'gyro_offset_z' },
     { label: 'Joy Exp', id: 'control_joystick_exponent', step: '0.1', min: 0.1, max: 5.0, section: 'control', key: 'joystick_exponent' },
-    { label: 'Max Tilt (deg)', id: 'control_max_target_pitch_offset_deg', step: '0.1', min: 0, max: 90, section: 'control', key: 'max_target_pitch_offset_deg', path: ['strategies', 'nested_pid'] },
-    { label: 'Yaw Control', id: 'control_yaw_control_enabled', type: 'checkbox', section: 'control', key: 'yaw_control_enabled', path: ['strategies', 'nested_pid'] },
     { label: 'M Deadzone', id: 'motor_deadzone_duty', step: '1', min: 0, section: 'motor', key: 'deadzone_duty' },
     { label: 'Enc Gear Ratio', id: 'encoder_gear_ratio', step: '0.1', min: 0.1, max: 1000, section: 'encoder', key: 'gear_ratio' },
     { label: 'Enc Whl Diam mm', id: 'encoder_wheel_diameter_mm', step: '0.1', min: 1, max: 1000, section: 'encoder', key: 'wheel_diameter_mm' },
@@ -43,7 +41,6 @@ export const GENERAL_CONFIG_FIELDS = [
     { label: 'Wheelbase (m)', id: 'dimensions_wheelbase_m', step: '0.001', min: 0.01, max: 1.0, section: 'dimensions', key: 'wheelbase_m' },
     { label: 'Joy Deadzone', id: 'behavior_joystick_deadzone', step: '0.01', min: 0, max: 1, section: 'behavior', key: 'joystick_deadzone' },
     { label: 'Joy Timeout(ms)', id: 'behavior_joystick_timeout_ms', step: '10', min: 1, max: 10000, section: 'behavior', key: 'joystick_timeout_ms' },
-    { label: 'Joy Max AngVel', id: 'behavior_max_target_angular_velocity_dps', step: '1', min: 1, max: 1000, section: 'behavior', key: 'max_target_angular_velocity_dps' },
     { label: 'Fall Thresh(deg)', id: 'behavior_fall_pitch_threshold_deg', step: '1', min: 10, max: 90, section: 'behavior', key: 'fall_pitch_threshold_deg' },
     { label: 'Fall Dura(ms)', id: 'behavior_fall_threshold_duration_ms', step: '10', min: 1, max: 10000, section: 'behavior', key: 'fall_threshold_duration_ms' },
     { label: 'AutoBal Thresh(deg)', id: 'behavior_auto_balance_pitch_threshold_deg', step: '0.1', min: 0, max: 30, section: 'behavior', key: 'auto_balance_pitch_threshold_deg' },
@@ -55,6 +52,12 @@ export const GENERAL_CONFIG_FIELDS = [
     { label: 'Web Logs', id: 'web_web_logs_enabled', type: 'checkbox', section: 'web', key: 'web_logs_enabled' },
     { label: 'Log Lines', id: 'web_log_buffer_lines', step: '10', min: 1, max: 500, section: 'web', key: 'log_buffer_lines' },
     { label: 'Log Line Len', id: 'web_log_line_max_length', step: '16', min: 32, max: 512, section: 'web', key: 'log_line_max_length' }
+];
+
+export const NESTED_PID_CONFIG_FIELDS = [
+    { label: 'Max pitch command (deg)', id: 'nested_max_target_pitch_offset_deg', step: '0.1', min: 0, max: 90, section: 'control', key: 'max_target_pitch_offset_deg', path: ['strategies', 'nested_pid'] },
+    { label: 'Max yaw command (deg/s)', id: 'nested_max_target_angular_velocity_dps', step: '1', min: 1, max: 1000, section: 'control', key: 'max_target_angular_velocity_dps', path: ['strategies', 'nested_pid'] },
+    { label: 'Yaw control', id: 'nested_yaw_control_enabled', type: 'checkbox', section: 'control', key: 'yaw_control_enabled', path: ['strategies', 'nested_pid'] }
 ];
 
 export const LONGITUDINAL_CONFIG_FIELDS = [
@@ -79,6 +82,12 @@ export const LONGITUDINAL_CONFIG_FIELDS = [
     { label: 'Sync velocity deadband (m/s)', id: 'longitudinal_sync_velocity_deadband_mps', step: '0.0001', min: 0, max: 5, section: 'control', key: 'sync_velocity_deadband_mps', path: ['strategies', 'longitudinal_cascade'] },
     { label: 'Sync max effort', id: 'longitudinal_sync_max_effort', step: '0.001', min: 0, max: 1, section: 'control', key: 'sync_max_effort', path: ['strategies', 'longitudinal_cascade'] },
     { label: 'Max effort', id: 'longitudinal_max_effort', step: '0.001', min: 0, max: 1, section: 'control', key: 'max_effort', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Left encoder forward direction', id: 'longitudinal_left_encoder_forward_sign', type: 'select', valueType: 'number', options: [['1', 'Normal'], ['-1', 'Reversed']], section: 'control', key: 'left_encoder_forward_sign', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Right encoder forward direction', id: 'longitudinal_right_encoder_forward_sign', type: 'select', valueType: 'number', options: [['1', 'Normal'], ['-1', 'Reversed']], section: 'control', key: 'right_encoder_forward_sign', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Left motor output direction', id: 'longitudinal_left_output_sign', type: 'select', valueType: 'number', options: [['1', 'Normal'], ['-1', 'Reversed']], section: 'control', key: 'left_output_sign', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Right motor output direction', id: 'longitudinal_right_output_sign', type: 'select', valueType: 'number', options: [['1', 'Normal'], ['-1', 'Reversed']], section: 'control', key: 'right_output_sign', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Velocity to pitch direction', id: 'longitudinal_velocity_to_pitch_sign', type: 'select', valueType: 'number', options: [['1', 'Normal'], ['-1', 'Reversed']], section: 'control', key: 'velocity_to_pitch_sign', path: ['strategies', 'longitudinal_cascade'] },
+    { label: 'Pitch to effort direction', id: 'longitudinal_pitch_to_effort_sign', type: 'select', valueType: 'number', options: [['1', 'Normal'], ['-1', 'Reversed']], section: 'control', key: 'pitch_to_effort_sign', path: ['strategies', 'longitudinal_cascade'] },
     { label: 'HOLD enter velocity (m/s)', id: 'longitudinal_hold_enter_velocity_mps', step: '0.0001', min: 0, max: 5, section: 'control', key: 'hold_enter_velocity_mps', path: ['strategies', 'longitudinal_cascade'] },
     { label: 'HOLD exit velocity (m/s)', id: 'longitudinal_hold_exit_velocity_mps', step: '0.0001', min: 0, max: 5, section: 'control', key: 'hold_exit_velocity_mps', path: ['strategies', 'longitudinal_cascade'] },
     { label: 'HOLD pitch error deadband (deg)', id: 'longitudinal_hold_pitch_error_deadband_deg', step: '0.01', min: 0, max: 45, section: 'control', key: 'hold_pitch_error_deadband_deg', path: ['strategies', 'longitudinal_cascade'] },

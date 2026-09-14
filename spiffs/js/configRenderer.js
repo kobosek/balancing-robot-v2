@@ -1,6 +1,8 @@
 import { uiElements } from './ui.js';
-import { GENERAL_CONFIG_FIELDS, LONGITUDINAL_CONFIG_FIELDS, PID_FIELDS } from './configSchema.js';
-import { saveGeneralConfig, savePIDConfigSection } from './configPersistence.js';
+import { GENERAL_CONFIG_FIELDS, LONGITUDINAL_CONFIG_FIELDS,
+    NESTED_PID_CONFIG_FIELDS, PID_FIELDS } from './configSchema.js';
+import { saveGeneralConfig, saveStrategyConfig, discardConfigDraft,
+    rebaseAndSaveStrategyDraft } from './configPersistence.js';
 
 function registerDynamicElement(id, element) {
     uiElements[id] = element;
@@ -66,7 +68,7 @@ function addFormField(parent, fieldConfig) {
     parent.appendChild(group);
 }
 
-function createPIDFormDiv(idPrefix, saveButtonSuffix = 'PID') {
+function createPIDFormDiv(idPrefix, options = {}) {
     const formDiv = document.createElement('div');
     formDiv.dataset.pidSection = idPrefix;
     formDiv.className = 'config-pid-form';
@@ -76,13 +78,14 @@ function createPIDFormDiv(idPrefix, saveButtonSuffix = 'PID') {
             id: `${idPrefix}_${field.suffix}`,
             step: field.step
         });
+        if (options.forcedZero?.includes(field.suffix)) {
+            const input = formDiv.querySelector(`#${idPrefix}_${field.suffix}`);
+            input.value = '0';
+            input.disabled = true;
+            input.dataset.forcedZero = 'true';
+            input.title = 'Fixed at zero for this loop type';
+        }
     });
-
-    const button = document.createElement('button');
-    button.textContent = `Save ${saveButtonSuffix}`;
-    button.className = 'config-save-btn';
-    button.addEventListener('click', () => savePIDConfigSection(idPrefix, formDiv));
-    formDiv.appendChild(button);
     return formDiv;
 }
 
@@ -105,6 +108,41 @@ function createConfigSubsection(title, description = '') {
     body.className = 'config-subsection-body';
     section.appendChild(body);
     return { section, body };
+}
+
+function addStrategyDraftControls(strategyForm) {
+    const status = document.createElement('div');
+    status.className = 'config-draft-status';
+    status.dataset.draftStatus = 'true';
+    status.textContent = 'No unsaved local changes.';
+    strategyForm.appendChild(status);
+
+    const comparison = document.createElement('div');
+    comparison.className = 'config-draft-comparison';
+    comparison.dataset.draftComparison = 'true';
+    comparison.hidden = true;
+    strategyForm.appendChild(comparison);
+
+    const actions = document.createElement('div');
+    actions.className = 'config-draft-actions';
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'config-draft-retry';
+    retry.dataset.draftAction = 'retry';
+    retry.textContent = 'Rebase and retry draft';
+    retry.hidden = true;
+    actions.appendChild(retry);
+    const discard = document.createElement('button');
+    discard.type = 'button';
+    discard.className = 'config-draft-discard';
+    discard.dataset.draftAction = 'discard';
+    discard.textContent = 'Discard local draft';
+    discard.hidden = true;
+    actions.appendChild(discard);
+    strategyForm.appendChild(actions);
+
+    retry.addEventListener('click', () => rebaseAndSaveStrategyDraft(strategyForm));
+    discard.addEventListener('click', () => discardConfigDraft(strategyForm));
 }
 
 function createPidBlock(title, pidForm) {
@@ -207,6 +245,10 @@ function createGeneralConfigForm(container) {
 function createLongitudinalConfigForm(container) {
     container.classList.add('strategy-form-card');
 
+    const strategyForm = document.createElement('div');
+    strategyForm.dataset.strategyForm = 'longitudinal_cascade';
+    strategyForm.className = 'strategy-form';
+
     const header = document.createElement('div');
     header.className = 'strategy-form-header';
     const heading = document.createElement('h3');
@@ -216,34 +258,45 @@ function createLongitudinalConfigForm(container) {
     note.className = 'config-help';
     note.textContent = 'Values use SI units. Editing this set does not activate the strategy; apply it from the selector while the robot is IDLE.';
     header.appendChild(note);
-    container.appendChild(header);
+    strategyForm.appendChild(header);
+    addStrategyDraftControls(strategyForm);
 
     const formDiv = document.createElement('div');
-    formDiv.dataset.strategySection = 'longitudinal_cascade';
     formDiv.className = 'config-field-form';
     LONGITUDINAL_CONFIG_FIELDS.forEach(field => addFormField(formDiv, field));
 
-    const button = document.createElement('button');
-    button.textContent = 'Save Longitudinal Settings';
-    button.className = 'config-save-btn';
-    button.addEventListener('click', () => saveGeneralConfig(formDiv, LONGITUDINAL_CONFIG_FIELDS));
-    formDiv.appendChild(button);
-
     const parameters = createConfigSubsection('Cascade parameters', 'Motion profile, HOLD, synchronization and request limiter.');
     parameters.body.appendChild(formDiv);
-    container.appendChild(parameters.section);
+    strategyForm.appendChild(parameters.section);
 
     const loops = createConfigSubsection('Loop PIDs', 'The pitch loop is shared with the velocity cascade; the velocity loop is used in velocity and position-hold modes.');
     const pidGrid = document.createElement('div');
     pidGrid.className = 'config-pid-grid';
-    pidGrid.appendChild(createPidBlock('Pitch PID', createPIDFormDiv('longitudinal_pid_pitch', 'Save Pitch PID')));
-    pidGrid.appendChild(createPidBlock('Velocity PI', createPIDFormDiv('longitudinal_pid_velocity', 'Save Velocity PI')));
+    pidGrid.appendChild(createPidBlock('Pitch PD', createPIDFormDiv(
+        'longitudinal_pid_pitch', { forcedZero: ['ki'] })));
+    pidGrid.appendChild(createPidBlock('Velocity PI', createPIDFormDiv(
+        'longitudinal_pid_velocity', { forcedZero: ['kd'] })));
     loops.body.appendChild(pidGrid);
-    container.appendChild(loops.section);
+    strategyForm.appendChild(loops.section);
+
+    const saveAction = () => saveStrategyConfig(
+        'longitudinal_cascade', strategyForm, LONGITUDINAL_CONFIG_FIELDS,
+        ['longitudinal_pid_pitch', 'longitudinal_pid_velocity']);
+    strategyForm._saveAction = saveAction;
+    const button = document.createElement('button');
+    button.textContent = 'Save Longitudinal Cascade';
+    button.className = 'config-save-btn';
+    button.addEventListener('click', saveAction);
+    strategyForm.appendChild(button);
+    container.appendChild(strategyForm);
 }
 
 function createNestedPidConfigForm(container) {
     container.classList.add('strategy-form-card');
+
+    const strategyForm = document.createElement('div');
+    strategyForm.dataset.strategyForm = 'nested_pid';
+    strategyForm.className = 'strategy-form';
 
     const header = document.createElement('div');
     header.className = 'strategy-form-header';
@@ -252,33 +305,53 @@ function createNestedPidConfigForm(container) {
     header.appendChild(heading);
     const note = document.createElement('p');
     note.className = 'config-help';
-    note.textContent = 'Existing pitch, wheel-speed and optional yaw loops. Each loop keeps its own draft and Save action.';
+    note.textContent = 'Existing pitch, wheel-speed and optional yaw loops. Save applies the complete NestedPid set in one revision-bound operation.';
     header.appendChild(note);
-    container.appendChild(header);
+    strategyForm.appendChild(header);
+    addStrategyDraftControls(strategyForm);
+
+    const settings = createConfigSubsection('Strategy settings', 'NestedPid pitch and yaw command limits and yaw enable state.');
+    const settingsForm = document.createElement('div');
+    settingsForm.className = 'config-field-form';
+    NESTED_PID_CONFIG_FIELDS.forEach(field => addFormField(settingsForm, field));
+    settings.body.appendChild(settingsForm);
+    strategyForm.appendChild(settings.section);
 
     const angle = createConfigSubsection('Balance angle loop', 'The outer pitch loop produces the wheel speed target.');
-    angle.body.appendChild(createPIDFormDiv('pid_angle', 'Save Angle PID'));
-    container.appendChild(angle.section);
+    angle.body.appendChild(createPIDFormDiv('pid_angle'));
+    strategyForm.appendChild(angle.section);
 
     const wheels = createConfigSubsection('Wheel speed loops', 'Each wheel has an independent speed PID and tuning candidate.');
     const wheelGrid = document.createElement('div');
     wheelGrid.className = 'config-pid-grid';
-    const leftBlock = createPidBlock('Left wheel PID', createPIDFormDiv('pid_speed_left', 'Save Left PID'));
+    const leftBlock = createPidBlock('Left wheel PID', createPIDFormDiv('pid_speed_left'));
     leftBlock.appendChild(createPidTuningPanel('left', 'Left Motor PID Tuning'));
     wheelGrid.appendChild(leftBlock);
-    const rightBlock = createPidBlock('Right wheel PID', createPIDFormDiv('pid_speed_right', 'Save Right PID'));
+    const rightBlock = createPidBlock('Right wheel PID', createPIDFormDiv('pid_speed_right'));
     rightBlock.appendChild(createPidTuningPanel('right', 'Right Motor PID Tuning'));
     wheelGrid.appendChild(rightBlock);
     wheels.body.appendChild(wheelGrid);
-    container.appendChild(wheels.section);
+    strategyForm.appendChild(wheels.section);
 
     const yaw = createConfigSubsection('Yaw control loops', 'Yaw control remains available only when Nested PID is active.');
     const yawGrid = document.createElement('div');
     yawGrid.className = 'config-pid-grid';
-    yawGrid.appendChild(createPidBlock('Yaw angle PID', createPIDFormDiv('pid_yaw_angle', 'Save Yaw Angle PID')));
-    yawGrid.appendChild(createPidBlock('Yaw rate PID', createPIDFormDiv('pid_yaw_rate', 'Save Yaw Rate PID')));
+    yawGrid.appendChild(createPidBlock('Yaw angle PID', createPIDFormDiv('pid_yaw_angle')));
+    yawGrid.appendChild(createPidBlock('Yaw rate PID', createPIDFormDiv('pid_yaw_rate')));
     yaw.body.appendChild(yawGrid);
-    container.appendChild(yaw.section);
+    strategyForm.appendChild(yaw.section);
+
+    const saveAction = () => saveStrategyConfig(
+        'nested_pid', strategyForm, NESTED_PID_CONFIG_FIELDS,
+        ['pid_angle', 'pid_speed_left', 'pid_speed_right',
+            'pid_yaw_angle', 'pid_yaw_rate']);
+    strategyForm._saveAction = saveAction;
+    const button = document.createElement('button');
+    button.textContent = 'Save Nested PID';
+    button.className = 'config-save-btn';
+    button.addEventListener('click', saveAction);
+    strategyForm.appendChild(button);
+    container.appendChild(strategyForm);
 }
 
 export function createConfigForms() {

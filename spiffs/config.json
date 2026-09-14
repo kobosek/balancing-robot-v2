@@ -64,6 +64,7 @@
           "iterm_max": 50.0
         },
         "max_target_pitch_offset_deg": 5.0,
+        "max_target_angular_velocity_dps": 60.0,
         "yaw_control_enabled": false,
         "revision": 0
       },
@@ -103,6 +104,12 @@
         "sync_velocity_deadband_mps": 0.0,
         "sync_max_effort": 0.0,
         "max_effort": 1.0,
+        "left_encoder_forward_sign": 1,
+        "right_encoder_forward_sign": -1,
+        "left_output_sign": 1,
+        "right_output_sign": 1,
+        "velocity_to_pitch_sign": 1,
+        "pitch_to_effort_sign": 1,
         "loop_mode": "pitch_only",
         "hold_enter_velocity_mps": 0.02,
         "hold_exit_velocity_mps": 0.05,
